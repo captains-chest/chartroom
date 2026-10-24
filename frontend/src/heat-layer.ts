@@ -1,7 +1,7 @@
 // The live heatmap under the SVG plan: picks the sensors for the active layer, has the worker
-// triangulate them (only when the layout changes), eases values and the range, cross-fades layout
-// changes, and hands the field to a renderer (heat/models.ts FieldRenderer): WebGL2 or, failing
-// that, Canvas2D from the worker's field grid. The signal layer is traced instead (signal.ts): in
+// plan their per-cell weights (only when the layout changes), eases values and the range,
+// cross-fades layout changes, and hands the field to a renderer (heat/models.ts FieldRenderer):
+// WebGL2 or, failing that, Canvas2D from the worker's field grid. The signal layer is traced instead (signal.ts): in
 // one WebGL2 pass, or by the worker for Canvas2D. Loaded on demand, the first time a layer is
 // switched on.
 import { FADE_DISTANCE, fieldGrid } from './field';

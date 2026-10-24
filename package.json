@@ -9,6 +9,7 @@
     "test": "vp test run",
     "e2e": "playwright test",
     "size": "node scripts/check-size.mjs",
+    "example-plan": "node scripts/example-plan/trace.mjs && node scripts/example-plan/render-svg.mjs",
     "format": "vp fmt .",
     "format:check": "vp fmt --check .",
     "lint": "vp lint",

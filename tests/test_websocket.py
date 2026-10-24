@@ -1,5 +1,7 @@
 """Websocket API: chartroom/plans/*."""
 
+import json
+from pathlib import Path
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -7,6 +9,8 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry, flush_store
 
 from custom_components.chartroom.const import DOMAIN, STORAGE_KEY
+
+EXAMPLE_PLAN = Path(__file__).parents[1] / "frontend/test/fixtures/example-plan.json"
 
 
 async def _setup(hass: HomeAssistant) -> None:
@@ -88,3 +92,18 @@ async def test_save_requires_admin(hass: HomeAssistant, hass_ws_client, hass_adm
     msg = await ws.receive_json()
     assert not msg["success"]
     assert msg["error"]["code"] == "unauthorized"
+
+
+async def test_example_plan_round_trips(hass: HomeAssistant, hass_ws_client) -> None:
+    """The traced example plan (frontend fixture) saves and loads unchanged."""
+    plan = json.loads(EXAMPLE_PLAN.read_text(encoding="utf-8"))
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+
+    await ws.send_json_auto_id({"type": "chartroom/plans/save", "plan_id": "example", "plan": plan})
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+
+    await ws.send_json_auto_id({"type": "chartroom/plans/get", "plan_id": "example"})
+    msg = await ws.receive_json()
+    assert msg["result"] == {"id": "example", **plan}

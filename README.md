@@ -39,6 +39,24 @@ JavaScript dependencies; everything it needs ships in this repository.
 
 Websocket commands: `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin).
 
+## Example data
+
+[![Example plan: two bedrooms, kitchen-living, bath and hall, about 62 m²](docs/images/example-plan.svg)](docs/images/example-plan.svg)
+
+[`frontend/test/fixtures/example-plan.json`](frontend/test/fixtures/example-plan.json) is a real
+one-floor flat of about 62 m², traced by hand into the plan model (`frontend/src/plan.ts`): walls in
+metres with material and thickness, rooms, doors with their swing, windows, and sample
+temperature/humidity sensors. Only the geometry and generic room types were kept; the source
+drawing is not in the repository. Tests check each room against the area stated on the drawing.
+
+```sh
+pnpm example-plan                                   # regenerate the fixture and the SVG preview
+HA_URL=http://127.0.0.1:8123 HA_TOKEN=... node scripts/example-plan/load-into-ha.mjs
+```
+
+The last command saves the fixture to a dev Home Assistant as plan `example` via
+`chartroom/plans/save`.
+
 ## Development
 
 Needs Node.js 24, pnpm and [uv](https://docs.astral.sh/uv/).

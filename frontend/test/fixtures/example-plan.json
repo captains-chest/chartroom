@@ -1,0 +1,609 @@
+{
+  "schema_version": 1,
+  "name": "Example flat (traced fixture)",
+  "floor_id": null,
+  "outline": [
+    [
+      0,
+      0
+    ],
+    [
+      7.813,
+      0
+    ],
+    [
+      7.813,
+      4.207
+    ],
+    [
+      10.699,
+      4.207
+    ],
+    [
+      10.699,
+      8.263
+    ],
+    [
+      0.839,
+      8.263
+    ],
+    [
+      0.839,
+      7.424
+    ],
+    [
+      0,
+      7.424
+    ]
+  ],
+  "walls": [
+    {
+      "id": "ext_north",
+      "a": [
+        0.095,
+        0.246
+      ],
+      "b": [
+        7.564,
+        0.246
+      ],
+      "thickness": 0.493,
+      "material": "exterior"
+    },
+    {
+      "id": "ext_east",
+      "a": [
+        7.564,
+        0.246
+      ],
+      "b": [
+        7.564,
+        4.456
+      ],
+      "thickness": 0.498,
+      "material": "exterior"
+    },
+    {
+      "id": "ext_north_2",
+      "a": [
+        7.564,
+        4.456
+      ],
+      "b": [
+        10.607,
+        4.456
+      ],
+      "thickness": 0.498,
+      "material": "exterior"
+    },
+    {
+      "id": "ext_east_2",
+      "a": [
+        10.607,
+        4.456
+      ],
+      "b": [
+        10.607,
+        8.173
+      ],
+      "thickness": 0.184,
+      "material": "exterior"
+    },
+    {
+      "id": "ext_south",
+      "a": [
+        10.607,
+        8.173
+      ],
+      "b": [
+        0.88,
+        8.173
+      ],
+      "thickness": 0.179,
+      "material": "exterior"
+    },
+    {
+      "id": "ext_entry_west",
+      "a": [
+        0.88,
+        8.173
+      ],
+      "b": [
+        0.88,
+        7.38
+      ],
+      "thickness": 0.081,
+      "material": "exterior"
+    },
+    {
+      "id": "ext_entry_step",
+      "a": [
+        0.88,
+        7.38
+      ],
+      "b": [
+        0.095,
+        7.38
+      ],
+      "thickness": 0.087,
+      "material": "exterior"
+    },
+    {
+      "id": "ext_west",
+      "a": [
+        0.095,
+        7.38
+      ],
+      "b": [
+        0.095,
+        0.246
+      ],
+      "thickness": 0.19,
+      "material": "exterior"
+    },
+    {
+      "id": "int_bedroom_1_east",
+      "a": [
+        3.216,
+        0.493
+      ],
+      "b": [
+        3.216,
+        6.481
+      ],
+      "thickness": 0.087,
+      "material": "partition"
+    },
+    {
+      "id": "int_bedroom_1_south",
+      "a": [
+        0.19,
+        4.267
+      ],
+      "b": [
+        3.173,
+        4.267
+      ],
+      "thickness": 0.087,
+      "material": "partition"
+    },
+    {
+      "id": "int_bath_south",
+      "a": [
+        0.19,
+        6.443
+      ],
+      "b": [
+        3.173,
+        6.443
+      ],
+      "thickness": 0.076,
+      "material": "partition"
+    },
+    {
+      "id": "int_bath_closet",
+      "a": [
+        0.736,
+        4.31
+      ],
+      "b": [
+        0.736,
+        6.406
+      ],
+      "thickness": 0.087,
+      "material": "partition"
+    },
+    {
+      "id": "int_bath_shower",
+      "a": [
+        0.78,
+        5.707
+      ],
+      "b": [
+        1.419,
+        5.707
+      ],
+      "thickness": 0.087,
+      "material": "partition"
+    },
+    {
+      "id": "int_bath_stub_north",
+      "a": [
+        2.22,
+        4.31
+      ],
+      "b": [
+        2.22,
+        4.608
+      ],
+      "thickness": 0.087,
+      "material": "partition"
+    },
+    {
+      "id": "int_bath_stub_east",
+      "a": [
+        2.875,
+        5.252
+      ],
+      "b": [
+        3.173,
+        5.252
+      ],
+      "thickness": 0.087,
+      "material": "partition"
+    },
+    {
+      "id": "int_bedroom_2_west",
+      "a": [
+        7.41,
+        4.705
+      ],
+      "b": [
+        7.41,
+        8.084
+      ],
+      "thickness": 0.19,
+      "material": "partition"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "bedroom_1",
+      "name": "Bedroom 1",
+      "polygon": [
+        [
+          0.19,
+          0.493
+        ],
+        [
+          3.173,
+          0.493
+        ],
+        [
+          3.173,
+          4.223
+        ],
+        [
+          0.19,
+          4.223
+        ]
+      ],
+      "area_id": "bedroom"
+    },
+    {
+      "id": "kitchen_living",
+      "name": "Kitchen-living",
+      "polygon": [
+        [
+          3.26,
+          0.493
+        ],
+        [
+          7.315,
+          0.493
+        ],
+        [
+          7.315,
+          8.084
+        ],
+        [
+          3.173,
+          8.084
+        ],
+        [
+          3.173,
+          6.481
+        ],
+        [
+          3.26,
+          6.481
+        ]
+      ],
+      "area_id": "living_room"
+    },
+    {
+      "id": "bath",
+      "name": "Bath",
+      "polygon": [
+        [
+          0.78,
+          4.31
+        ],
+        [
+          3.173,
+          4.31
+        ],
+        [
+          3.173,
+          6.406
+        ],
+        [
+          0.78,
+          6.406
+        ]
+      ],
+      "area_id": "bath"
+    },
+    {
+      "id": "hall",
+      "name": "Hall",
+      "polygon": [
+        [
+          0.19,
+          6.481
+        ],
+        [
+          3.173,
+          6.481
+        ],
+        [
+          3.173,
+          8.084
+        ],
+        [
+          0.92,
+          8.084
+        ],
+        [
+          0.92,
+          7.337
+        ],
+        [
+          0.19,
+          7.337
+        ]
+      ],
+      "area_id": "hall"
+    },
+    {
+      "id": "bedroom_2",
+      "name": "Bedroom 2",
+      "polygon": [
+        [
+          7.505,
+          4.705
+        ],
+        [
+          10.515,
+          4.705
+        ],
+        [
+          10.515,
+          8.084
+        ],
+        [
+          7.505,
+          8.084
+        ]
+      ],
+      "area_id": "office"
+    }
+  ],
+  "doors": [
+    {
+      "id": "door_bedroom_1",
+      "wall": "int_bedroom_1_east",
+      "offset": 2.171,
+      "width": 0.92,
+      "material": "wood_door",
+      "thickness": 0.04,
+      "hinge": "b",
+      "swing": 1
+    },
+    {
+      "id": "door_bedroom_2",
+      "wall": "int_bedroom_2_west",
+      "offset": 0.092,
+      "width": 0.915,
+      "material": "wood_door",
+      "thickness": 0.04,
+      "hinge": "a",
+      "swing": -1
+    },
+    {
+      "id": "door_bath",
+      "wall": "int_bath_south",
+      "offset": 1.365,
+      "width": 0.926,
+      "material": "wood_door",
+      "thickness": 0.04,
+      "hinge": "a",
+      "swing": -1
+    },
+    {
+      "id": "door_entrance",
+      "wall": "ext_south",
+      "offset": 8.014,
+      "width": 1.013,
+      "material": "wood_door",
+      "thickness": 0.06,
+      "hinge": "b",
+      "swing": 1
+    }
+  ],
+  "windows": [
+    {
+      "id": "window_bedroom_1",
+      "wall": "ext_north",
+      "offset": 0.474,
+      "width": 1.993,
+      "material": "glass",
+      "thickness": 0.024
+    },
+    {
+      "id": "window_kitchen_north",
+      "wall": "ext_north",
+      "offset": 3.62,
+      "width": 1.987,
+      "material": "glass",
+      "thickness": 0.024
+    },
+    {
+      "id": "window_kitchen_east",
+      "wall": "ext_east",
+      "offset": 0.734,
+      "width": 1.987,
+      "material": "glass",
+      "thickness": 0.024
+    },
+    {
+      "id": "window_bedroom_2",
+      "wall": "ext_north_2",
+      "offset": 0.249,
+      "width": 1.689,
+      "material": "glass",
+      "thickness": 0.024
+    }
+  ],
+  "sources": [
+    {
+      "id": "living_room_temperature",
+      "kind": "sensor",
+      "entity_id": "sensor.living_room_temperature",
+      "position": [
+        5.119,
+        2.77
+      ],
+      "area_id": "living_room"
+    },
+    {
+      "id": "living_room_humidity",
+      "kind": "sensor",
+      "entity_id": "sensor.living_room_humidity",
+      "position": [
+        5.369,
+        2.77
+      ],
+      "area_id": "living_room"
+    },
+    {
+      "id": "kitchen_temperature",
+      "kind": "sensor",
+      "entity_id": "sensor.kitchen_temperature",
+      "position": [
+        5.533,
+        5.959
+      ],
+      "area_id": "kitchen"
+    },
+    {
+      "id": "kitchen_humidity",
+      "kind": "sensor",
+      "entity_id": "sensor.kitchen_humidity",
+      "position": [
+        5.783,
+        5.959
+      ],
+      "area_id": "kitchen"
+    },
+    {
+      "id": "bedroom_temperature",
+      "kind": "sensor",
+      "entity_id": "sensor.bedroom_temperature",
+      "position": [
+        1.556,
+        2.358
+      ],
+      "area_id": "bedroom"
+    },
+    {
+      "id": "bedroom_humidity",
+      "kind": "sensor",
+      "entity_id": "sensor.bedroom_humidity",
+      "position": [
+        1.806,
+        2.358
+      ],
+      "area_id": "bedroom"
+    },
+    {
+      "id": "bath_temperature",
+      "kind": "sensor",
+      "entity_id": "sensor.bath_temperature",
+      "position": [
+        1.726,
+        5.358
+      ],
+      "area_id": "bath"
+    },
+    {
+      "id": "bath_humidity",
+      "kind": "sensor",
+      "entity_id": "sensor.bath_humidity",
+      "position": [
+        1.976,
+        5.358
+      ],
+      "area_id": "bath"
+    },
+    {
+      "id": "bath_temperature_2_dead_battery",
+      "kind": "sensor",
+      "entity_id": "sensor.bath_temperature_2_dead_battery",
+      "position": [
+        2.226,
+        5.358
+      ],
+      "area_id": "bath"
+    },
+    {
+      "id": "hall_temperature",
+      "kind": "sensor",
+      "entity_id": "sensor.hall_temperature",
+      "position": [
+        1.303,
+        7.301
+      ],
+      "area_id": "hall"
+    },
+    {
+      "id": "hall_humidity",
+      "kind": "sensor",
+      "entity_id": "sensor.hall_humidity",
+      "position": [
+        1.553,
+        7.301
+      ],
+      "area_id": "hall"
+    },
+    {
+      "id": "office_temperature",
+      "kind": "sensor",
+      "entity_id": "sensor.office_temperature",
+      "position": [
+        8.885,
+        6.395
+      ],
+      "area_id": "office"
+    },
+    {
+      "id": "office_humidity",
+      "kind": "sensor",
+      "entity_id": "sensor.office_humidity",
+      "position": [
+        9.135,
+        6.395
+      ],
+      "area_id": "office"
+    }
+  ],
+  "meta": {
+    "traced_px_per_m": 184.683,
+    "stated_areas_m2": {
+      "bedroom_1": 11.3,
+      "kitchen_living": 31.1,
+      "bath": 4.9,
+      "hall": 4.2,
+      "bedroom_2": 10.3
+    },
+    "stated_total_m2": 62,
+    "sample_areas": {
+      "living_room": "kitchen_living",
+      "kitchen": "kitchen_living",
+      "bedroom": "bedroom_1",
+      "bath": "bath",
+      "hall": "hall",
+      "office": "bedroom_2"
+    }
+  }
+}

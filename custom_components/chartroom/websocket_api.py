@@ -10,6 +10,7 @@ import voluptuous as vol
 
 from .const import DOMAIN
 from .store import ChartroomStore
+from .underlay import async_remove_underlay
 
 PLAN_ID = vol.All(str, vol.Length(min=1, max=64), vol.Match(r"^[a-z0-9_-]+$"))
 
@@ -95,4 +96,5 @@ async def ws_delete_plan(
     if not await store.async_delete_plan(msg["plan_id"]):
         connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Plan not found")
         return
+    await async_remove_underlay(hass, msg["plan_id"])
     connection.send_result(msg["id"], {"deleted": msg["plan_id"]})

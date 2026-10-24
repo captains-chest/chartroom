@@ -24,6 +24,7 @@ from .const import (
     VERSION,
 )
 from .store import ChartroomStore
+from .underlay import UnderlayView
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 FRONTEND_DIR = Path(__file__).parent / "frontend"
@@ -52,6 +53,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
         )
+        hass.http.register_view(UnderlayView())
         hass.data[DATA_STATIC] = True
 
     # The card is loaded on every dashboard, like a Lovelace module resource.

@@ -17,3 +17,7 @@ PANEL_ICON: Final = "mdi:floor-plan"
 STATIC_URL: Final = "/chartroom_static"
 PANEL_JS: Final = "chartroom-panel.js"
 CARD_JS: Final = "chartroom-card.js"
+
+UNDERLAY_URL: Final = "/api/chartroom/underlay/{plan_id}"
+UNDERLAY_DIR: Final = "chartroom_underlays"
+UNDERLAY_MAX_BYTES: Final = 10 * 1024 * 1024

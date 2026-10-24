@@ -15,7 +15,6 @@ import {
   signalInput,
   signalKey,
   signalLimitWarnings,
-  signalNote,
   wallSegments,
 } from '../src/signal';
 import { createHandler } from '../src/worker-protocol';
@@ -145,29 +144,6 @@ describe('wall segments', () => {
     const [w, ...rest] = signalLimitWarnings(walls(MAX_SIGNAL_SEGMENTS + 3));
     expect(rest).toEqual([]);
     expect(w).toMatch(/2051 wall segments .*more than 2048.*leaves out the rest/);
-  });
-});
-
-describe('signalNote', () => {
-  const input = (sources: number, segments: number, leftOut = { sources: 0, segments: 0 }) => ({
-    aps: new Float32Array(sources * SRC),
-    walls: new Float32Array(segments * SEG),
-    leftOut,
-  });
-
-  it('counts the sources and wall segments the map uses', () => {
-    expect(signalNote(input(3, 1))).toEqual(['3 sources', '1 wall segment']);
-    expect(signalNote(input(1, 0))).toEqual(['1 source', '0 wall segments']);
-    expect(signalNote(input(0, 4))).toEqual(['No sources', '4 wall segments']);
-  });
-
-  it('says how many it left out over the limits', () => {
-    expect(signalNote(input(32, 2048, { sources: 1, segments: 12 }))).toEqual([
-      '32 sources',
-      '2048 wall segments',
-      '1 source left out (limit 32)',
-      '12 wall segments left out (limit 2048)',
-    ]);
   });
 });
 

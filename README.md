@@ -3,11 +3,29 @@
 Floor plans for Home Assistant: draw your home once, then see temperature, humidity and Wi-Fi
 signal as live heatmaps over it — in a sidebar panel and as a dashboard card.
 
-> **Status: Phase 0 (scaffold).** The panel and card load, list your floors and areas, and show a
-> placeholder plan. Drawing (Phase 1) and heatmaps come next. See
-> [docs/render-design.md](docs/render-design.md) for how the heatmaps will be rendered.
+> **Status: Phase 1 (plan and editor).** The panel shows one tab per Home Assistant floor, with
+> pan and zoom, and a built-in editor for walls, doors, windows and rooms over an image underlay.
+> Heatmaps come next. See [docs/render-design.md](docs/render-design.md) for how they will be
+> rendered.
 
 ![Chartroom panel](docs/images/panel.png)
+
+## Drawing your plan
+
+Open **Chartroom** in the sidebar, pick a floor and press **Edit** (or **Create plan** on a floor
+without one). Admins only; changes save automatically.
+
+![Chartroom editor](docs/images/editor.png)
+
+- **Wall**: click to start, click to add corners, double-click or Esc to finish. Endpoints snap to
+  other walls and stay joined when you drag them. Each wall has a material and a thickness.
+- **Door** / **Window**: click on a wall. Width, swing and an optional open/closed entity are set
+  in the inspector.
+- **Room**: click the corners, double-click to close, then link the room to a Home Assistant area.
+- **Underlay**: import a PNG, JPEG, WebP or SVG drawing to trace over, then calibrate the scale
+  with **Measure** (two points and their real distance) or by a room's known area.
+- **Undo** / **Redo**: Ctrl+Z and Ctrl+Shift+Z.
+- **Materials**: the loss per centimetre for each wall material, used by the signal heatmap.
 
 ![Chartroom card](docs/images/card.png)
 
@@ -37,7 +55,7 @@ JavaScript dependencies; everything it needs ships in this repository.
 | `frontend/src/`                        | `<chartroom-panel>` and `<chartroom-card>`: TypeScript Web Components, no framework.      |
 | `tests/`, `frontend/test/`, `e2e/`     | pytest, Vitest, and Playwright against a real Home Assistant.                             |
 
-Websocket commands: `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin).
+Websocket commands: `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin). Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB).
 
 ## Example data
 

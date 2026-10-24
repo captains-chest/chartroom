@@ -1,5 +1,7 @@
 import { DeviceControls, deviceControlStyles } from './device-controls';
 import type { Hass, PlanSummary } from './ha-types';
+import { isHeatLayer, layerCounts, type HeatLayerId } from './heat';
+import { LayerToggles } from './layer-toggles';
 import { normalizePlan } from './plan';
 import { PlanView, planViewStyles } from './plan-view';
 
@@ -12,6 +14,10 @@ export interface ChartroomCardConfig {
   floor_id?: string;
   /** CSS height of the plan, e.g. 320px. In the sections view the grid sets it. */
   height?: string;
+  /** Heatmap layer to show: temperature or humidity. Default: none. */
+  layer?: HeatLayerId | 'none';
+  /** Show the Temperature / Humidity buttons on the card. */
+  layer_toggles?: boolean;
 }
 
 /** The Chartroom dashboard card: one floor's plan with live device markers. */
@@ -25,6 +31,12 @@ export class ChartroomCard extends HTMLElement {
   #message: HTMLElement;
   #loaded = '';
   #load = 0;
+  #layers = new LayerToggles((layer) => {
+    this.#layer = layer;
+    this.#renderLayers();
+  });
+  #layer: HeatLayerId | null = null;
+  #unsubscribe: Promise<(() => Promise<void> | void) | null> | null = null;
 
   constructor() {
     super();
@@ -38,6 +50,11 @@ export class ChartroomCard extends HTMLElement {
       .stage { position: relative; flex: 1 1 auto; min-height: 120px; height: var(--chartroom-height, 320px); padding: 8px; box-sizing: border-box; }
       .message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
         padding: 16px; text-align: center; color: var(--secondary-text-color, #727272); }
+      .layers { position: absolute; left: 12px; top: 12px; z-index: 1; }
+      .layers button { font: inherit; font-size: 12px; color: inherit; padding: 2px 8px; border-radius: 6px; cursor: pointer;
+        border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); }
+      .layers button[aria-pressed=true] { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); border-color: transparent; }
+      .layers button:disabled { opacity: 0.4; cursor: default; }
       [hidden] { display: none !important; }`;
     // ha-card is Home Assistant's own element; outside HA it is just an unknown element.
     const card = document.createElement('ha-card');
@@ -49,7 +66,10 @@ export class ChartroomCard extends HTMLElement {
     this.#message.textContent = 'Loading…';
     this.#stage = document.createElement('div');
     this.#stage.className = 'stage';
-    this.#stage.append(this.#view.svg, this.#message, this.#controls.dialog);
+    this.#layers.el.classList.add('layers');
+    this.#layers.el.hidden = true;
+    this.#view.onPlan = () => this.#renderLayers();
+    this.#stage.append(this.#view.el, this.#layers.el, this.#message, this.#controls.dialog);
     card.append(this.#title, this.#stage);
     root.append(style, card);
     this.#controls.attach();
@@ -61,6 +81,11 @@ export class ChartroomCard extends HTMLElement {
     this.#title.textContent = config.title ?? '';
     if (config.height) this.style.setProperty('--chartroom-height', config.height);
     else this.style.removeProperty('--chartroom-height');
+    if (config.layer !== undefined && config.layer !== 'none' && !isHeatLayer(config.layer))
+      throw new Error('layer must be temperature, humidity or none');
+    this.#layer = isHeatLayer(config.layer) ? config.layer : null;
+    this.#layers.el.hidden = config.layer_toggles !== true;
+    this.#renderLayers();
     this.#loaded = '';
     if (this.#hass) void this.#loadPlan();
   }
@@ -68,10 +93,40 @@ export class ChartroomCard extends HTMLElement {
   set hass(hass: Hass) {
     this.#hass = hass;
     this.#view.setHass(hass);
+    this.#renderLayers();
     if (!this.#loaded && hass.connection) void this.#loadPlan();
+    if (this.isConnected) this.#subscribe();
   }
 
-  async #loadPlan(): Promise<void> {
+  connectedCallback(): void {
+    if (this.#hass) this.#subscribe();
+  }
+
+  disconnectedCallback(): void {
+    const unsub = this.#unsubscribe;
+    this.#unsubscribe = null;
+    void unsub?.then((u) => u?.());
+  }
+
+  /** Reload when a plan is saved or deleted elsewhere (the editor in the panel), so edits show live. */
+  #subscribe(): void {
+    const c = this.#hass?.connection;
+    if (this.#unsubscribe || !c?.subscribeMessage) return;
+    this.#unsubscribe = c
+      .subscribeMessage<{ plan_id: string; deleted: boolean }>(
+        (e) => {
+          const shown = this.dataset['plan'];
+          if (!shown || e.plan_id === shown || !this.#config?.plan_id) {
+            this.#loaded = '';
+            void this.#loadPlan(true);
+          }
+        },
+        { type: 'chartroom/plans/subscribe' },
+      )
+      .catch(() => null);
+  }
+
+  async #loadPlan(live = false): Promise<void> {
     const c = this.#hass?.connection;
     if (!c || !this.#config) return;
     const want = `${this.#config.plan_id ?? ''}|${this.#config.floor_id ?? ''}`;
@@ -88,6 +143,8 @@ export class ChartroomCard extends HTMLElement {
           ? plans.find((p) => p.floor_id === cfg.floor_id)
           : plans[0];
       if (!summary) {
+        delete this.dataset['plan'];
+        this.#view.setPlan(null);
         this.#show(
           plans.length === 0
             ? 'No floor plan yet. Draw one in the Chartroom panel.'
@@ -101,7 +158,7 @@ export class ChartroomCard extends HTMLElement {
       });
       if (load !== this.#load) return;
       this.#view.setPlan(normalizePlan(raw));
-      this.#view.fit();
+      if (!live || this.dataset['plan'] !== summary.id) this.#view.fit();
       this.dataset['plan'] = summary.id;
       this.#show(null);
     } catch (err) {
@@ -113,7 +170,19 @@ export class ChartroomCard extends HTMLElement {
   #show(message: string | null): void {
     this.#message.hidden = message === null;
     this.#message.textContent = message ?? '';
-    this.#view.svg.classList.toggle('hidden', message !== null);
+    this.#view.el.classList.toggle('hidden', message !== null);
+  }
+
+  #renderLayers(): void {
+    const counts = layerCounts(this.#view.plan, this.#hass);
+    this.#layers.update(this.#layer, counts);
+    const show = this.#layer && counts[this.#layer] > 0 ? this.#layer : null;
+    if (show !== this.#view.layer) void this.#view.setLayer(show);
+  }
+
+  /** The view, for tests. */
+  get view(): PlanView {
+    return this.#view;
   }
 
   getCardSize(): number {

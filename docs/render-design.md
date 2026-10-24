@@ -142,6 +142,36 @@ scaled with smoothing. The TypeScript code is also the reference the shaders are
 
 The worker stub that ships in Phase 0 (`frontend/src/worker.ts`) already has the message protocol.
 
+## As built in Phase 3
+
+The temperature and humidity layers follow this note, with these differences:
+
+- **Outside the hull: a shader pass, not an extension fan.** The owner asked for the
+  nearest-hull-edge projection to run as its own shader pass, so pass 1a is a full-grid fragment
+  pass that loops over the hull edges per cell (and, in the same pass, computes confidence and the
+  outside fade). Pass 1b then rasterises the Delaunay triangles over it, writing the value channel
+  only. The fan above is not built. With tens of sensors the loop is a few dozen edges per cell on
+  a grid of at most 256 cells per side, so the cost is small.
+- **Barycentric weights in the fragment shader.** Each triangle vertex carries its triangle's
+  three node indices; the fragment computes the weights from the node positions and mixes the
+  node values (positions and values in a small float texture). Letting the rasteriser
+  interpolate a per-vertex value varying gave visible drift (up to 0.1 % of the range) in the long
+  thin triangles along the hull, where the gradient is steep. With exact weights the GPU and the
+  CPU reference agree to about 4e-6 °C on 99.9 % of the cells; the odd cell whose centre falls on
+  a triangle edge differs by up to 0.2 % of the range.
+- **Field target RGBA32F** (value, confidence, fade) rather than R32F, so pass 2 does no geometry.
+  The worker's Canvas2D fallback produces the same three channels.
+- **Confidence**: 1 within 3 m of a sensor, easing to 0.3 at 8 m (smoothstep). Outside the
+  outline the layer drops to 45 % and fades out over 2.5 m.
+- **Staleness** uses `last_reported` (older than 6 h is stale) when Home Assistant sends it.
+  Unavailable, unknown and non-numeric sensors are left out, shown as a dashed marker label, and
+  counted in the legend.
+- **Transitions**: each sensor value eases over 600 ms (ease-out cubic) and pass 1 reruns per
+  frame while anything moves; a new sensor layout cross-fades from the previous field target in
+  the colour pass. With `prefers-reduced-motion` both are instant.
+
+The underlay image, if any, sits above the heat canvas.
+
 ## What Phase 1 must provide
 
 - Plan coordinates in **metres**, from the plan scale.

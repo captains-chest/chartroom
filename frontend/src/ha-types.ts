@@ -30,10 +30,17 @@ export interface EntityState {
   state: string;
   attributes: { friendly_name?: string; device_class?: string; unit_of_measurement?: string };
   last_changed?: string;
+  last_updated?: string;
+  last_reported?: string;
 }
 
 export interface HassConnection {
   sendMessagePromise<T>(message: { type: string; [key: string]: unknown }): Promise<T>;
+  /** Subscribe to a command's events; resolves to the unsubscribe function. */
+  subscribeMessage?<T>(
+    callback: (event: T) => void,
+    message: { type: string; [key: string]: unknown },
+  ): Promise<() => Promise<void> | void>;
 }
 
 export interface Hass {

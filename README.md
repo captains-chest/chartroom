@@ -1,16 +1,17 @@
 # Chartroom
 
 Floor plans for Home Assistant: draw your home once, put your lights, switches, doors and windows
-on it, and (soon) see temperature, humidity and Wi-Fi signal as live heatmaps over it — in a
-sidebar panel and as a dashboard card.
+on it, and see temperature and humidity (and, next, Wi-Fi signal) as live heatmaps over it — in
+a sidebar panel and as a dashboard card.
 
-> **Status: Phase 2 (devices) is complete.** Phase 1 gave the panel one tab per Home Assistant
-> floor, pan and zoom, an optional underlay and an editor for walls, doors, windows, rooms and
-> sensor/signal sources. Phase 2 adds live device markers in the panel and the card: tap to
-> toggle, hold for details. Heatmaps come next (Phase 3); see
-> [docs/render-design.md](docs/render-design.md) for how they will be rendered.
+> **Status: Phase 3 (temperature and humidity heatmaps) is complete.** Phase 1 gave the panel
+> one tab per Home Assistant floor, pan and zoom, an optional underlay and an editor for walls,
+> doors, windows, rooms and sensor/signal sources. Phase 2 added live device markers (tap to
+> toggle, hold for details). Phase 3 adds live temperature and humidity fields between your
+> sensors. The Wi-Fi and radio signal heatmap comes next (Phase 4); see
+> [docs/render-design.md](docs/render-design.md) for how the heatmaps are rendered.
 
-![Chartroom panel with device markers](docs/images/panel-devices.png)
+![Chartroom panel with the temperature heatmap](docs/images/heatmap-temperature.png)
 
 ## Drawing your plan
 
@@ -49,6 +50,31 @@ without one). Admins only; changes save automatically.
 
 ![The panel with an underlay](docs/images/panel-underlay.png)
 
+## Heatmaps
+
+The **Temperature** and **Humidity** buttons at the top left of the panel show a live field built
+from the temperature and humidity sensors placed on the plan (with **Source** in the editor). Press
+the active button again to hide it. Your choice is remembered on this device.
+
+- **Linear between sensors.** Two sensors at 25 °C and 30 °C give exactly 27.5 °C halfway between
+  them. With three or more sensors the plan is split into triangles between them (Delaunay) and
+  each point mixes the three corners. Outside the sensors' hull a point takes the value of the
+  nearest hull edge. Two sensors, or sensors in a line, give a gradient along the line. One sensor
+  colours the plan in one colour.
+- **Honest about guessing.** The colour fades where the nearest sensor is far away and outside the
+  house. Walls do not bend the field.
+- **Only good readings.** Unavailable, unknown, non-numeric and stale sensors (no report for 6 h)
+  are left out and shown with a dashed label. The legend shows the colour scale, the range of the
+  readings, how many sensors are used and how many were left out.
+- **Live.** New readings ease in over about half a second. The triangles are rebuilt only when a
+  sensor is added, moved or removed.
+- Temperature runs blue, cyan, green, yellow, red (16–28 °C by default, widened to fit the
+  readings). Humidity runs sand, yellow, mint, blue (30–70 %).
+- Drawn with WebGL2. Without it (or without float render targets) a Web Worker computes the same
+  field and a 2D canvas draws it.
+
+![Humidity heatmap](docs/images/heatmap-humidity.png)
+
 ## Devices
 
 Markers follow Home Assistant live, in the panel and in the card:
@@ -75,6 +101,8 @@ Markers follow Home Assistant live, in the panel and in the card:
   have to sit in a `foreignObject` inside the zoomable SVG, which renders unreliably in WebKit
   (Safari and the iOS companion app), so Chartroom does not use it.
 
+![Chartroom panel with device markers](docs/images/panel-devices.png)
+
 ![Chartroom card](docs/images/card.png)
 
 ## Install (HACS)
@@ -91,10 +119,15 @@ type: custom:chartroom-card
 title: Ground floor
 floor_id: ground_floor # or plan_id: example; without either, the first plan
 height: 320px # optional; in the sections view the grid sets the height
+layer: temperature # optional: temperature, humidity or none (the default)
+layer_toggles: true # optional: show the Temperature/Humidity buttons on the card
 ```
 
-The card shows the plan with live device markers (tap to toggle, hold for details). It does not
-pan or zoom, so the dashboard still scrolls over it; open the panel to explore a plan.
+The card shows the plan with live device markers (tap to toggle, hold for details) and, with
+`layer`, a heatmap. It does not pan or zoom, so the dashboard still scrolls over it; open the panel
+to explore a plan. When a plan is edited, open cards update straight away.
+
+![Card with a humidity heatmap](docs/images/card-heatmap.png)
 
 Requires Home Assistant 2026.10 or newer. Chartroom has no Python requirements and no runtime
 JavaScript dependencies; everything it needs ships in this repository.
@@ -109,7 +142,7 @@ JavaScript dependencies; everything it needs ships in this repository.
 | `.ci/configuration.yaml`               | The CI Home Assistant: template sensors, lights, switches, a lock and a cover for e2e.    |
 | `tests/`, `frontend/test/`, `e2e/`     | pytest, Vitest, and Playwright against a real Home Assistant.                             |
 
-Websocket commands: `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin). Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB).
+Websocket commands: `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin), and `chartroom/plans/subscribe`, which sends `{plan_id, deleted}` whenever a plan is saved or deleted. Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB).
 
 ## Example data
 

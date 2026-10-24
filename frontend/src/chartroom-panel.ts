@@ -5,6 +5,8 @@ import { type FloorTab, floorTabs, planIdForFloor } from './model';
 import type { PlanEditor } from './plan-editor';
 import { DeviceControls, deviceControlStyles } from './device-controls';
 import { PlanView, planViewStyles } from './plan-view';
+import { isHeatLayer, layerCounts, type HeatLayerId } from './heat';
+import { LayerToggles } from './layer-toggles';
 import { button, h } from './ui';
 import { loadUnderlayUrl } from './underlay';
 
@@ -14,6 +16,7 @@ interface PanelInfo {
 
 const TAB_KEY = 'chartroom:tab';
 const UNDERLAY_KEY = 'chartroom:underlay';
+const LAYER_KEY = 'chartroom:layer';
 
 interface UnderlayPref {
   visible: boolean;
@@ -60,6 +63,8 @@ export class ChartroomPanel extends HTMLElement {
   #underlayToggle: HTMLButtonElement;
   #underlayOpacity: HTMLInputElement;
   #plansRequested = false;
+  #layers = new LayerToggles((layer) => this.#setLayer(layer));
+  #layer: HeatLayerId | null = null;
   narrow = false;
   panel?: PanelInfo;
 
@@ -114,11 +119,16 @@ export class ChartroomPanel extends HTMLElement {
       this.#underlayToggle,
       this.#underlayOpacity,
     );
+    const stored = localStorage.getItem(LAYER_KEY);
+    this.#layer = isHeatLayer(stored) ? stored : null;
+    this.#view.onPlan = () => this.#renderLayers();
+    this.#layers.el.classList.add('layers');
     this.#stage = h(
       'div',
       { class: 'stage' },
-      this.#view.svg,
+      this.#view.el,
       this.#empty,
+      this.#layers.el,
       zoom,
       this.#underlayControls,
       this.#controls.dialog,
@@ -155,6 +165,7 @@ export class ChartroomPanel extends HTMLElement {
   set hass(hass: Hass) {
     this.#hass = hass;
     this.#view.setHass(hass);
+    this.#renderLayers();
     this.toggleAttribute('narrow', this.narrow);
     this.#menuButton.hidden = !this.narrow;
     if (!this.#plansRequested && hass.connection) {
@@ -172,6 +183,11 @@ export class ChartroomPanel extends HTMLElement {
   /** The plan on screen (for tests and the editor). */
   get plan(): Plan | null {
     return this.#editor?.plan ?? this.#plan;
+  }
+
+  /** The view, for tests. */
+  get view(): PlanView {
+    return this.#view;
   }
 
   get isAdmin(): boolean {
@@ -309,7 +325,8 @@ export class ChartroomPanel extends HTMLElement {
 
   #showEmpty(text: string | null, tab?: FloorTab): void {
     this.#empty.hidden = text === null;
-    this.#view.svg.classList.toggle('hidden', text !== null);
+    this.#view.el.classList.toggle('hidden', text !== null);
+    this.#layers.el.hidden = text !== null;
     if (text === null) return;
     const children: (HTMLElement | string)[] = [h('p', {}, text)];
     if (tab?.floor_id && this.isAdmin) {
@@ -387,6 +404,21 @@ export class ChartroomPanel extends HTMLElement {
     this.#renderUnderlayControls();
   }
 
+  #setLayer(layer: HeatLayerId | null): void {
+    this.#layer = layer;
+    if (layer) localStorage.setItem(LAYER_KEY, layer);
+    else localStorage.removeItem(LAYER_KEY);
+    this.#renderLayers();
+  }
+
+  /** The layer buttons follow the plan's sensors; a layer without sensors shows nothing. */
+  #renderLayers(): void {
+    const counts = layerCounts(this.#view.plan, this.#hass);
+    this.#layers.update(this.#layer, counts);
+    const show = this.#layer && counts[this.#layer] > 0 ? this.#layer : null;
+    if (show !== this.#view.layer) void this.#view.setLayer(show);
+  }
+
   #onKey = (e: KeyboardEvent): void => {
     this.#editor?.key(e);
   };
@@ -425,7 +457,8 @@ const panelStyles = `
   .spacer { flex: 1; }
   main { flex: 1; display: flex; min-height: 0; }
   .stage { position: relative; flex: 1; min-width: 0; }
-  .stage svg.hidden { visibility: hidden; }
+  .layers { position: absolute; left: 12px; top: 12px; padding: 4px; border-radius: 8px;
+    background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent); }
   .zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
   .zoom button { width: 36px; height: 36px; padding: 0; font-size: 1.1rem; }
   .underlay-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 8px;

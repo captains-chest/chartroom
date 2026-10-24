@@ -18,7 +18,9 @@ export default defineConfig({
       },
       output: {
         entryFileNames: '[name].js',
-        chunkFileNames: 'chunks/[name].js',
+        // Lazy chunks keep their module's name; the code shared by the panel and the card has a
+        // stable one (the size check counts it towards the card).
+        chunkFileNames: (c) => (c.isDynamicEntry ? 'chunks/[name].js' : 'chunks/shared.js'),
         assetFileNames: 'assets/[name][extname]',
       },
     },

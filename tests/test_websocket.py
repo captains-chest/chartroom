@@ -107,3 +107,35 @@ async def test_example_plan_round_trips(hass: HomeAssistant, hass_ws_client) -> 
     await ws.send_json_auto_id({"type": "chartroom/plans/get", "plan_id": "example"})
     msg = await ws.receive_json()
     assert msg["result"] == {"id": "example", **plan}
+
+
+async def test_subscribe_reports_saves_and_deletes(hass: HomeAssistant, hass_ws_client) -> None:
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json_auto_id({"type": "chartroom/plans/subscribe"})
+    msg = await ws.receive_json()
+    assert msg["success"]
+    sub = msg["id"]
+
+    await ws.send_json_auto_id(
+        {"type": "chartroom/plans/save", "plan_id": "up", "plan": {"name": "Upstairs"}}
+    )
+    replies = [await ws.receive_json(), await ws.receive_json()]
+    events = [m for m in replies if m["type"] == "event"]
+    assert [e["id"] for e in events] == [sub]
+    assert events[0]["event"] == {"plan_id": "up", "deleted": False}
+
+    await ws.send_json_auto_id({"type": "chartroom/plans/delete", "plan_id": "up"})
+    replies = [await ws.receive_json(), await ws.receive_json()]
+    events = [m for m in replies if m["type"] == "event"]
+    assert events[0]["event"] == {"plan_id": "up", "deleted": True}
+
+    # Unsubscribing stops the events.
+    await ws.send_json_auto_id({"type": "unsubscribe_events", "subscription": sub})
+    assert (await ws.receive_json())["success"]
+    await ws.send_json_auto_id(
+        {"type": "chartroom/plans/save", "plan_id": "up", "plan": {"name": "Upstairs"}}
+    )
+    msg = await ws.receive_json()
+    assert msg["type"] == "result"
+    assert msg["success"]

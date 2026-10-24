@@ -6,24 +6,88 @@ logger:
   logs:
     custom_components.chartroom: debug
 
-# Sensors the editor's source tool offers. The e2e setup puts them in areas.
+# Sensors the editor's source tool offers and the heatmap reads (the example plan has them
+# placed). Backed by input numbers so the tests can change a reading. The e2e setup puts them in
+# areas.
 template:
   - sensor:
+      - name: Living room temperature
+        unique_id: e2e_living_room_temperature
+        state: "{{ states('input_number.living_room_temp') | float(0) | round(1) }}"
+        unit_of_measurement: '°C'
+        device_class: temperature
+        state_class: measurement
+      - name: Living room humidity
+        unique_id: e2e_living_room_humidity
+        state: "{{ states('input_number.living_room_hum') | float(0) | round(0) }}"
+        unit_of_measurement: '%'
+        device_class: humidity
+        state_class: measurement
       - name: Kitchen temperature
         unique_id: e2e_kitchen_temperature
-        state: '21.5'
+        state: "{{ states('input_number.kitchen_temp') | float(0) | round(1) }}"
         unit_of_measurement: '°C'
         device_class: temperature
         state_class: measurement
       - name: Kitchen humidity
         unique_id: e2e_kitchen_humidity
-        state: '48'
+        state: "{{ states('input_number.kitchen_hum') | float(0) | round(0) }}"
         unit_of_measurement: '%'
         device_class: humidity
         state_class: measurement
       - name: Bedroom temperature
         unique_id: e2e_bedroom_temperature
-        state: '19.0'
+        state: "{{ states('input_number.bedroom_temp') | float(0) | round(1) }}"
+        unit_of_measurement: '°C'
+        device_class: temperature
+        state_class: measurement
+      - name: Bedroom humidity
+        unique_id: e2e_bedroom_humidity
+        state: "{{ states('input_number.bedroom_hum') | float(0) | round(0) }}"
+        unit_of_measurement: '%'
+        device_class: humidity
+        state_class: measurement
+      - name: Bath temperature
+        unique_id: e2e_bath_temperature
+        state: "{{ states('input_number.bath_temp') | float(0) | round(1) }}"
+        unit_of_measurement: '°C'
+        device_class: temperature
+        state_class: measurement
+      - name: Bath humidity
+        unique_id: e2e_bath_humidity
+        state: "{{ states('input_number.bath_hum') | float(0) | round(0) }}"
+        unit_of_measurement: '%'
+        device_class: humidity
+        state_class: measurement
+      - name: Hall temperature
+        unique_id: e2e_hall_temperature
+        state: "{{ states('input_number.hall_temp') | float(0) | round(1) }}"
+        unit_of_measurement: '°C'
+        device_class: temperature
+        state_class: measurement
+      - name: Hall humidity
+        unique_id: e2e_hall_humidity
+        state: "{{ states('input_number.hall_hum') | float(0) | round(0) }}"
+        unit_of_measurement: '%'
+        device_class: humidity
+        state_class: measurement
+      - name: Office temperature
+        unique_id: e2e_office_temperature
+        state: "{{ states('input_number.office_temp') | float(0) | round(1) }}"
+        unit_of_measurement: '°C'
+        device_class: temperature
+        state_class: measurement
+      - name: Office humidity
+        unique_id: e2e_office_humidity
+        state: "{{ states('input_number.office_hum') | float(0) | round(0) }}"
+        unit_of_measurement: '%'
+        device_class: humidity
+        state_class: measurement
+      # A sensor with a flat battery: unavailable, so the heatmap leaves it out.
+      - name: Bath temperature 2 dead battery
+        unique_id: e2e_bath_temperature_2_dead_battery
+        state: '0'
+        availability: '{{ false }}'
         unit_of_measurement: '°C'
         device_class: temperature
         state_class: measurement
@@ -130,3 +194,78 @@ input_boolean:
   living_room_blind:
     name: Living room blind (sim)
     initial: false
+
+# Readings behind the climate sensors, like the developer instance's simulated ones.
+input_number:
+  living_room_temp:
+    name: Living room temp (sim)
+    min: 10
+    max: 32
+    step: 0.1
+    initial: 22.4
+  living_room_hum:
+    name: Living room hum (sim)
+    min: 0
+    max: 100
+    step: 1
+    initial: 45
+  kitchen_temp:
+    name: Kitchen temp (sim)
+    min: 10
+    max: 32
+    step: 0.1
+    initial: 21.5
+  kitchen_hum:
+    name: Kitchen hum (sim)
+    min: 0
+    max: 100
+    step: 1
+    initial: 48
+  bedroom_temp:
+    name: Bedroom temp (sim)
+    min: 10
+    max: 32
+    step: 0.1
+    initial: 19.0
+  bedroom_hum:
+    name: Bedroom hum (sim)
+    min: 0
+    max: 100
+    step: 1
+    initial: 52
+  bath_temp:
+    name: Bath temp (sim)
+    min: 10
+    max: 32
+    step: 0.1
+    initial: 23.5
+  bath_hum:
+    name: Bath hum (sim)
+    min: 0
+    max: 100
+    step: 1
+    initial: 68
+  hall_temp:
+    name: Hall temp (sim)
+    min: 10
+    max: 32
+    step: 0.1
+    initial: 20.2
+  hall_hum:
+    name: Hall hum (sim)
+    min: 0
+    max: 100
+    step: 1
+    initial: 50
+  office_temp:
+    name: Office temp (sim)
+    min: 10
+    max: 32
+    step: 0.1
+    initial: 21.0
+  office_hum:
+    name: Office hum (sim)
+    min: 0
+    max: 100
+    step: 1
+    initial: 40

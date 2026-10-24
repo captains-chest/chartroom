@@ -17,7 +17,7 @@ test('the Chartroom panel renders in the sidebar and talks to the integration', 
   await expect(panel.locator('svg.plan')).toBeVisible();
   await expect(panel.locator('h1')).toHaveText('Chartroom');
   await expect(panel.locator('.status')).toContainText('saved plan(s)');
-  await expect(panel.locator('.status')).toContainText('worker 0 ready');
+  await expect(panel.locator('.status')).toContainText(/worker \d+ ready/);
   // The sidebar entry registered by the integration.
   await expect(page.locator('ha-sidebar').getByText('Chartroom', { exact: true })).toBeVisible();
 });
@@ -105,7 +105,7 @@ test('creating a plan for an empty floor opens the editor on it', async ({ page 
 });
 
 test('the Chartroom card renders on a dashboard', async ({ page }) => {
-  const card = page.locator('chartroom-card[data-plan=example]');
+  const card = page.locator('chartroom-card[data-plan=example]').first();
   // On a cold start the first page load can miss the card module (it is added to the frontend's
   // extra modules when the config entry loads) and show a configuration error; a reload picks
   // it up. Each attempt is bounded so the loop really does reload.

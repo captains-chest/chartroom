@@ -179,6 +179,13 @@ export async function ensureDashboard(token: string): Promise<void> {
             cards: [
               { type: 'custom:chartroom-card', title: 'Chartroom', plan_id: 'example' },
               { type: 'custom:chartroom-card', title: 'Devices', plan_id: DEVICES_PLAN },
+              {
+                type: 'custom:chartroom-card',
+                title: 'Climate',
+                plan_id: 'example',
+                layer: 'temperature',
+                layer_toggles: true,
+              },
             ],
           },
         ],
@@ -228,9 +235,19 @@ export async function ensureFloorsAndAreas(token: string): Promise<void> {
 
 /** Test sensors (from .ci/configuration.yaml) and the areas they belong in. */
 export const SENSOR_AREAS: Record<string, string> = {
+  'sensor.living_room_temperature': 'living_room',
+  'sensor.living_room_humidity': 'living_room',
   'sensor.kitchen_temperature': 'kitchen',
   'sensor.kitchen_humidity': 'kitchen',
   'sensor.bedroom_temperature': 'bedroom',
+  'sensor.bedroom_humidity': 'bedroom',
+  'sensor.bath_temperature': 'bath',
+  'sensor.bath_humidity': 'bath',
+  'sensor.bath_temperature_2_dead_battery': 'bath',
+  'sensor.hall_temperature': 'hall',
+  'sensor.hall_humidity': 'hall',
+  'sensor.office_temperature': 'office',
+  'sensor.office_humidity': 'office',
   'sensor.hall_sensor_rssi': 'hall',
   // Devices for the marker tests.
   'light.kitchen_ceiling_light': 'kitchen',

@@ -2,10 +2,12 @@
 // handles into. Handles pan (drag), zoom (wheel, pinch, buttons) and keeps the viewBox in metres.
 import { planBounds } from './geometry';
 import type { Hass } from './ha-types';
+import type { HeatLayerId, LayerData } from './heat';
+import type { HeatLayer } from './heat-layer';
 import { MarkerLayer, markerStyles } from './markers';
 import type { Plan, Point } from './plan';
 import { planBody } from './plan-svg';
-import { s } from './ui';
+import { h, s } from './ui';
 import {
   fitView,
   metresPerPixel,
@@ -28,7 +30,17 @@ export interface PointerDelegate {
 }
 
 export class PlanView {
+  /** The plan box: the heatmap canvas under the SVG, and the heatmap legend. */
+  readonly el: HTMLDivElement;
   readonly svg: SVGSVGElement;
+  readonly heatLegend: HTMLDivElement;
+  readonly #heatBox: HTMLDivElement;
+  readonly #heatValues: SVGGElement;
+  /** The live heatmap, once a layer has been switched on (loaded on demand). */
+  heat: HeatLayer | null = null;
+  #heatLayer: HeatLayerId | null = null;
+  #heatLoad: Promise<HeatLayer> | null = null;
+  #labelHeat: ((g: SVGGElement, data: LayerData | null) => void) | null = null;
   readonly overlay: SVGGElement;
   readonly #underlay: SVGGElement;
   readonly #body: SVGGElement;
@@ -44,6 +56,8 @@ export class PlanView {
   #gesture: 'pan' | 'delegate' | 'pinch' | null = null;
   #last: { x: number; y: number; d?: number } | null = null;
   delegate: PointerDelegate | null = null;
+  /** Called after every setPlan (the panel refreshes its layer buttons). */
+  onPlan: (() => void) | null = null;
   /** Called after every pan or zoom (the editor rescales its handles). */
   onViewChange: (() => void) | null = null;
 
@@ -55,17 +69,24 @@ export class PlanView {
     this.#underlay = s('g', { class: 'underlay' });
     this.#body = s('g', { class: 'body' });
     this.overlay = s('g', { class: 'overlay' });
+    this.#heatValues = s('g', { class: 'heat-values', 'aria-hidden': 'true' });
     this.svg = s(
       'svg',
       // A group, not an image, so the device markers inside are buttons screen readers reach.
       { class: 'plan', role: 'group', 'aria-label': 'Floor plan', preserveAspectRatio: 'none' },
       this.#underlay,
       this.#body,
+      this.#heatValues,
       this.markers.g,
       this.overlay,
     );
-    if (fixed) this.svg.classList.add('fixed');
-    else this.svg.addEventListener('wheel', (e) => this.#wheel(e), { passive: false });
+    this.#heatBox = h('div', { class: 'heat-box', hidden: true });
+    this.heatLegend = h('div', { class: 'heat-legend', role: 'img', hidden: true });
+    this.el = h('div', { class: 'plan-box' }, this.#heatBox, this.svg, this.heatLegend);
+    if (fixed) {
+      this.svg.classList.add('fixed');
+      this.el.classList.add('fixed');
+    } else this.svg.addEventListener('wheel', (e) => this.#wheel(e), { passive: false });
     this.svg.addEventListener('pointerdown', (e) => this.#down(e));
     this.svg.addEventListener('pointermove', (e) => this.#move(e));
     this.svg.addEventListener('pointerup', (e) => this.#up(e));
@@ -102,12 +123,54 @@ export class PlanView {
     this.markers.render(plan?.devices ?? [], this.#hass, this.#selectedDevice);
     this.#renderUnderlay();
     if (!this.#fitted) this.fit();
+    this.heat?.setPlan(plan);
+    this.onPlan?.();
+  }
+
+  /** Show a heatmap layer, or none. The renderer loads the first time a layer is shown. */
+  async setLayer(layer: HeatLayerId | null): Promise<void> {
+    this.#heatLayer = layer;
+    if (!layer && !this.heat) return;
+    const heat = await this.#loadHeat();
+    heat.setLayer(this.#heatLayer);
+  }
+
+  get layer(): HeatLayerId | null {
+    return this.#heatLayer;
+  }
+
+  #loadHeat(): Promise<HeatLayer> {
+    this.#heatLoad ??= import('./heat-layer').then((m) => {
+      const heat = new m.HeatLayer(this.#heatBox, this.heatLegend);
+      this.#labelHeat = m.renderValueLabels;
+      heat.onReadings = (data) => this.#markHeat(data);
+      heat.setView(this.#view, this.svg.clientWidth, this.svg.clientHeight);
+      heat.setHass(this.#hass);
+      heat.setPlan(this.#plan);
+      this.heat = heat;
+      return heat;
+    });
+    return this.#heatLoad;
+  }
+
+  /** Value labels next to the layer's sensors; sensors left out are marked. */
+  #markHeat(data: LayerData | null): void {
+    this.#labelHeat?.(this.#heatValues, data);
+    this.el.classList.toggle('heat-on', !!data && data.readings.length > 0);
+    const used = new Set(data?.readings.map((r) => r.id));
+    const left = new Set(data?.excluded.map((r) => r.id));
+    for (const el of this.#body.querySelectorAll<SVGElement>('.source')) {
+      const id = el.dataset['id'] ?? '';
+      el.classList.toggle('heat-used', used.has(id));
+      el.classList.toggle('heat-excluded', left.has(id));
+    }
   }
 
   /** New states from Home Assistant: restyle the markers whose entity changed. */
   setHass(hass: Hass | undefined): void {
     this.#hass = hass;
     this.markers.update(hass);
+    this.heat?.setHass(hass);
   }
 
   /** The underlay image as a URL the browser can load (a blob URL). */
@@ -178,6 +241,7 @@ export class PlanView {
     this.svg.setAttribute('viewBox', viewBoxOf(v));
     this.svg.style.setProperty('--mpp', String(this.mpp));
     this.markers.setScale(this.mpp);
+    this.heat?.setView(v, this.svg.clientWidth, this.svg.clientHeight);
     this.onViewChange?.();
   }
 
@@ -276,8 +340,12 @@ export class PlanView {
 
 /** CSS for the plan inside the panel's shadow root, using Home Assistant theme colours. */
 export const planViewStyles = `
-  svg.plan { display: block; width: 100%; height: 100%; touch-action: none; user-select: none;
-    background: var(--primary-background-color, #fafafa); cursor: grab; }
+  .plan-box { position: relative; width: 100%; height: 100%; overflow: hidden;
+    background: var(--primary-background-color, #fafafa); }
+  .plan-box.fixed { background: none; }
+  .plan-box.hidden { visibility: hidden; }
+  svg.plan { position: relative; display: block; width: 100%; height: 100%; touch-action: none; user-select: none;
+    background: none; cursor: grab; }
   svg.plan.panning { cursor: grabbing; }
   svg.plan.fixed { touch-action: pan-x pan-y; cursor: default; background: none; }
   .room { fill: var(--card-background-color, #fff); stroke: var(--divider-color, #ddd); stroke-width: 1px; vector-effect: non-scaling-stroke; }
@@ -298,4 +366,28 @@ export const planViewStyles = `
   .selected.room { fill: color-mix(in srgb, var(--primary-color, #03a9f4) 18%, transparent); stroke: var(--primary-color, #03a9f4); stroke-width: 2px; }
   .selected .door, .selected .swing { stroke: var(--primary-color, #03a9f4); }
   .underlay { pointer-events: none; }
+  .heat-box { position: absolute; inset: 0; pointer-events: none; }
+  .heat-box canvas { display: block; width: 100%; height: 100%; }
+  .heat-on .room, .heat-on .room.linked { fill: var(--card-background-color, #fff); fill-opacity: 0.14; }
+  .heat-on .name, .heat-on .area, .heat-value { paint-order: stroke; stroke-linejoin: round;
+    stroke: color-mix(in srgb, var(--card-background-color, #fff) 80%, transparent); stroke-width: calc(var(--mpp, 0.01) * 3px); }
+  .heat-on .name, .heat-on .area { stroke-width: 0.06px; }
+  .heat-value { font-size: calc(var(--mpp, 0.01) * 12px); font-weight: 600; fill: var(--primary-text-color, #222);
+    text-anchor: middle; pointer-events: none; }
+  .heat-value { transform: translateY(calc(var(--mpp, 0.01) * -10px)); }
+  .heat-value.excluded { fill: var(--secondary-text-color, #777); pointer-events: auto; }
+  .source.heat-excluded { fill: none; stroke: var(--secondary-text-color, #777); stroke-width: 1.5px; stroke-dasharray: 2 2; }
+  .heat-legend { position: absolute; top: 10px; right: 10px; width: 190px; box-sizing: border-box; padding: 6px 10px 8px;
+    border-radius: 8px; font-size: 12px; line-height: 1.3; color: var(--primary-text-color, #222); pointer-events: none;
+    background: color-mix(in srgb, var(--card-background-color, #fff) 90%, transparent);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+  .fixed .heat-legend, .plan-box.fixed .heat-legend { top: auto; bottom: 4px; right: 4px; width: 160px; font-size: 11px; }
+  .heat-title { font-weight: 600; margin-bottom: 4px; }
+  .heat-title span { font-weight: 400; color: var(--secondary-text-color, #666); }
+  .heat-bar { position: relative; height: 10px; border-radius: 3px; }
+  .heat-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--primary-text-color, #222);
+    box-shadow: 0 0 0 1px var(--card-background-color, #fff); }
+  .heat-scale { display: flex; justify-content: space-between; color: var(--secondary-text-color, #666); margin-top: 2px; }
+  .heat-note { color: var(--secondary-text-color, #666); margin-top: 2px; }
+  .heat-layers { display: flex; gap: 4px; }
 ${markerStyles}`;

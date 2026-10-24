@@ -7,6 +7,7 @@ import {
   ensureDashboard,
   ensureExamplePlan,
   ensureFloorsAndAreas,
+  ensureSensorAreas,
   onboard,
   waitForHa,
 } from './ha';
@@ -32,6 +33,7 @@ export default async function globalSetup(): Promise<void> {
   await ensureChartroom(token);
   await ensureDashboard(token);
   await ensureFloorsAndAreas(token);
+  await ensureSensorAreas(token);
   await ensureExamplePlan(
     token,
     JSON.parse(readFileSync('frontend/test/fixtures/example-plan.json', 'utf8')),

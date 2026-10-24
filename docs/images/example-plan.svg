@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-0.5 -0.5 11.7 9.26" width="702" height="556" font-family="system-ui, sans-serif">
 <title>Example flat (traced fixture)</title>
-<style>.room{fill:#f6f8fa;stroke:none}.wall{stroke:none}.exterior{fill:#555}.partition{fill:#888}.window{fill:#fff;stroke:#555;stroke-width:0.02}.door{fill:none;stroke:#555;stroke-width:0.02}.swing{fill:none;stroke:#999;stroke-width:0.015;stroke-dasharray:0.06 0.04}.name{font-size:0.32px;fill:#222;text-anchor:middle}.area{font-size:0.24px;fill:#666;text-anchor:middle}.source{fill:#03a9f4;stroke:#fff;stroke-width:0.03}</style>
+<style>.room{fill:#f6f8fa;stroke:none}.wall{stroke:none}.exterior{fill:#555}.partition{fill:#888}.window{fill:#fff;stroke:#555;stroke-width:0.02}.door{fill:none;stroke:#555;stroke-width:0.02}.swing{fill:none;stroke:#999;stroke-width:0.015;stroke-dasharray:0.06 0.04}.name{font-size:0.32px;fill:#222;text-anchor:middle}.area{font-size:0.24px;fill:#666;text-anchor:middle}.source{fill:#03a9f4;stroke:#fff;stroke-width:0.03}.source.access_point{fill:#ff9800}.source.radio{fill:#9c27b0}</style>
 <rect x="-0.5" y="-0.5" width="11.7" height="9.26" fill="#fff"/>
 <g class="rooms">
 <polygon class="room" data-kind="room" data-id="bedroom_1" points="0.19,0.49 3.17,0.49 3.17,4.22 0.19,4.22"/>
@@ -51,18 +51,18 @@
 <text class="name" x="9.01" y="5.84">Bedroom 2</text><text class="area" x="9.01" y="6.14">10.2 m²</text>
 </g>
 <g class="sources">
-<circle class="source" data-kind="source" data-id="living_room_temperature" cx="5.12" cy="2.77" r="0.08"><title>sensor.living_room_temperature</title></circle>
-<circle class="source" data-kind="source" data-id="living_room_humidity" cx="5.37" cy="2.77" r="0.08"><title>sensor.living_room_humidity</title></circle>
-<circle class="source" data-kind="source" data-id="kitchen_temperature" cx="5.53" cy="5.96" r="0.08"><title>sensor.kitchen_temperature</title></circle>
-<circle class="source" data-kind="source" data-id="kitchen_humidity" cx="5.78" cy="5.96" r="0.08"><title>sensor.kitchen_humidity</title></circle>
-<circle class="source" data-kind="source" data-id="bedroom_temperature" cx="1.56" cy="2.36" r="0.08"><title>sensor.bedroom_temperature</title></circle>
-<circle class="source" data-kind="source" data-id="bedroom_humidity" cx="1.81" cy="2.36" r="0.08"><title>sensor.bedroom_humidity</title></circle>
-<circle class="source" data-kind="source" data-id="bath_temperature" cx="1.73" cy="5.36" r="0.08"><title>sensor.bath_temperature</title></circle>
-<circle class="source" data-kind="source" data-id="bath_humidity" cx="1.98" cy="5.36" r="0.08"><title>sensor.bath_humidity</title></circle>
-<circle class="source" data-kind="source" data-id="bath_temperature_2_dead_battery" cx="2.23" cy="5.36" r="0.08"><title>sensor.bath_temperature_2_dead_battery</title></circle>
-<circle class="source" data-kind="source" data-id="hall_temperature" cx="1.3" cy="7.3" r="0.08"><title>sensor.hall_temperature</title></circle>
-<circle class="source" data-kind="source" data-id="hall_humidity" cx="1.55" cy="7.3" r="0.08"><title>sensor.hall_humidity</title></circle>
-<circle class="source" data-kind="source" data-id="office_temperature" cx="8.89" cy="6.4" r="0.08"><title>sensor.office_temperature</title></circle>
-<circle class="source" data-kind="source" data-id="office_humidity" cx="9.14" cy="6.4" r="0.08"><title>sensor.office_humidity</title></circle>
+<circle class="source sensor" data-kind="source" data-id="living_room_temperature" cx="5.12" cy="2.77" r="0.08"><title>sensor.living_room_temperature</title></circle>
+<circle class="source sensor" data-kind="source" data-id="living_room_humidity" cx="5.37" cy="2.77" r="0.08"><title>sensor.living_room_humidity</title></circle>
+<circle class="source sensor" data-kind="source" data-id="kitchen_temperature" cx="5.53" cy="5.96" r="0.08"><title>sensor.kitchen_temperature</title></circle>
+<circle class="source sensor" data-kind="source" data-id="kitchen_humidity" cx="5.78" cy="5.96" r="0.08"><title>sensor.kitchen_humidity</title></circle>
+<circle class="source sensor" data-kind="source" data-id="bedroom_temperature" cx="1.56" cy="2.36" r="0.08"><title>sensor.bedroom_temperature</title></circle>
+<circle class="source sensor" data-kind="source" data-id="bedroom_humidity" cx="1.81" cy="2.36" r="0.08"><title>sensor.bedroom_humidity</title></circle>
+<circle class="source sensor" data-kind="source" data-id="bath_temperature" cx="1.73" cy="5.36" r="0.08"><title>sensor.bath_temperature</title></circle>
+<circle class="source sensor" data-kind="source" data-id="bath_humidity" cx="1.98" cy="5.36" r="0.08"><title>sensor.bath_humidity</title></circle>
+<circle class="source sensor" data-kind="source" data-id="bath_temperature_2_dead_battery" cx="2.23" cy="5.36" r="0.08"><title>sensor.bath_temperature_2_dead_battery</title></circle>
+<circle class="source sensor" data-kind="source" data-id="hall_temperature" cx="1.3" cy="7.3" r="0.08"><title>sensor.hall_temperature</title></circle>
+<circle class="source sensor" data-kind="source" data-id="hall_humidity" cx="1.55" cy="7.3" r="0.08"><title>sensor.hall_humidity</title></circle>
+<circle class="source sensor" data-kind="source" data-id="office_temperature" cx="8.89" cy="6.4" r="0.08"><title>sensor.office_temperature</title></circle>
+<circle class="source sensor" data-kind="source" data-id="office_humidity" cx="9.14" cy="6.4" r="0.08"><title>sensor.office_humidity</title></circle>
 </g>
 </svg>

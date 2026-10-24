@@ -3,21 +3,33 @@
 import { add, along, dist, frame, mm, sub } from './geometry';
 import type { Hass } from './ha-types';
 import { History } from './history';
-import { areaChoices } from './model';
-import { type Door, materialsOf, type Opening, type Plan, type Point, polygonArea } from './plan';
+import { areaChoices, entityArea, sourceChoices } from './model';
+import {
+  type Door,
+  limitWarnings,
+  materialsOf,
+  type Opening,
+  type Plan,
+  type Point,
+  polygonArea,
+  type SourceKind,
+} from './plan';
 import {
   addOpening,
   addRoom,
+  addSource,
   addWall,
   areaFactor,
   deleteOpening,
   deleteRoom,
+  deleteSource,
   deleteWall,
   DEFAULT_WALL,
   moveEndpoint,
   moveOpening,
   moveRoom,
   moveRoomVertex,
+  moveSource,
   moveWall,
   scalePlan,
   setMaterial,
@@ -26,6 +38,7 @@ import {
   twoPointFactor,
   updateOpening,
   updateRoom,
+  updateSource,
   updateWall,
   wallAt,
 } from './plan-ops';
@@ -33,8 +46,22 @@ import type { PlanView } from './plan-view';
 import { button, field, h, numberInput, s, select, textInput } from './ui';
 import { importUnderlay, loadUnderlayUrl } from './underlay';
 
-export type Tool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'measure' | 'underlay';
-type Kind = 'wall' | 'room' | 'door' | 'window';
+export type Tool =
+  | 'select'
+  | 'wall'
+  | 'room'
+  | 'door'
+  | 'window'
+  | 'source'
+  | 'measure'
+  | 'underlay';
+type Kind = 'wall' | 'room' | 'door' | 'window' | 'source';
+
+const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
+  { value: 'sensor', label: 'Temperature / humidity sensor' },
+  { value: 'access_point', label: 'Wi-Fi access point' },
+  { value: 'radio', label: 'Radio (Zigbee, Z-Wave, Thread…)' },
+];
 interface Selection {
   kind: Kind;
   id: string;
@@ -44,6 +71,7 @@ type Drag =
   | { type: 'endpoint'; base: Plan; from: Point }
   | { type: 'wall'; base: Plan; id: string; start: Point }
   | { type: 'opening'; base: Plan; id: string }
+  | { type: 'source'; base: Plan; id: string; start: Point; from: Point }
   | { type: 'room'; base: Plan; id: string; start: Point }
   | { type: 'vertex'; base: Plan; id: string; index: number }
   | { type: 'underlay'; base: Plan; start: Point };
@@ -77,6 +105,12 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
   },
   { tool: 'door', label: 'Door', key: 'd', hint: 'Click on a wall to put a door there.' },
   { tool: 'window', label: 'Window', key: 'n', hint: 'Click on a wall to put a window there.' },
+  {
+    tool: 'source',
+    label: 'Source',
+    key: 's',
+    hint: 'Click to place a sensor, access point or radio; pick its entity on the right.',
+  },
   {
     tool: 'measure',
     label: 'Measure',
@@ -121,12 +155,16 @@ export class PlanEditor {
   #toolButtons = new Map<Tool, HTMLButtonElement>();
   #underlayUrl: string | null = null;
   #lastClick = { t: 0, x: 0, y: 0 };
+  /** What the Source tool places next. */
+  #sourceKind: SourceKind = 'sensor';
 
   constructor(host: EditorHost) {
     this.#host = host;
     this.#view = host.view;
     this.#history = new History(host.plan);
     this.#savedPlan = host.plan;
+    // The panel may already have loaded the picture.
+    this.#underlayUrl = host.view.underlayUrl;
     for (const t of TOOLS) {
       const b = button(t.label, () => this.setTool(t.tool), {
         'data-tool': t.tool,
@@ -189,7 +227,8 @@ export class PlanEditor {
   }
 
   hassChanged(): void {
-    if (this.#selection?.kind === 'room' || !this.#selection) this.#renderInspector();
+    const k = this.#selection?.kind;
+    if (!k || k === 'room' || k === 'source') this.#renderInspector();
   }
 
   setTool(tool: Tool): void {
@@ -199,7 +238,7 @@ export class PlanEditor {
     for (const [t, b] of this.#toolButtons) b.setAttribute('aria-pressed', String(t === tool));
     this.#hint.textContent = TOOLS.find((t) => t.tool === tool)?.hint ?? '';
     this.#view.svg.dataset['tool'] = tool;
-    if (tool !== 'select') this.#selection = tool === 'underlay' ? null : this.#selection;
+    if (tool === 'underlay' || tool === 'source') this.#selection = null;
     this.#render();
   }
 
@@ -313,7 +352,9 @@ export class PlanEditor {
         ? deleteWall(p, sel.id)
         : sel.kind === 'room'
           ? deleteRoom(p, sel.id)
-          : deleteOpening(p, sel.id);
+          : sel.kind === 'source'
+            ? deleteSource(p, sel.id)
+            : deleteOpening(p, sel.id);
     this.#selection = null;
     this.#commit(next);
   }
@@ -399,6 +440,13 @@ export class PlanEditor {
         }
         return true;
       }
+      case 'source': {
+        const r = this.#placeSource(p);
+        this.#selection = { kind: 'source', id: r.id };
+        this.setTool('select');
+        this.#commit(r.plan);
+        return true;
+      }
       case 'measure': {
         const q = this.#snapped(p, true).point;
         if (this.#draft.length === 0 || this.#measured) {
@@ -435,9 +483,17 @@ export class PlanEditor {
       return true;
     }
     const el = target?.closest<SVGElement>('[data-kind]');
-    const kind = el?.dataset['kind'] as Kind | 'source' | undefined;
+    const kind = el?.dataset['kind'] as Kind | undefined;
     const id = el?.dataset['id'];
-    if (!kind || !id || kind === 'source') {
+    if (kind === 'source' && id) {
+      const src = base.sources.find((x) => x.id === id);
+      if (!src) return false;
+      this.#selection = { kind, id };
+      this.#drag = { type: 'source', base, id, start: p, from: src.position };
+      this.#render();
+      return true;
+    }
+    if (!kind || !id) {
       // A click beside a wall still picks it, so thin walls are easy to hit.
       const near = wallAt(base, p, this.#snapRadius() / 2);
       if (!near) {
@@ -502,6 +558,9 @@ export class PlanEditor {
         next = moveOpening(d.base, d.id, along(wall, p));
         break;
       }
+      case 'source':
+        next = moveSource(d.base, d.id, add(d.from, sub(p, d.start)));
+        break;
       case 'underlay': {
         const u = d.base.underlay;
         if (!u) return;
@@ -561,6 +620,7 @@ export class PlanEditor {
     const p = this.plan;
     if (sel.kind === 'wall') return p.walls.find((w) => w.id === sel.id);
     if (sel.kind === 'room') return p.rooms.find((r) => r.id === sel.id);
+    if (sel.kind === 'source') return p.sources.find((x) => x.id === sel.id);
     return findOpening(p, sel.id);
   }
 
@@ -660,13 +720,15 @@ export class PlanEditor {
   #renderInspector(): void {
     const plan = this.plan;
     const sel = this.#selection;
-    const parts: (HTMLElement | null)[] = [];
+    const parts: (HTMLElement | null)[] = [this.#warningsPanel()];
+    if (this.#tool === 'source' && !sel) parts.push(this.#newSourcePanel());
     if (this.#measured) parts.push(this.#measurePanel(this.#measured));
     if (sel?.kind === 'wall') parts.push(this.#wallPanel(sel.id));
     else if (sel?.kind === 'room') parts.push(this.#roomPanel(sel.id));
     else if (sel?.kind === 'door' || sel?.kind === 'window') parts.push(this.#openingPanel(sel.id));
+    else if (sel?.kind === 'source') parts.push(this.#sourcePanel(sel.id));
     else parts.push(this.#planPanel());
-    if (!sel) parts.push(this.#underlayPanel(), this.#materialsPanel());
+    if (!sel && this.#tool !== 'source') parts.push(this.#underlayPanel(), this.#materialsPanel());
     this.inspector.replaceChildren(...parts.filter((x): x is HTMLElement => x !== null));
     this.inspector.dataset['selection'] = sel ? `${sel.kind}:${sel.id}` : '';
     this.inspector.dataset['walls'] = String(plan.walls.length);
@@ -895,8 +957,121 @@ export class PlanEditor {
       h(
         'p',
         { class: 'meta' },
-        `${plan.walls.length} walls · ${plan.rooms.length} rooms · ${plan.doors.length} doors · ${plan.windows.length} windows · ${area.toFixed(1)} m²`,
+        `${plan.walls.length} walls · ${plan.rooms.length} rooms · ${plan.doors.length} doors · ${plan.windows.length} windows · ${plan.sources.length} sources · ${area.toFixed(1)} m²`,
       ),
+    );
+  }
+
+  #warningsPanel(): HTMLElement | null {
+    const warnings = limitWarnings(this.plan);
+    if (warnings.length === 0) return null;
+    return h(
+      'section',
+      { 'data-panel': 'warnings', class: 'warnings', role: 'status' },
+      ...warnings.map((w) => h('p', {}, w)),
+    );
+  }
+
+  /** A new source at `p`: a sensor takes the first one on this floor not placed yet. */
+  #placeSource(p: Point): { plan: Plan; id: string } {
+    const kind = this.#sourceKind;
+    const plan = this.plan;
+    let entity = '';
+    if (kind === 'sensor') {
+      const placed = new Set(plan.sources.map((x) => x.entity_id));
+      entity =
+        sourceChoices(this.#host.hass(), kind, plan.floor_id ?? null).find(
+          (c) => !placed.has(c.entity_id),
+        )?.entity_id ?? '';
+    }
+    return addSource(plan, kind, p, entity, entity ? entityArea(this.#host.hass(), entity) : null);
+  }
+
+  #newSourcePanel(): HTMLElement {
+    return this.#section(
+      'New source',
+      'new-source',
+      field(
+        'Kind',
+        select(SOURCE_KINDS, this.#sourceKind, (v) => (this.#sourceKind = v as SourceKind), {
+          name: 'source-kind',
+        }),
+      ),
+      h('p', { class: 'hint' }, 'Click on the plan to place it, then drag it into position.'),
+    );
+  }
+
+  #sourcePanel(id: string): HTMLElement | null {
+    const src = this.plan.sources.find((x) => x.id === id);
+    if (!src) return null;
+    const hass = this.#host.hass();
+    const floor = this.plan.floor_id ?? null;
+    const set = (patch: Parameters<typeof updateSource>[2]): void =>
+      this.#commit(updateSource(this.plan, id, patch));
+    const pick = (v: string): void => {
+      const entity = v.trim();
+      set({ entity_id: entity, area_id: entity ? entityArea(hass, entity) : null });
+    };
+    const choices = sourceChoices(hass, src.kind, floor);
+    const areaName = src.area_id ? (hass?.areas?.[src.area_id]?.name ?? src.area_id) : null;
+    let entityControl: HTMLElement;
+    if (src.kind === 'sensor') {
+      const opts = choices.map((c) => ({ value: c.entity_id, label: c.name }));
+      if (src.entity_id && !opts.some((o) => o.value === src.entity_id))
+        opts.unshift({ value: src.entity_id, label: `${src.entity_id} (not on this floor)` });
+      entityControl = select(
+        [
+          { value: '', label: opts.length ? '— pick a sensor —' : '— no sensors on this floor —' },
+          ...opts,
+        ],
+        src.entity_id,
+        pick,
+        { name: 'entity' },
+      );
+    } else {
+      const list = h('datalist', { id: `entities-${id}` });
+      for (const c of choices) list.append(h('option', { value: c.entity_id }, c.name));
+      entityControl = h(
+        'div',
+        { class: 'combo' },
+        textInput(src.entity_id, pick, {
+          name: 'entity',
+          list: `entities-${id}`,
+          placeholder: 'sensor.…_rssi, device_tracker.…',
+        }),
+        list,
+      );
+    }
+    return this.#section(
+      'Source',
+      'source',
+      field(
+        'Kind',
+        select(SOURCE_KINDS, src.kind, (v) => set({ kind: v as SourceKind }), {
+          name: 'source-kind',
+        }),
+      ),
+      field(src.kind === 'sensor' ? 'Sensor' : 'Entity', entityControl),
+      src.kind === 'sensor'
+        ? null
+        : field(
+            'Level at 1 m (dBm)',
+            numberInput(src.tx_dbm ?? -40, (v) => set({ tx_dbm: v }), {
+              name: 'tx-dbm',
+              min: -120,
+              max: 30,
+              step: 1,
+            }),
+          ),
+      h(
+        'p',
+        { class: 'meta', 'data-area': src.area_id ?? '' },
+        `${areaName ? `In ${areaName}` : 'No area'} · ${src.position[0].toFixed(2)}, ${src.position[1].toFixed(2)} m`,
+      ),
+      button('Delete source', () => this.deleteSelection(), {
+        class: 'danger',
+        'data-action': 'delete',
+      }),
     );
   }
 
@@ -1005,7 +1180,7 @@ export class PlanEditor {
   }
 
   #setUnderlayUrl(url: string): void {
-    if (this.#underlayUrl?.startsWith('blob:')) URL.revokeObjectURL(this.#underlayUrl);
+    // The view revokes the old blob URL when it gets the new one.
     this.#underlayUrl = url;
     this.#render();
   }
@@ -1041,7 +1216,13 @@ const editorStyles = `
   button.danger { color: var(--error-color, #db4437); }
   svg.editing { cursor: default; }
   svg.editing[data-tool=wall], svg.editing[data-tool=room], svg.editing[data-tool=measure],
-  svg.editing[data-tool=door], svg.editing[data-tool=window] { cursor: crosshair; }
+  svg.editing[data-tool=door], svg.editing[data-tool=window], svg.editing[data-tool=source] { cursor: crosshair; }
+  svg.editing .source { cursor: move; }
+  .inspector .warnings { margin: 8px 0 0; padding: 4px 8px; border-radius: 4px; font-size: 0.85rem;
+    background: color-mix(in srgb, var(--warning-color, #ffa600) 15%, transparent);
+    border-left: 3px solid var(--warning-color, #ffa600); }
+  .inspector .warnings p { margin: 4px 0; }
+  .combo input { width: 100%; box-sizing: border-box; }
   svg.editing[data-tool=underlay] { cursor: move; }
   .handle { fill: var(--card-background-color, #fff); stroke: var(--primary-color, #03a9f4); stroke-width: 2px;
     vector-effect: non-scaling-stroke; cursor: move; }

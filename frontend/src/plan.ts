@@ -262,3 +262,28 @@ export function validatePlan(plan: Plan): string[] {
   }
   return problems;
 }
+
+/**
+ * Soft limits per floor from docs/render-design.md: above them the signal heatmap may get slow on
+ * phones and wall tablets, so the editor warns (it still saves).
+ */
+export const LIMITS = { walls: 512, accessPoints: 32 } as const;
+
+/** Access points and radios: the sources the signal layer traces rays from. */
+export const isSignalSource = (s: Source): boolean =>
+  s.kind === 'access_point' || s.kind === 'radio';
+
+/** Warnings for a plan (one floor) that is over the soft limits. */
+export function limitWarnings(plan: Plan): string[] {
+  const out: string[] = [];
+  if (plan.walls.length > LIMITS.walls)
+    out.push(
+      `${plan.walls.length} walls on this floor (more than ${LIMITS.walls}): the signal map may be slow on phones and tablets.`,
+    );
+  const aps = plan.sources.filter(isSignalSource).length;
+  if (aps > LIMITS.accessPoints)
+    out.push(
+      `${aps} access points and radios on this floor (more than ${LIMITS.accessPoints}): the signal map may be slow on phones and tablets.`,
+    );
+  return out;
+}

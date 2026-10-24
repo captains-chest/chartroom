@@ -12,7 +12,18 @@ import {
   sub,
   wallRect,
 } from './geometry';
-import type { Door, Material, Opening, Plan, Point, Room, Wall, Window } from './plan';
+import type {
+  Door,
+  Material,
+  Opening,
+  Plan,
+  Point,
+  Room,
+  Source,
+  SourceKind,
+  Wall,
+  Window,
+} from './plan';
 
 export type OpeningKind = 'door' | 'window';
 
@@ -379,4 +390,48 @@ export function setMaterial(plan: Plan, material: Material): Plan {
     ...plan,
     materials: [...rest, { ...material, db_per_cm: Math.max(0, material.db_per_cm) }],
   };
+}
+
+/** Default reference level at 1 m for new access points and radios, in dBm. */
+export const DEFAULT_TX_DBM = { access_point: -40, radio: -45 } as const;
+
+/** Place a source; access points and radios get a default reference level. */
+export function addSource(
+  plan: Plan,
+  kind: SourceKind,
+  position: Point,
+  entity_id = '',
+  area_id: string | null = null,
+): { plan: Plan; id: string } {
+  const id = nextId(plan, kind === 'sensor' ? 'sensor' : kind);
+  const source: Source = { id, kind, entity_id, position: mmPoint(position) };
+  if (area_id) source.area_id = area_id;
+  if (kind !== 'sensor') source.tx_dbm = DEFAULT_TX_DBM[kind];
+  return { plan: { ...plan, sources: [...plan.sources, source] }, id };
+}
+
+export function moveSource(plan: Plan, id: string, to: Point): Plan {
+  return {
+    ...plan,
+    sources: plan.sources.map((x) => (x.id === id ? { ...x, position: mmPoint(to) } : x)),
+  };
+}
+
+/** Change a source. Switching to a sensor drops `tx_dbm`; switching away adds the default. */
+export function updateSource(plan: Plan, id: string, patch: Partial<Omit<Source, 'id'>>): Plan {
+  return {
+    ...plan,
+    sources: plan.sources.map((x) => {
+      if (x.id !== id) return x;
+      const next: Source = { ...x, ...patch };
+      if (next.kind === 'sensor') delete next.tx_dbm;
+      else if (next.tx_dbm === undefined) next.tx_dbm = DEFAULT_TX_DBM[next.kind];
+      if (!next.area_id) delete next.area_id;
+      return next;
+    }),
+  };
+}
+
+export function deleteSource(plan: Plan, id: string): Plan {
+  return { ...plan, sources: plan.sources.filter((x) => x.id !== id) };
 }

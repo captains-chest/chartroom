@@ -11,6 +11,24 @@ export interface AreaEntry {
   floor_id: string | null;
 }
 
+export interface EntityEntry {
+  entity_id: string;
+  area_id?: string | null;
+  device_id?: string | null;
+  name?: string | null;
+}
+
+export interface DeviceEntry {
+  id: string;
+  area_id?: string | null;
+}
+
+export interface EntityState {
+  entity_id: string;
+  state: string;
+  attributes: { friendly_name?: string; device_class?: string; unit_of_measurement?: string };
+}
+
 export interface HassConnection {
   sendMessagePromise<T>(message: { type: string; [key: string]: unknown }): Promise<T>;
 }
@@ -18,6 +36,10 @@ export interface HassConnection {
 export interface Hass {
   floors?: Record<string, FloorEntry>;
   areas?: Record<string, AreaEntry>;
+  /** The entity and device registries (display entries) and current states. */
+  entities?: Record<string, EntityEntry>;
+  devices?: Record<string, DeviceEntry>;
+  states?: Record<string, EntityState>;
   connection?: HassConnection;
   user?: { is_admin: boolean };
   /** fetch() with the user's access token, for the integration's HTTP views. */

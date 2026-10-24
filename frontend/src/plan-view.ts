@@ -87,16 +87,31 @@ export class PlanView {
     if (!this.#fitted) this.fit();
   }
 
-  /** The underlay image as a URL the browser can load (a blob URL from the editor). */
+  /** The underlay image as a URL the browser can load (a blob URL). */
   setUnderlayUrl(url: string | null): void {
+    if (url === this.#underlayUrl) return;
+    if (this.#underlayUrl?.startsWith('blob:')) URL.revokeObjectURL(this.#underlayUrl);
     this.#underlayUrl = url;
     this.#renderUnderlay();
   }
 
+  get underlayUrl(): string | null {
+    return this.#underlayUrl;
+  }
+
+  /** Viewer preference: hide the underlay, or show it at another opacity than the plan's. */
+  setUnderlayDisplay(display: { visible: boolean; opacity: number | null } | null): void {
+    this.#display = display;
+    this.#renderUnderlay();
+  }
+
+  #display: { visible: boolean; opacity: number | null } | null = null;
+
   #renderUnderlay(): void {
     const u = this.#plan?.underlay;
-    if (!u || !this.#underlayUrl) {
+    if (!u || !this.#underlayUrl || this.#display?.visible === false) {
       this.#underlay.replaceChildren();
+      this.svg.classList.remove('with-underlay');
       return;
     }
     const img = s('image', {
@@ -105,10 +120,12 @@ export class PlanView {
       y: u.origin[1],
       width: u.width_px * u.scale,
       height: u.height_px * u.scale,
-      opacity: u.opacity,
+      opacity: this.#display?.opacity ?? u.opacity,
       preserveAspectRatio: 'none',
     });
     this.#underlay.replaceChildren(img);
+    // Rooms let the drawing show through.
+    this.svg.classList.add('with-underlay');
   }
 
   fit(): void {
@@ -229,6 +246,7 @@ export const planViewStyles = `
     background: var(--primary-background-color, #fafafa); cursor: grab; }
   svg.plan.panning { cursor: grabbing; }
   .room { fill: var(--card-background-color, #fff); stroke: var(--divider-color, #ddd); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+  .with-underlay .room { fill-opacity: 0.35; }
   .room.linked { fill: color-mix(in srgb, var(--primary-color, #03a9f4) 6%, var(--card-background-color, #fff)); }
   .wall { stroke: none; fill: var(--secondary-text-color, #777); }
   .wall.exterior { fill: var(--primary-text-color, #333); }
@@ -238,6 +256,9 @@ export const planViewStyles = `
   .name { font-size: 0.32px; fill: var(--primary-text-color, #222); text-anchor: middle; pointer-events: none; }
   .area { font-size: 0.24px; fill: var(--secondary-text-color, #666); text-anchor: middle; pointer-events: none; }
   .source { fill: var(--primary-color, #03a9f4); stroke: #fff; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+  .source.access_point { fill: var(--orange-color, #ff9800); }
+  .source.radio { fill: var(--purple-color, #9c27b0); }
+  .source.selected { stroke: var(--primary-text-color, #222); stroke-width: 3px; }
   .selected.wall, .selected.window { fill: var(--primary-color, #03a9f4); }
   .selected.room { fill: color-mix(in srgb, var(--primary-color, #03a9f4) 18%, transparent); stroke: var(--primary-color, #03a9f4); stroke-width: 2px; }
   .selected .door, .selected .swing { stroke: var(--primary-color, #03a9f4); }

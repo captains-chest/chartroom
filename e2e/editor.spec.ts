@@ -18,6 +18,7 @@ interface PlanLike {
   doors: { id: string; wall: string }[];
   windows: { id: string; wall: string }[];
   underlay?: { url: string; scale: number; width_px: number; origin: Pt } | null;
+  sources: { id: string; kind: string; entity_id: string; position: Pt; area_id?: string }[];
 }
 
 const length = (w: { a: Pt; b: Pt }): number => Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]);
@@ -236,11 +237,35 @@ test.describe('plan editor', () => {
     await saved(panel);
     const stored = await getPlan<PlanLike>(token(), PLAN_ID);
     expect(stored.underlay?.width_px).toBe(1200);
-    const image = await fetch(`${HA_URL}${stored.underlay!.url}`, {
+    const file = await fetch(`${HA_URL}${stored.underlay!.url}`, {
       headers: { Authorization: `Bearer ${token()}` },
     });
-    expect(image.status).toBe(200);
-    expect(image.headers.get('content-type')).toBe('image/png');
+    expect(file.status).toBe(200);
+    expect(file.headers.get('content-type')).toBe('image/png');
+
+    // The read-only panel shows the underlay too, with a show/hide toggle and an opacity slider.
+    await panel.locator('button.edit').click();
+    await expect(panel.locator('.toolbar')).toHaveCount(0);
+    const image = panel.locator('svg.plan .underlay image');
+    const toggle = panel.getByRole('button', { name: 'Underlay', exact: true });
+    const opacity = panel.getByRole('slider', { name: 'Underlay opacity' });
+    await expect(image).toHaveCount(1);
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await opacity.fill('0.8');
+    await expect(image).toHaveAttribute('opacity', '0.8');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(image).toHaveCount(0);
+    await toggle.click();
+    await expect(image).toHaveCount(1);
+    // The choice is the viewer's own: it survives a reload and is not saved in the plan.
+    await page.reload();
+    await panel.locator(`[role=tab][data-plan="${PLAN_ID}"]`).click();
+    await expect(image).toHaveAttribute('opacity', '0.8');
+    await expect(image).toHaveAttribute('href', /^blob:/);
+    await expect(panel.locator('svg.plan')).toHaveClass(/with-underlay/);
+    await shot(page, 'panel-underlay.png');
+    expect((await getPlan<PlanLike>(token(), PLAN_ID)).underlay).toMatchObject({ opacity: 0.5 });
 
     // Deleting the plan deletes its image.
     await deletePlan(token(), PLAN_ID);
@@ -248,5 +273,108 @@ test.describe('plan editor', () => {
       headers: { Authorization: `Bearer ${token()}` },
     });
     expect(gone.status).toBe(404);
+  });
+});
+
+test.describe('sources', () => {
+  const PLAN_ID = 'e2e-sources';
+  test.beforeEach(async () => {
+    // On the ground floor, so the sensor list is filtered to its areas.
+    await savePlan(token(), PLAN_ID, {
+      ...FIXTURE,
+      name: 'E2E sources',
+      floor_id: 'ground_floor',
+      sources: [],
+    });
+  });
+  test.afterEach(async () => {
+    await deletePlan(token(), PLAN_ID);
+  });
+
+  test('sensors and access points are placed, moved, deleted and saved', async ({ page }) => {
+    const panel = await openPlan(page, PLAN_ID);
+    await startEditing(panel);
+    const inspector = panel.locator('.inspector');
+
+    // A sensor: only temperature and humidity sensors in the floor's areas are offered.
+    await page.keyboard.press('s');
+    await expect(inspector.locator('section[data-panel=new-source]')).toBeVisible();
+    await clickAt(page, panel, [2, 2]);
+    await expect(inspector.locator('section[data-panel=source]')).toBeVisible();
+    const entity = inspector.locator('select[name=entity]');
+    const offered = await entity
+      .locator('option')
+      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
+    expect(offered).toContain('sensor.kitchen_temperature');
+    expect(offered).toContain('sensor.kitchen_humidity');
+    expect(offered).not.toContain('sensor.bedroom_temperature');
+    expect(offered).not.toContain('sensor.hall_sensor_rssi');
+    await entity.selectOption('sensor.kitchen_temperature');
+    await expect(inspector.locator('[data-area]')).toHaveAttribute('data-area', 'kitchen');
+    const sensorId = (await livePlan(panel)).sources[0]!.id;
+
+    // Drag it a metre right and down.
+    const [sx, sy] = await toScreen(panel, [2, 2]);
+    const [tx, ty] = await toScreen(panel, [3, 3]);
+    await page.mouse.move(sx, sy);
+    await page.mouse.down();
+    await page.mouse.move((sx + tx) / 2, (sy + ty) / 2);
+    await page.mouse.move(tx, ty);
+    await page.mouse.up();
+    await expect.poll(async () => (await livePlan(panel)).sources[0]!.position).toEqual([3, 3]);
+
+    // An access point with a free-form entity and a transmit level.
+    await panel.locator('[data-tool=source]').click();
+    await inspector.locator('select[name=source-kind]').selectOption('access_point');
+    await clickAt(page, panel, [5, 2]);
+    await expect(inspector.locator('input[name=tx-dbm]')).toHaveValue('-40');
+    await inspector.locator('input[name=entity]').fill('sensor.hall_sensor_rssi');
+    await inspector.locator('input[name=entity]').press('Enter');
+    await expect
+      .poll(async () => (await livePlan(panel)).sources.map((s) => s.kind))
+      .toEqual(['sensor', 'access_point']);
+    await expect(panel.locator('svg.plan .source.access_point')).toHaveCount(1);
+    await expect(inspector.locator('[data-area]')).toHaveAttribute('data-area', 'hall');
+    await shot(page, 'editor-sources.png');
+
+    // Select it on the plan and delete it.
+    await panel.locator('svg.plan .source.access_point').click();
+    await expect(inspector).toHaveAttribute('data-selection', /^source:access_point_/);
+    await inspector.locator('[data-action=delete]').click();
+    await expect(panel.locator('svg.plan .source')).toHaveCount(1);
+
+    await saved(panel);
+    const stored = await getPlan<PlanLike>(token(), PLAN_ID);
+    expect(stored.sources).toEqual([
+      {
+        id: sensorId,
+        kind: 'sensor',
+        entity_id: 'sensor.kitchen_temperature',
+        position: [3, 3],
+        area_id: 'kitchen',
+      },
+    ]);
+  });
+
+  test('a floor over the wall limit shows a warning', async ({ page }) => {
+    const walls = Array.from({ length: 513 }, (_, i) => ({
+      id: `w${i}`,
+      a: [i * 0.02, 0],
+      b: [i * 0.02, 1],
+      thickness: 0.1,
+      material: 'partition',
+    }));
+    await savePlan(token(), PLAN_ID, {
+      ...FIXTURE,
+      name: 'E2E sources',
+      walls,
+      doors: [],
+      windows: [],
+    });
+    const panel = await openPlan(page, PLAN_ID);
+    await startEditing(panel);
+    await expect(panel.locator('.inspector section[data-panel=warnings]')).toContainText(
+      '513 walls on this floor',
+    );
   });
 });

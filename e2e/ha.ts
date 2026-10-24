@@ -214,6 +214,28 @@ export async function ensureFloorsAndAreas(token: string): Promise<void> {
   });
 }
 
+/** Test sensors (from .ci/configuration.yaml) and the areas they belong in. */
+export const SENSOR_AREAS: Record<string, string> = {
+  'sensor.kitchen_temperature': 'kitchen',
+  'sensor.kitchen_humidity': 'kitchen',
+  'sensor.bedroom_temperature': 'bedroom',
+  'sensor.hall_sensor_rssi': 'hall',
+};
+
+/** Put the test sensors in their areas, only where an entity exists and has no area yet. */
+export async function ensureSensorAreas(token: string): Promise<void> {
+  await withSocket(token, async (send) => {
+    const entities = await send<{ entity_id: string; area_id: string | null }[]>({
+      type: 'config/entity_registry/list',
+    });
+    for (const [entity_id, area_id] of Object.entries(SENSOR_AREAS)) {
+      const e = entities.find((x) => x.entity_id === entity_id);
+      if (!e || e.area_id) continue;
+      await send({ type: 'config/entity_registry/update', entity_id, area_id });
+    }
+  });
+}
+
 export const planCommand = <R>(
   token: string,
   msg: { type: string; plan_id?: string; plan?: unknown },

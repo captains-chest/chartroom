@@ -1,4 +1,5 @@
 import type { AreaEntry, Hass, PlanSummary } from './ha-types';
+import type { SourceKind } from './plan';
 
 export interface FloorGroup {
   id: string | null;
@@ -83,4 +84,55 @@ export function areaChoices(hass: Hass | undefined, floorId: string | null): Are
     .sort(
       (a, b) => Number(b.floor_id === floorId) - Number(a.floor_id === floorId) || byName(a, b),
     );
+}
+
+/** The area an entity is in: its own, else its device's. */
+export function entityArea(hass: Hass | undefined, entityId: string): string | null {
+  const e = hass?.entities?.[entityId];
+  if (!e) return null;
+  if (e.area_id) return e.area_id;
+  return (e.device_id && hass?.devices?.[e.device_id]?.area_id) || null;
+}
+
+export interface EntityChoice {
+  entity_id: string;
+  name: string;
+  area_id: string | null;
+}
+
+/** Device classes each kind of source is picked from (empty: any entity). */
+const SOURCE_CLASSES: Record<SourceKind, readonly string[]> = {
+  sensor: ['temperature', 'humidity'],
+  access_point: [],
+  radio: [],
+};
+
+/**
+ * Entities to place as a source: temperature and humidity sensors for `sensor`, any entity for
+ * access points and radios. On a plan with a floor, only entities in that floor's areas.
+ */
+export function sourceChoices(
+  hass: Hass | undefined,
+  kind: SourceKind,
+  floorId: string | null,
+): EntityChoice[] {
+  const classes = SOURCE_CLASSES[kind];
+  const areas = hass?.areas ?? {};
+  const onFloor = (area: string | null): boolean =>
+    !floorId || (area !== null && areas[area]?.floor_id === floorId);
+  const out: EntityChoice[] = [];
+  for (const st of Object.values(hass?.states ?? {})) {
+    if (classes.length > 0) {
+      if (!st.entity_id.startsWith('sensor.')) continue;
+      if (!classes.includes(st.attributes.device_class ?? '')) continue;
+    }
+    const area = entityArea(hass, st.entity_id);
+    if (!onFloor(area)) continue;
+    out.push({
+      entity_id: st.entity_id,
+      name: st.attributes.friendly_name ?? st.entity_id,
+      area_id: area,
+    });
+  }
+  return out.sort((a, b) => byName(a, b) || a.entity_id.localeCompare(b.entity_id));
 }

@@ -5,3 +5,31 @@ logger:
   default: warning
   logs:
     custom_components.chartroom: debug
+
+# Sensors the editor's source tool offers. The e2e setup puts them in areas.
+template:
+  - sensor:
+      - name: Kitchen temperature
+        unique_id: e2e_kitchen_temperature
+        state: '21.5'
+        unit_of_measurement: '°C'
+        device_class: temperature
+        state_class: measurement
+      - name: Kitchen humidity
+        unique_id: e2e_kitchen_humidity
+        state: '48'
+        unit_of_measurement: '%'
+        device_class: humidity
+        state_class: measurement
+      - name: Bedroom temperature
+        unique_id: e2e_bedroom_temperature
+        state: '19.0'
+        unit_of_measurement: '°C'
+        device_class: temperature
+        state_class: measurement
+      - name: Hall sensor RSSI
+        unique_id: e2e_hall_sensor_rssi
+        state: '-52'
+        unit_of_measurement: 'dBm'
+        device_class: signal_strength
+        state_class: measurement

@@ -5,12 +5,32 @@ import { type FloorTab, floorTabs, planIdForFloor } from './model';
 import type { PlanEditor } from './plan-editor';
 import { PlanView, planViewStyles } from './plan-view';
 import { button, h } from './ui';
+import { loadUnderlayUrl } from './underlay';
 
 interface PanelInfo {
   config?: { version?: string };
 }
 
 const TAB_KEY = 'chartroom:tab';
+const UNDERLAY_KEY = 'chartroom:underlay';
+
+interface UnderlayPref {
+  visible: boolean;
+  /** null: the opacity saved in the plan. */
+  opacity: number | null;
+}
+
+function readUnderlayPref(): UnderlayPref {
+  try {
+    const v = JSON.parse(localStorage.getItem(UNDERLAY_KEY) ?? 'null') as Partial<UnderlayPref>;
+    return {
+      visible: v?.visible !== false,
+      opacity: typeof v?.opacity === 'number' ? Math.min(1, Math.max(0.05, v.opacity)) : null,
+    };
+  } catch {
+    return { visible: true, opacity: null };
+  }
+}
 
 /** The full-screen Chartroom panel: the plan of each floor, with pan, zoom and the editor. */
 export class ChartroomPanel extends HTMLElement {
@@ -32,6 +52,11 @@ export class ChartroomPanel extends HTMLElement {
   #plan: Plan | null = null;
   #editor: PlanEditor | null = null;
   #loading = 0;
+  #underlayLoad = 0;
+  #underlayPref = readUnderlayPref();
+  #underlayControls: HTMLElement;
+  #underlayToggle: HTMLButtonElement;
+  #underlayOpacity: HTMLInputElement;
   #plansRequested = false;
   narrow = false;
   panel?: PanelInfo;
@@ -61,7 +86,39 @@ export class ChartroomPanel extends HTMLElement {
       button('−', () => this.#view.zoom(1 / 1.4), { 'aria-label': 'Zoom out', title: 'Zoom out' }),
       button('⤢', () => this.#view.fit(), { 'aria-label': 'Fit plan', title: 'Fit plan' }),
     );
-    this.#stage = h('div', { class: 'stage' }, this.#view.svg, this.#empty, zoom);
+    this.#underlayToggle = button(
+      'Underlay',
+      () => this.#setUnderlayPref({ visible: !this.#underlayPref.visible }),
+      {
+        title: 'Show or hide the drawing under the plan',
+        'data-action': 'toggle-underlay',
+      },
+    );
+    this.#underlayOpacity = h('input', {
+      type: 'range',
+      min: 0.05,
+      max: 1,
+      step: 0.05,
+      'aria-label': 'Underlay opacity',
+      name: 'underlay-opacity',
+    });
+    this.#underlayOpacity.addEventListener('input', () =>
+      this.#setUnderlayPref({ opacity: this.#underlayOpacity.valueAsNumber }),
+    );
+    this.#underlayControls = h(
+      'div',
+      { class: 'underlay-controls', hidden: true },
+      this.#underlayToggle,
+      this.#underlayOpacity,
+    );
+    this.#stage = h(
+      'div',
+      { class: 'stage' },
+      this.#view.svg,
+      this.#empty,
+      zoom,
+      this.#underlayControls,
+    );
     root.append(
       style,
       h(
@@ -185,6 +242,7 @@ export class ChartroomPanel extends HTMLElement {
       this.#planId = null;
       this.#plan = null;
       this.#view.setPlan(null);
+      void this.#loadUnderlay();
       this.#editButton.hidden = true;
       this.#showEmpty(`No plan for ${tab.label} yet.`, tab);
       return;
@@ -199,11 +257,49 @@ export class ChartroomPanel extends HTMLElement {
       this.#showEmpty(null);
       this.#view.setPlan(this.#plan);
       this.#view.fit();
+      void this.#loadUnderlay();
       this.#editButton.hidden = !this.isAdmin;
       this.dataset['plan'] = tab.plan_id;
     } catch (err) {
       this.#showEmpty(`Could not load this plan: ${(err as Error).message ?? err}`);
     }
+  }
+
+  /** Fetch the current plan's underlay (if any) and show it in the read-only view. */
+  async #loadUnderlay(): Promise<void> {
+    const load = ++this.#underlayLoad;
+    const u = this.#plan?.underlay;
+    this.#view.setUnderlayUrl(null);
+    this.#renderUnderlayControls();
+    if (!u) return;
+    try {
+      const url = await loadUnderlayUrl(this.#hass, u.url);
+      if (load !== this.#underlayLoad) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      this.#view.setUnderlayUrl(url);
+    } catch {
+      // The plan still shows without its drawing.
+    }
+  }
+
+  #setUnderlayPref(patch: Partial<UnderlayPref>): void {
+    this.#underlayPref = { ...this.#underlayPref, ...patch };
+    localStorage.setItem(UNDERLAY_KEY, JSON.stringify(this.#underlayPref));
+    this.#renderUnderlayControls();
+  }
+
+  /** The viewer's show/hide and opacity choice; the editor always shows the plan's own. */
+  #renderUnderlayControls(): void {
+    const u = this.#plan?.underlay;
+    const editing = this.#editor !== null;
+    const pref = this.#underlayPref;
+    this.#underlayControls.hidden = !u || editing;
+    this.#underlayToggle.setAttribute('aria-pressed', String(pref.visible));
+    this.#underlayOpacity.hidden = !pref.visible;
+    this.#underlayOpacity.value = String(pref.opacity ?? u?.opacity ?? 0.5);
+    this.#view.setUnderlayDisplay(editing ? null : pref);
   }
 
   #showEmpty(text: string | null, tab?: FloorTab): void {
@@ -267,6 +363,7 @@ export class ChartroomPanel extends HTMLElement {
     this.#inspectorSlot.hidden = false;
     this.#editButton.textContent = 'Done';
     this.toggleAttribute('editing', true);
+    this.#renderUnderlayControls();
   }
 
   async #closeEditor(): Promise<void> {
@@ -281,6 +378,7 @@ export class ChartroomPanel extends HTMLElement {
     this.#editButton.textContent = 'Edit';
     this.toggleAttribute('editing', false);
     this.#view.setPlan(this.#plan);
+    this.#renderUnderlayControls();
   }
 
   #onKey = (e: KeyboardEvent): void => {
@@ -324,6 +422,9 @@ const panelStyles = `
   .stage svg.hidden { visibility: hidden; }
   .zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
   .zoom button { width: 36px; height: 36px; padding: 0; font-size: 1.1rem; }
+  .underlay-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 8px;
+    padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent); }
+  .underlay-controls input { width: 120px; }
   .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
     justify-content: center; gap: 8px; color: var(--secondary-text-color, #727272); text-align: center; padding: 16px; }
   .empty .hint { font-size: 0.85rem; margin: 0; }

@@ -50,7 +50,7 @@ export const PLAN_STYLE =
   '.window{fill:#fff;stroke:#555;stroke-width:0.02}.door{fill:none;stroke:#555;stroke-width:0.02}' +
   '.swing{fill:none;stroke:#999;stroke-width:0.015;stroke-dasharray:0.06 0.04}' +
   '.name{font-size:0.32px;fill:#222;text-anchor:middle}.area{font-size:0.24px;fill:#666;text-anchor:middle}' +
-  '.source{fill:#03a9f4;stroke:#fff;stroke-width:0.03}';
+  '.source{fill:#03a9f4;stroke:#fff;stroke-width:0.03}.source.access_point{fill:#ff9800}.source.radio{fill:#9c27b0}';
 
 /** The plan's groups (rooms, walls, windows, doors, labels, sources), without the <svg> wrapper. */
 export function planBody(plan: Plan, options: { sources?: boolean } = {}): string {
@@ -109,7 +109,7 @@ export function planBody(plan: Plan, options: { sources?: boolean } = {}): strin
     out.push('<g class="sources">');
     for (const s of plan.sources) {
       out.push(
-        `<circle class="source" ${data('source', s.id)} cx="${f(s.position[0])}" cy="${f(s.position[1])}" r="0.08"><title>${esc(s.entity_id)}</title></circle>`,
+        `<circle class="source ${esc(s.kind)}" ${data('source', s.id)} cx="${f(s.position[0])}" cy="${f(s.position[1])}" r="0.08"><title>${esc(s.entity_id || 'No entity yet')}</title></circle>`,
       );
     }
     out.push('</g>');

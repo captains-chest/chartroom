@@ -1,13 +1,15 @@
-// The heatmap field, as pure maths shared by the worker, the WebGL2 renderer and the tests.
+// The heatmap field, as pure maths shared by the worker, the WebGL2 renderer and the tests: the
+// grid, confidence, the outside fade, and the sensor nodes (buildMesh merges sensors at the same
+// spot and names the layout's mode).
 //
-// Sensors are points with a value. Between them the field is linear (docs/render-design.md):
+// The linear interpolation here is the Phase 0 design (docs/render-design.md), kept as a tested
+// reference; the field drawn today is field-plan.ts's inverse path distance:
 // - 3+ sensors spread out: a Delaunay triangulation (Bowyer-Watson, written here) and barycentric
 //   interpolation inside each triangle; outside the convex hull, the value of the nearest point
 //   on the nearest hull edge.
 // - 2 sensors, or 3+ nearly on a line: segment mode. Project onto the line through them, lerp
 //   between neighbours, clamp at the ends. That is the same "nearest edge" rule over a chain.
 // - 1 sensor: flat. 0 sensors: nothing.
-// Walls are boundaries: field-plan.ts picks, per cell, the sensors this runs over.
 import { polygonArea, signedArea } from './geometry';
 import type { Point } from './plan/types';
 

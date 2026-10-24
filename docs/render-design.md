@@ -1,7 +1,9 @@
-# Render design (Phase 0 notes)
+# Render design
 
-How Chartroom paints live layers (temperature, humidity, signal) onto the floor plan. Written in
-Phase 0 so that Phase 1's plan and wall model carries what Phases 3 and 4 need.
+How Chartroom paints live layers (temperature, humidity, signal) onto the floor plan. It started
+as Phase 0 notes, written so that Phase 1's plan and wall model carries what Phases 3 and 4 need.
+The "As built" sections record where the build went another way and win where the two differ.
+"How it is built" is the short version of the current design.
 
 ## The look
 
@@ -18,45 +20,88 @@ The reference we work from (not in this repo) is a Wi-Fi survey heatmap over a h
 The plan Page mockup (one flat fill per room) is a simplified stand-in. It neither interpolates
 between sensors nor casts rays; this document replaces it as the rendering target.
 
-Two layer families use two different models.
+## How it is built
 
-## Temperature and humidity: linear interpolation between sensors
+- **Temperature and humidity**: inverse path-distance weighting over the nearest three sensors a
+  cell can reach without crossing a wall or a closed door (see "As built: walls are boundaries").
+- **Signal**: straight rays from each source, losing dB at each wall by material and thickness;
+  the strongest source wins (see "As built in Phase 4").
+- **Outside the outline**: signal shows at 45 % and fades to nothing over 2.5 m (`OUTSIDE_ALPHA`
+  and `FADE_DISTANCE` in `field.ts`). Temperature and humidity show no colour there, only the
+  no-data grey at 35 % of that fade.
+- **SVG stays on top**: walls, rooms, labels and device markers remain SVG for crisp lines, hit
+  testing and accessibility. The canvas under them is only the field, and the underlay image sits
+  under the canvas.
+- **Colour ramp**: 256 RGBA entries (`rampLut`) with a per-layer domain: 16–28 °C, 30–70 %, -90
+  to -30 dBm. Being a lookup table, themes and colour-blind-safe ramps are a data change, and
+  ramp, opacity and theme changes never recompute the field.
 
-The value at a point is a **linear interpolation between the sensor points around it**. Two rooms
-at 25 °C and 30 °C give exactly 27.5 °C halfway between the sensors, changing evenly along the
-line. No blobs, no plateaus around sensors, no inverse-distance weighting.
+The seams, under `frontend/src/`:
 
-Per floor, with `n` sensors that report a fresh numeric value:
+- `heat-layer.ts` (a lazy chunk) picks the sensors for the active layer, asks the worker to plan
+  a new layout, eases values and cross-fades layouts. It draws through a **`FieldRenderer`**
+  (`heat/models.ts`) with two implementations:
+  - `heat/gl-renderer.ts` (WebGL2): a weights pass for temperature and humidity, or `SIGNAL_FS`
+    for signal, writes value, confidence and fade into an RGBA32F target; a colour pass draws it.
+  - `heat/canvas-renderer.ts` (Canvas2D): the worker fills the same grid and the page colours it
+    into an `ImageData`, scaled up with smoothing.
 
-| Sensors                    | Field                                                                                                                                                                                                                                        |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0                          | No layer.                                                                                                                                                                                                                                    |
-| 1                          | Flat: the one value everywhere.                                                                                                                                                                                                              |
-| 2, or all (near-)collinear | **Segment mode**: project the point onto the line through the sensors, lerp between the two neighbouring sensors along it, clamp beyond the ends.                                                                                            |
-| 3 or more, not collinear   | **Triangulated**: Delaunay triangulation of the sensor positions, barycentric interpolation inside each triangle; outside the convex hull, project onto the nearest hull edge and lerp along that edge (at a hull vertex, the vertex value). |
+  The legend and the sensor value labels live in `heat/legend.ts` and `heat/value-labels.ts`.
 
-- **Triangulation**: our own Bowyer-Watson in TypeScript, no libraries, in the worker. Robust
-  orientation tests with an epsilon relative to the plan size; if the hull area is below a
-  threshold (near-collinear set) or triangulation fails, fall back to segment mode. Duplicate
-  positions are merged (mean value).
-- **GPU drawing**: the triangles are drawn as a mesh with the sensor value as a per-vertex
-  attribute, so the rasteriser's linear interpolation _is_ the barycentric interpolation, at no
-  cost per pixel.
-- **Outside the hull**: a **fan of extension geometry** built on the CPU at triangulation time:
-  for each hull edge, a quad extruded outward perpendicular to the edge, with each outer vertex
-  carrying the value of the edge endpoint it came from (so the value only varies along the edge
-  direction: exactly "project to the nearest edge and lerp"); for each hull vertex, a wedge
-  between the neighbouring quads with the constant vertex value. Extruded far enough to cover the
-  plan bounds plus the outside margin. This needs no extra shader pass. (The alternative, a
-  fragment-shader pass that loops over hull edges per pixel, is the fallback if the geometry
-  approach shows artefacts.)
-- **Re-triangulate only when sensors move, appear or disappear.** A value update only rewrites
-  the per-vertex value buffer.
-- **Walls (superseded).** This note first left walls out of temperature and humidity. They are now
-  boundaries for the field; see "As built: walls are boundaries" below, which replaces the
-  triangulated mesh and hull pass described here and in Phase 3.
-- **Confidence / staleness**: a sensor that is stale or unavailable is dropped from the set
-  (which triggers a re-triangulation); the layer fades where the nearest sensor is far away.
+- The worker (`worker.ts`, messages in `worker-protocol.ts`) runs `planField` (`field-plan.ts`)
+  when the layout changes, and `fillField` / `signalField` for the Canvas2D renderer.
+  `heat/field-client.ts` talks to it and runs the same handler in the page when workers are
+  unavailable. Nothing the worker loads touches the DOM; `pnpm size` checks that.
+- `viewer.ts` **`ViewerController`** is what the panel and the card share around the plan view:
+  the layer buttons, the History slider, the hass the plan shows, loading a plan, and releasing
+  the view's layers while the element is off the page.
+- `api.ts` **`ChartroomApi`** is the port to the integration's websocket commands, so the viewer
+  never talks to Home Assistant's connection itself and its tests hand it a fake.
+- The editor (`plan-editor.ts`, a lazy chunk) keeps its pure parts in `editor/`: the tools as
+  pure steps (`tools.ts`), snapping (`snap.ts`), how to find, delete and drag each kind of item
+  (`kinds.ts`) and the autosaver (`autosaver.ts`). The plan schema and its operations live in
+  `plan/`.
+
+```
+plan + hass                  main thread                             worker
+-----------                  -----------                             ------
+sensors, walls, doors,  ->   heat-layer.ts: layout key changed?  ->  planField: barriers,
+door/window states                                                   visibility, path distances,
+                                                                     per-cell weights
+sensor states           ->   eased values (600 ms)
+                             |
+                             v
+                             FieldRenderer
+                             - WebGL2: weights pass or SIGNAL_FS  -> RGBA32F field target
+                                       -> colour pass -> canvas under the SVG plan
+                             - Canvas2D: values to the worker    ->  fillField / signalField
+                                       <- field grid -> ImageData -> canvas
+```
+
+The Phase 0 notes follow. Two layer families use two different models.
+
+## Temperature and humidity: the Phase 0 plan (superseded)
+
+Phase 0 planned a **linear interpolation between the sensor points around a point**, with no
+inverse-distance weighting: a Delaunay triangulation of the sensors (our own Bowyer-Watson),
+barycentric interpolation inside each triangle, the nearest hull edge outside the hull, segment
+mode for two or (near-)collinear sensors and a flat field for one. Phase 3 shipped that on the
+GPU (see "As built in Phase 3").
+
+It was replaced when walls became boundaries. The field is now inverse path-distance weighting
+over the nearest three sensors (see "As built: walls are boundaries"). Two sensors in one open
+room still give exactly 27.5 °C halfway between 25 °C and 30 °C; with three or more sensors it is
+no longer the Delaunay plane.
+
+What is left of the plan:
+
+- `buildMesh` in `field.ts` still merges sensors closer than 1 mm into one node (mean value), and
+  still triangulates to name the layout's mode (`none`, `flat`, `segment`, `mesh`), which the e2e
+  checks read. The interpolation functions beside it (`weightsAt`, `evalField`, `confidenceAt`)
+  are only used by the unit tests.
+- A value update only re-mixes the node values. The layout is planned again only when sensors,
+  walls or door and window states change; a stale or unavailable sensor leaves the set, which
+  plans again.
 
 ## Signal: straight rays from each access point
 
@@ -81,33 +126,6 @@ For each pixel `p` and access point `s` (position, transmit power or reference l
 - Geodesic distance fields (Dijkstra / fast marching around walls) are **not** part of this
   design.
 
-## Pipeline
-
-```
-Phase 1 plan model                 worker / main thread                 GPU (WebGL2)
-------------------                 --------------------                 ------------
-sensors: entity, pos, floor   ->   Bowyer-Watson, hull, extension   ->  VBO: positions (static until
-                                   fan (on add/move/remove only)        sensors move) + value
-sensor states (hass)          ->   eased per-vertex values          ->  VBO: values (per update)
-                                                                        draw mesh -> R32F field target
-walls: a, b, thickness, mat   ->   pack + resolve loss_db           ->  sampler2D uWalls
-access points: pos, tx, PL0   ->   uniforms                         ->  fragment pass: rays x walls,
-                                                                        max over APs -> R32F target
-                                                                    ->  colour pass: ramp texture,
-                                                                        confidence, outside fade,
-                                                                        bilinear upscale -> canvas
-                                                                        under the SVG plan
-```
-
-- **Two passes**: pass 1 writes the scalar field into a float target; pass 2 maps it through
-  the colour ramp, applies confidence and the outside fade (from the plan outline) and draws it.
-  Ramp, opacity and theme changes never recompute the field.
-- **Colour ramp**: a 256x1 texture, `blue -> cyan -> green -> yellow -> red`, with a per-layer
-  domain (for example 16–28 °C, 30–70 %, -90 to -40 dBm). Being a texture, themes and
-  colour-blind-safe ramps are a data change.
-- **SVG stays on top**: walls, rooms, labels and device markers remain SVG for crisp lines, hit
-  testing and accessibility. The canvas is only the field.
-
 ## Live transitions
 
 - Each sensor or access point keeps `from`, `to` and a start time. A `requestAnimationFrame`
@@ -118,42 +136,44 @@ access points: pos, tx, PL0   ->   uniforms                         ->  fragment
 
 ## Performance budget
 
-- **Temperature and humidity** cost almost nothing per pixel: a small mesh rasterised once per
-  animation frame. The cost is triangulation, `O(n log n)` to `O(n^2)` for tens of sensors, and it
-  only runs when sensors move.
-- **Signal** costs roughly `pixels x access points x walls` ray tests per frame. Render pass 1 at
-  **lower resolution** (about 1/4 of the canvas per axis, at most 512 px on the long side) and let
-  bilinear upscaling in pass 2 smooth it; walls stay sharp because they are SVG. Example: 256x256,
-  8 access points, 200 walls is about 105 M simple tests, fine on desktop GPUs and mid-range
-  phones, and it only runs while values change.
+- **Temperature and humidity** cost is in planning (path distances over the grid), which runs in
+  the worker only when the layout changes. Per frame, the weights pass mixes at most three node
+  values per cell.
+- **Signal** costs roughly `cells x sources x walls` ray tests per trace. It is traced on a fixed
+  low-resolution grid (at most 128 cells on the long side; temperature and humidity use 256) and
+  bilinear upscaling in the colour pass smooths it; walls stay sharp because they are SVG.
+  Example: 128 x 128 cells, 8 access points, 200 walls is about 26 M simple tests, fine on desktop
+  GPUs and mid-range phones, and it only runs when the input changes.
 - **Limits**: a soft cap of 512 walls per floor (an editor warning that it may be slow) and
   hard caps of 32 sources and 2048 wall segments, the shader's uniform array and texture row.
   Beyond the hard caps the signal map uses the first ones and leaves out the rest: the editor
-  warns and the legend says how many were left out. Optional culling of walls by bounding box per
-  access point.
-- Measure on old wall tablets in Phase 3 (WebGL2 availability, float render targets, fill rate)
-  before raising caps.
+  warns and the legend says how many were left out. Per-source culling of walls by bounding box
+  is not done yet.
+- The measurements are under "Old-wall-tablet check" below.
 
 ## Canvas2D fallback
 
 When WebGL2 or float render targets are unavailable, the **Web Worker** computes the same fields
-on the same low-resolution grid with the same formulas (barycentric / segment / hull-edge lerp for
-temperature and humidity, rays and wall loss for signal) and posts back a `Float32Array` of value
-and confidence. The main thread maps it through the same ramp into an `ImageData` and draws it
-scaled with smoothing. The TypeScript code is also the reference the shaders are tested against
-(Vitest for the maths, Playwright pixel checks for the shaders).
+on the same grid with the same formulas (`fillField` in `field-plan.ts` mixes the planned weights
+for temperature and humidity; `signalField` in `signal.ts` traces rays with wall loss) and posts
+back a `Float32Array` of value, confidence and fade. The main thread maps it through the same
+ramp into an `ImageData` and draws it scaled with smoothing. The TypeScript code is also the
+reference the shaders are tested against (Vitest for the maths, Playwright checks for the
+shaders).
 
-The worker stub that ships in Phase 0 (`frontend/src/worker.ts`) already has the message protocol.
+The worker is `frontend/src/worker.ts`, with its messages in `worker-protocol.ts`.
 
 ## As built in Phase 3
 
-The temperature and humidity layers follow this note, with these differences:
+The temperature and humidity layers followed this note, with these differences. The first two
+bullets are superseded: "As built: walls are boundaries" replaced the hull pass and the triangle
+pass with one weights pass.
 
 - **Outside the hull: a shader pass, not an extension fan.** The owner asked for the
   nearest-hull-edge projection to run as its own shader pass, so pass 1a is a full-grid fragment
   pass that loops over the hull edges per cell (and, in the same pass, computes confidence and the
   outside fade). Pass 1b then rasterises the Delaunay triangles over it, writing the value channel
-  only. The fan above is not built. With tens of sensors the loop is a few dozen edges per cell on
+  only. The extension fan Phase 0 planned is not built. With tens of sensors the loop is a few dozen edges per cell on
   a grid of at most 256 cells per side, so the cost is small.
 - **Barycentric weights in the fragment shader.** Each triangle vertex carries its triangle's
   three node indices; the fragment computes the weights from the node positions and mixes the
@@ -165,7 +185,8 @@ The temperature and humidity layers follow this note, with these differences:
 - **Field target RGBA32F** (value, confidence, fade) rather than R32F, so pass 2 does no geometry.
   The worker's Canvas2D fallback produces the same three channels.
 - **Confidence**: 1 within 3 m of a sensor, easing to 0.3 at 8 m (smoothstep). Outside the
-  outline the layer drops to 45 % and fades out over 2.5 m.
+  outline the layer dropped to 45 % and faded out over 2.5 m; temperature and humidity now show
+  only the no-data grey there.
 - **Staleness** uses `last_reported` (older than 6 h is stale) when Home Assistant sends it.
   Unavailable, unknown and non-numeric sensors are left out, shown as a dashed marker label, and
   counted in the legend.
@@ -240,8 +261,9 @@ move one source, wait for the new field to be drawn and read back; median (p90),
 | 4x           | 181 ms (202)   | 246 ms (250)   | 47 / 55 fps                  |
 | 6x           | 175 ms (196)   | 241 ms (245)   | 38 / 39 fps                  |
 
-The same check with the 32 sources as temperature sensors (wall-aware field, re-planned on every
-move): 77 / 54 ms at 1x, 159 / 134 ms at 4x, 201 / 181 ms at 6x (WebGL2 / worker, median).
+The same check with the 32 sources as temperature sensors (wall-aware field with doorways,
+planned again on every move): 78 / 81 ms at 1x, 156 / 135 ms at 4x, 206 / 182 ms at 6x (WebGL2 /
+worker, median).
 
 A realistic flat (64 segments, 4 sources) at 6x: 50 ms (62) retrace with either renderer, 38-43 fps
 while panning (the frame cost is the SVG and the colour pass, not the field).
@@ -251,7 +273,7 @@ Reading it:
 - A retrace happens only when a source moves, a door opens or a source goes unavailable, never per
   frame; panning and zooming only redraw the colour pass.
 - The worker is not throttled here, so on a CPU 6x slower than this box expect about
-  `6 x 230 ms ~ 1.4 s` for the worst case in the Canvas2D fallback, and about 0.1 s for a realistic
+  `6 x 245 ms ~ 1.5 s` for the worst case in the Canvas2D fallback, and about 0.1 s for a realistic
   flat. It runs off the main thread, so the panel stays responsive; the old field stays up until
   the new one arrives.
 - **Rust/WebAssembly decision: not needed.** The fallback is within budget for realistic plans and
@@ -324,9 +346,8 @@ changes sharply at a wall instead of smearing across it.
 - **Cost** (planning on this box, 256 x 208 cells, a 16 x 12 grid of rooms with doors, 192
   rooms): 8 sensors 288 ms, 32 sensors 350 ms, 128 sensors 524 ms, 256 sensors 702 ms (the
   visible-set planner it replaced: 61 / 282 / 2219 / 3328 ms on the same plan). Planning runs only
-  when sensors, walls or door states change. The throttled e2e check at the soft caps (32
-  temperature sensors, 512 walls) retraces in 78 / 156 / 206 ms with WebGL2 and 81 / 135 / 182 ms
-  with the worker at 1x / 4x / 6x.
+  when sensors, walls or door states change. The throttled e2e check at the soft caps is under
+  "Old-wall-tablet check".
 
 ## What Phase 1 must provide
 
@@ -343,7 +364,8 @@ changes sharply at a wall instead of smearing across it.
 ## What Phase 4 adds
 
 - Per-source radio parameters from ZHA, Z-Wave JS and Zigbee2MQTT (link quality, RSSI, which
-  coordinator or router), plus mesh links drawn in SVG.
+  coordinator or router), plus mesh links drawn in SVG. The mesh links shipped; the radio
+  parameters did not (see "As built in Phase 4").
 - Calibration: fit `n` and per-material losses to measured RSSI where enough sensors exist.
 - The decision point for moving the worker maths to Rust/WebAssembly, if the TypeScript
-  fallback is too slow on phones.
+  fallback is too slow on phones. Decided: not needed (see "Old-wall-tablet check").

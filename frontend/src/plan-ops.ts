@@ -14,19 +14,19 @@ import {
   sub,
   wallRect,
 } from './geometry';
-import type {
-  Door,
-  Material,
-  Opening,
-  Plan,
-  Point,
-  Room,
-  Source,
-  SourceKind,
-  Wall,
-  Window,
+import {
+  DEFAULT_TX_DBM,
+  type Door,
+  type Material,
+  type Opening,
+  type Plan,
+  type Point,
+  type Room,
+  type Source,
+  type SourceKind,
+  type Wall,
+  type Window,
 } from './plan';
-import { DEFAULT_TX_DBM } from './plan';
 
 export type OpeningKind = 'door' | 'window';
 
@@ -35,6 +35,34 @@ export const DEFAULT_DOOR = { width: 0.8, material: 'wood_door', thickness: 0.04
 export const DEFAULT_WINDOW = { width: 1.2, material: 'glass', thickness: 0.024 } as const;
 /** Walls shorter than this are not created. */
 export const MIN_WALL = 0.05;
+/** Smallest wall thickness, opening width and opening thickness the inspector accepts (m). */
+const MIN_WALL_THICKNESS = 0.01;
+const MIN_OPENING_WIDTH = 0.1;
+const MIN_OPENING_THICKNESS = 0.001;
+/** Off-axis ratio under which a snapped point locks to the anchor's axis (tan 5° ≈ 0.09). */
+const AXIS_LOCK_RATIO = 0.09;
+
+/** `list` with the item `id` replaced by `change(item)`. */
+const updateById = <T extends { id: string }>(
+  list: readonly T[],
+  id: string,
+  change: (item: T) => T,
+): T[] => list.map((x) => (x.id === id ? change(x) : x));
+
+/** `list` without the item `id`. */
+const withoutId = <T extends { id: string }>(list: readonly T[], id: string): T[] =>
+  list.filter((x) => x.id !== id);
+
+/** Doors and windows alike mapped through `change`. */
+const mapOpenings = (plan: Plan, change: <T extends Opening>(o: T) => T): Plan => ({
+  ...plan,
+  doors: plan.doors.map(change),
+  windows: plan.windows.map(change),
+});
+
+/** Doors and windows with the opening `id` replaced by `change(opening)`. */
+const changeOpening = (plan: Plan, id: string, change: <T extends Opening>(o: T) => T): Plan =>
+  mapOpenings(plan, (o) => (o.id === id ? change(o) : o));
 
 /** A fresh id with the given prefix that the plan does not use yet. */
 export function nextId(plan: Plan, prefix: string): string {
@@ -67,7 +95,7 @@ function fitOpenings(plan: Plan): Plan {
     const offset = mm(Math.max(0, Math.min(o.offset, l - width)));
     return width === o.width && offset === o.offset ? o : { ...o, width, offset };
   };
-  return { ...plan, doors: plan.doors.map(fit), windows: plan.windows.map(fit) };
+  return mapOpenings(plan, fit);
 }
 
 function finish(plan: Plan): Plan {
@@ -127,15 +155,16 @@ export function moveWall(plan: Plan, id: string, delta: Point): Plan {
 
 export function updateWall(plan: Plan, id: string, patch: Partial<Omit<Wall, 'id'>>): Plan {
   const clean: Partial<Wall> = { ...patch };
-  if (clean.thickness !== undefined) clean.thickness = mm(Math.max(0.01, clean.thickness));
-  return finish({ ...plan, walls: plan.walls.map((w) => (w.id === id ? { ...w, ...clean } : w)) });
+  if (clean.thickness !== undefined)
+    clean.thickness = mm(Math.max(MIN_WALL_THICKNESS, clean.thickness));
+  return finish({ ...plan, walls: updateById(plan.walls, id, (w) => ({ ...w, ...clean })) });
 }
 
 /** Delete a wall and the doors and windows in it. */
 export function deleteWall(plan: Plan, id: string): Plan {
   return finish({
     ...plan,
-    walls: plan.walls.filter((w) => w.id !== id),
+    walls: withoutId(plan.walls, id),
     doors: plan.doors.filter((d) => d.wall !== id),
     windows: plan.windows.filter((w) => w.wall !== id),
   });
@@ -187,12 +216,10 @@ export function addOpening(
 /** Slide an opening so its centre sits `centre` metres along its wall. */
 export function moveOpening(plan: Plan, id: string, centre: number): Plan {
   const lengths = new Map(plan.walls.map((w) => [w.id, frame(w).length]));
-  const place = <T extends Opening>(o: T): T => {
-    if (o.id !== id) return o;
+  return changeOpening(plan, id, (o) => {
     const l = lengths.get(o.wall) ?? o.width;
     return { ...o, offset: mm(Math.max(0, Math.min(centre - o.width / 2, l - o.width))) };
-  };
-  return { ...plan, doors: plan.doors.map(place), windows: plan.windows.map(place) };
+  });
 }
 
 export function updateOpening(
@@ -200,26 +227,23 @@ export function updateOpening(
   id: string,
   patch: Partial<Omit<Door, 'id' | 'wall'>>,
 ): Plan {
-  const apply = <T extends Opening>(o: T): T => {
-    if (o.id !== id) return o;
-    const next = { ...o, ...patch } as T;
-    if (patch.width !== undefined) {
-      // Keep the centre where it was.
-      next.width = mm(Math.max(0.1, patch.width));
-      next.offset = mm(o.offset + (o.width - next.width) / 2);
-    }
-    if (patch.thickness !== undefined) next.thickness = mm(Math.max(0.001, patch.thickness));
-    return next;
-  };
-  return fitOpenings({ ...plan, doors: plan.doors.map(apply), windows: plan.windows.map(apply) });
+  return fitOpenings(
+    changeOpening(plan, id, (o) => {
+      const next = { ...o, ...patch };
+      if (patch.width !== undefined) {
+        // Keep the centre where it was.
+        next.width = mm(Math.max(MIN_OPENING_WIDTH, patch.width));
+        next.offset = mm(o.offset + (o.width - next.width) / 2);
+      }
+      if (patch.thickness !== undefined)
+        next.thickness = mm(Math.max(MIN_OPENING_THICKNESS, patch.thickness));
+      return next;
+    }),
+  );
 }
 
 export function deleteOpening(plan: Plan, id: string): Plan {
-  return {
-    ...plan,
-    doors: plan.doors.filter((d) => d.id !== id),
-    windows: plan.windows.filter((w) => w.id !== id),
-  };
+  return { ...plan, doors: withoutId(plan.doors, id), windows: withoutId(plan.windows, id) };
 }
 
 export function addRoom(
@@ -240,8 +264,7 @@ export function addRoom(
 export function updateRoom(plan: Plan, id: string, patch: Partial<Omit<Room, 'id'>>): Plan {
   return {
     ...plan,
-    rooms: plan.rooms.map((r) => {
-      if (r.id !== id) return r;
+    rooms: updateById(plan.rooms, id, (r) => {
       const next: Room = { ...r, ...patch };
       if (patch.area_id === null || patch.area_id === '') delete next.area_id;
       return next;
@@ -252,14 +275,15 @@ export function updateRoom(plan: Plan, id: string, patch: Partial<Omit<Room, 'id
 export function moveRoomVertex(plan: Plan, id: string, index: number, to: Point): Plan {
   return {
     ...plan,
-    rooms: plan.rooms.map((r) =>
-      r.id === id ? { ...r, polygon: r.polygon.map((p, i) => (i === index ? mmPoint(to) : p)) } : r,
-    ),
+    rooms: updateById(plan.rooms, id, (r) => ({
+      ...r,
+      polygon: r.polygon.map((p, i) => (i === index ? mmPoint(to) : p)),
+    })),
   };
 }
 
 export function deleteRoom(plan: Plan, id: string): Plan {
-  return { ...plan, rooms: plan.rooms.filter((r) => r.id !== id) };
+  return { ...plan, rooms: withoutId(plan.rooms, id) };
 }
 
 /**
@@ -274,20 +298,23 @@ export function scalePlan(plan: Plan, k: number): Plan {
     offset: mm(o.offset * k),
     width: mm(o.width * k),
   });
-  return withOutline({
-    ...plan,
-    walls: plan.walls.map((w) => ({ ...w, a: s(w.a), b: s(w.b) })),
-    rooms: plan.rooms.map((r) => ({ ...r, polygon: r.polygon.map(s) })),
-    doors: plan.doors.map(op),
-    windows: plan.windows.map(op),
-    sources: plan.sources.map((x) => ({ ...x, position: s(x.position) })),
-    ...(plan.devices
-      ? { devices: plan.devices.map((x) => ({ ...x, position: s(x.position) })) }
-      : {}),
-    underlay: plan.underlay
-      ? { ...plan.underlay, scale: plan.underlay.scale * k, origin: s(plan.underlay.origin) }
-      : plan.underlay,
-  });
+  return withOutline(
+    mapOpenings(
+      {
+        ...plan,
+        walls: plan.walls.map((w) => ({ ...w, a: s(w.a), b: s(w.b) })),
+        rooms: plan.rooms.map((r) => ({ ...r, polygon: r.polygon.map(s) })),
+        sources: plan.sources.map((x) => ({ ...x, position: s(x.position) })),
+        ...(plan.devices
+          ? { devices: plan.devices.map((x) => ({ ...x, position: s(x.position) })) }
+          : {}),
+        underlay: plan.underlay
+          ? { ...plan.underlay, scale: plan.underlay.scale * k, origin: s(plan.underlay.origin) }
+          : plan.underlay,
+      },
+      op,
+    ),
+  );
 }
 
 /** Scale factor that makes the distance between two drawn points equal `metres`. */
@@ -368,9 +395,8 @@ export function snap(p: Point, o: SnapOptions): { point: Point; target: boolean 
   if (o.anchor) {
     const dx = Math.abs(q[0] - o.anchor[0]);
     const dy = Math.abs(q[1] - o.anchor[1]);
-    // Within ~5 degrees of an axis: make it exact.
-    if (dy < dx * 0.09) q = [q[0], o.anchor[1]];
-    else if (dx < dy * 0.09) q = [o.anchor[0], q[1]];
+    if (dy < dx * AXIS_LOCK_RATIO) q = [q[0], o.anchor[1]];
+    else if (dx < dy * AXIS_LOCK_RATIO) q = [o.anchor[0], q[1]];
   }
   return { point: q, target: false };
 }
@@ -379,22 +405,23 @@ export function snap(p: Point, o: SnapOptions): { point: Point; target: boolean 
 export function moveRoom(plan: Plan, id: string, delta: Point): Plan {
   return {
     ...plan,
-    rooms: plan.rooms.map((r) =>
-      r.id === id ? { ...r, polygon: r.polygon.map((p) => mmPoint(add(p, delta))) } : r,
-    ),
+    rooms: updateById(plan.rooms, id, (r) => ({
+      ...r,
+      polygon: r.polygon.map((p) => mmPoint(add(p, delta))),
+    })),
   };
 }
 
 /** Add or override a material in the plan's own table. */
 export function setMaterial(plan: Plan, material: Material): Plan {
-  const rest = (plan.materials ?? []).filter((m) => m.id !== material.id);
   return {
     ...plan,
-    materials: [...rest, { ...material, db_per_cm: Math.max(0, material.db_per_cm) }],
+    materials: [
+      ...withoutId(plan.materials ?? [], material.id),
+      { ...material, db_per_cm: Math.max(0, material.db_per_cm) },
+    ],
   };
 }
-
-export { DEFAULT_TX_DBM };
 
 /** Place a source; access points and radios get a default reference level. */
 export function addSource(
@@ -414,7 +441,7 @@ export function addSource(
 export function moveSource(plan: Plan, id: string, to: Point): Plan {
   return {
     ...plan,
-    sources: plan.sources.map((x) => (x.id === id ? { ...x, position: mmPoint(to) } : x)),
+    sources: updateById(plan.sources, id, (x) => ({ ...x, position: mmPoint(to) })),
   };
 }
 
@@ -422,8 +449,7 @@ export function moveSource(plan: Plan, id: string, to: Point): Plan {
 export function updateSource(plan: Plan, id: string, patch: Partial<Omit<Source, 'id'>>): Plan {
   return {
     ...plan,
-    sources: plan.sources.map((x) => {
-      if (x.id !== id) return x;
+    sources: updateById(plan.sources, id, (x) => {
       const next: Source = { ...x, ...patch };
       if (next.kind === 'sensor') delete next.tx_dbm;
       else if (next.tx_dbm === undefined) next.tx_dbm = DEFAULT_TX_DBM[next.kind];
@@ -434,7 +460,7 @@ export function updateSource(plan: Plan, id: string, patch: Partial<Omit<Source,
 }
 
 export function deleteSource(plan: Plan, id: string): Plan {
-  return { ...plan, sources: plan.sources.filter((x) => x.id !== id) };
+  return { ...plan, sources: withoutId(plan.sources, id) };
 }
 
 // ---- devices ----
@@ -458,17 +484,14 @@ export function addDevice(
 export function moveDevice(plan: Plan, id: string, to: Point): Plan {
   return {
     ...plan,
-    devices: (plan.devices ?? []).map((d) => (d.id === id ? { ...d, position: mmPoint(to) } : d)),
+    devices: updateById(plan.devices ?? [], id, (d) => ({ ...d, position: mmPoint(to) })),
   };
 }
 
 export function updateDevice(plan: Plan, id: string, entity_id: string): Plan {
-  return {
-    ...plan,
-    devices: (plan.devices ?? []).map((d) => (d.id === id ? { ...d, entity_id } : d)),
-  };
+  return { ...plan, devices: updateById(plan.devices ?? [], id, (d) => ({ ...d, entity_id })) };
 }
 
 export function deleteDevice(plan: Plan, id: string): Plan {
-  return { ...plan, devices: (plan.devices ?? []).filter((d) => d.id !== id) };
+  return { ...plan, devices: withoutId(plan.devices ?? [], id) };
 }

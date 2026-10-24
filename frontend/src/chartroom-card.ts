@@ -1,11 +1,9 @@
 import { DeviceControls, deviceControlStyles } from './device-controls';
 import type { Hass, PlanSummary } from './ha-types';
-import { isHeatLayer, layerCounts, type HeatLayerId } from './heat';
-import { LayerToggles } from './layer-toggles';
-import { normalizePlan } from './plan';
+import { isHeatLayer, type HeatLayerId } from './heat';
 import { PlanView, planViewStyles } from './plan-view';
-import type { TimeBar } from './time-bar';
-import { UpdateNotice, updateNoticeStyles } from './version';
+import { updateNoticeStyles } from './version';
+import { ViewerController } from './viewer';
 
 export interface ChartroomCardConfig {
   type: string;
@@ -29,25 +27,16 @@ export interface ChartroomCardConfig {
 /** The Chartroom dashboard card: one floor's plan with live device markers. */
 export class ChartroomCard extends HTMLElement {
   #config?: ChartroomCardConfig;
-  #hass?: Hass;
   #view = new PlanView(true);
-  #controls = new DeviceControls(this.#view, this, () => this.#shown());
+  #viewer = new ViewerController(this.#view, {
+    el: this,
+    place: (bar) => this.#stage.after(bar),
+  });
+  #controls = new DeviceControls(this.#view, this, () => this.#viewer.shown());
   #title: HTMLElement;
   #stage: HTMLElement;
   #message: HTMLElement;
   #loaded = '';
-  #load = 0;
-  #layers = new LayerToggles(
-    (layer) => {
-      this.#layer = layer;
-      this.#renderLayers();
-    },
-    (on) => this.#setMesh(on),
-  );
-  #layer: HeatLayerId | null = null;
-  #time: TimeBar | null = null;
-  #timeButton: HTMLButtonElement;
-  #update = new UpdateNotice();
   #unsubscribe: Promise<(() => Promise<void> | void) | null> | null = null;
 
   constructor() {
@@ -83,20 +72,11 @@ export class ChartroomCard extends HTMLElement {
     this.#message.textContent = 'Loading…';
     this.#stage = document.createElement('div');
     this.#stage.className = 'stage';
-    this.#layers.el.classList.add('layers');
-    this.#layers.el.hidden = true;
-    this.#view.onPlan = () => this.#renderLayers();
-    this.#timeButton = document.createElement('button');
-    this.#timeButton.className = 'history';
-    this.#timeButton.textContent = 'History';
-    this.#timeButton.title = 'Show the plan at an earlier time';
-    this.#timeButton.setAttribute('aria-pressed', 'false');
-    this.#timeButton.addEventListener('click', () => void this.#toggleTime());
-    this.#layers.el.append(this.#timeButton);
+    this.#viewer.layers.el.hidden = true;
     this.#stage.append(
       this.#view.el,
-      this.#layers.el,
-      this.#update.el,
+      this.#viewer.layers.el,
+      this.#viewer.notice.el,
       this.#message,
       this.#controls.dialog,
     );
@@ -113,47 +93,39 @@ export class ChartroomCard extends HTMLElement {
     else this.style.removeProperty('--chartroom-height');
     if (config.layer !== undefined && config.layer !== 'none' && !isHeatLayer(config.layer))
       throw new Error('layer must be temperature, humidity, signal or none');
-    this.#layer = isHeatLayer(config.layer) ? config.layer : null;
-    this.#setMesh(config.mesh === true);
-    this.#layers.el.hidden = config.layer_toggles !== true && config.history !== true;
-    this.#layers.el.classList.toggle('no-toggles', config.layer_toggles !== true);
-    this.#timeButton.hidden = config.history !== true;
-    if (config.history !== true) this.#closeTime();
-    this.#renderLayers();
+    const viewer = this.#viewer;
+    if (config.history !== true) viewer.closeTime();
+    viewer.setLayer(isHeatLayer(config.layer) ? config.layer : null);
+    viewer.setMesh(config.mesh === true);
+    viewer.layers.el.hidden = config.layer_toggles !== true && config.history !== true;
+    viewer.layers.el.classList.toggle('no-toggles', config.layer_toggles !== true);
+    viewer.timeButton.hidden = config.history !== true;
     this.#loaded = '';
-    if (this.#hass) void this.#loadPlan();
+    if (viewer.hass) void this.#loadPlan();
   }
 
   set hass(hass: Hass) {
-    this.#hass = hass;
-    this.#view.setHass(this.#shown());
-    this.#renderLayers();
+    this.#viewer.hass = hass;
     if (!this.#loaded && hass.connection) void this.#loadPlan();
-    if (this.isConnected) {
-      this.#update.watch(hass.connection);
-      this.#subscribe();
-    }
+    if (this.isConnected) this.#subscribe();
   }
 
   // Lovelace moves cards by removing and re-adding them: release on removal, rebuild on return.
   connectedCallback(): void {
-    if (this.#hass) this.#subscribe();
-    this.#update.watch(this.#hass?.connection);
-    void this.#view.resume();
+    if (this.#viewer.hass) this.#subscribe();
+    this.#viewer.connect();
   }
 
   disconnectedCallback(): void {
     const unsub = this.#unsubscribe;
     this.#unsubscribe = null;
     void unsub?.then((u) => u?.());
-    this.#view.dispose();
-    this.#time?.pause();
-    this.#update.dispose();
+    this.#viewer.disconnect();
   }
 
   /** Reload when a plan is saved or deleted elsewhere (the editor in the panel), so edits show live. */
   #subscribe(): void {
-    const c = this.#hass?.connection;
+    const c = this.#viewer.hass?.connection;
     if (this.#unsubscribe || !c?.subscribeMessage) return;
     this.#unsubscribe = c
       .subscribeMessage<{ plan_id: string; deleted: boolean }>(
@@ -170,11 +142,10 @@ export class ChartroomCard extends HTMLElement {
   }
 
   async #loadPlan(live = false): Promise<void> {
-    const c = this.#hass?.connection;
+    const c = this.#viewer.hass?.connection;
     if (!c || !this.#config) return;
-    const want = `${this.#config.plan_id ?? ''}|${this.#config.floor_id ?? ''}`;
-    this.#loaded = want;
-    const load = ++this.#load;
+    this.#loaded = `${this.#config.plan_id ?? ''}|${this.#config.floor_id ?? ''}`;
+    const current = this.#viewer.begin();
     try {
       const { plans } = await c.sendMessagePromise<{ plans: PlanSummary[] }>({
         type: 'chartroom/plans/list',
@@ -195,78 +166,19 @@ export class ChartroomCard extends HTMLElement {
         );
         return;
       }
-      const raw = await c.sendMessagePromise<unknown>({
-        type: 'chartroom/plans/get',
-        plan_id: summary.id,
-      });
-      if (load !== this.#load) return;
-      this.#view.setPlan(normalizePlan(raw));
+      if (!(await this.#viewer.load(summary.id, current))) return;
       if (!live || this.dataset['plan'] !== summary.id) this.#view.fit();
       this.dataset['plan'] = summary.id;
       this.#show(null);
     } catch (err) {
-      if (load === this.#load)
-        this.#show(`Could not load the plan: ${(err as Error).message ?? err}`);
+      if (current()) this.#show(`Could not load the plan: ${(err as Error).message ?? err}`);
     }
-  }
-
-  async #toggleTime(): Promise<void> {
-    if (this.#time) return this.#closeTime();
-    const { TimeBar, timeBarStyles } = await import('./time-bar');
-    if (this.#time) return;
-    const root = this.shadowRoot!;
-    if (!root.querySelector('style.time')) {
-      const style = document.createElement('style');
-      style.className = 'time';
-      style.textContent = timeBarStyles;
-      root.append(style);
-    }
-    const time = new TimeBar({
-      hass: () => this.#hass,
-      plan: () => this.#view.plan,
-      changed: () => this.#view.setHass(this.#shown()),
-      live: () => this.#closeTime(),
-    });
-    this.#time = time;
-    this.#stage.after(time.el);
-    this.#markTime();
-    await time.load();
-  }
-
-  /** What the plan shows: live, or the recorded states at the slider's time. */
-  #shown(): Hass | undefined {
-    return this.#time ? this.#time.view(this.#hass) : this.#hass;
-  }
-
-  #closeTime(): void {
-    if (!this.#time) return;
-    this.#time.close();
-    this.#time = null;
-    if (this.#hass) this.#view.setHass(this.#hass);
-    this.#markTime();
-  }
-
-  #markTime(): void {
-    this.#timeButton.setAttribute('aria-pressed', String(!!this.#time));
-    this.toggleAttribute('history', !!this.#time);
   }
 
   #show(message: string | null): void {
     this.#message.hidden = message === null;
     this.#message.textContent = message ?? '';
     this.#view.el.classList.toggle('hidden', message !== null);
-  }
-
-  #setMesh(on: boolean): void {
-    this.#layers.setMesh(on);
-    if (on !== this.#view.meshOn) void this.#view.setMesh(on);
-  }
-
-  #renderLayers(): void {
-    const counts = layerCounts(this.#view.plan, this.#shown());
-    this.#layers.update(this.#layer, counts);
-    const show = this.#layer && counts[this.#layer] > 0 ? this.#layer : null;
-    if (show !== this.#view.layer) void this.#view.setLayer(show);
   }
 
   /** The view, for tests. */

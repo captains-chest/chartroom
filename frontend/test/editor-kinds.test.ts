@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { findItem, type Kind, KINDS, kindOps, titleOf } from '../src/editor/kinds';
-import { emptyPlan, type Plan } from '../src/plan';
-import { addDevice, addOpening, addRoom, addSource, addWall } from '../src/plan-ops';
+import { emptyPlan } from '../src/plan/functions';
+import type { Plan } from '../src/plan/models';
+import { addDevice, addOpening, addRoom, addSource, addWall } from '../src/plan/ops';
 
 /** One of each kind: a wall with a door and a window, a room, a source and a device. */
 function plan(): Plan {

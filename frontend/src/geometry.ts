@@ -1,6 +1,7 @@
 // 2D geometry for plans, in metres (x right, y down). Pure functions, shared by the SVG renderer,
 // the editor and the tests. Only type imports, so Node can load it with type stripping.
-import type { Door, Opening, Plan, Point, Wall } from './plan';
+import type { Door, Opening, Plan, Wall } from './plan/models';
+import type { Point } from './plan/types';
 
 export const add = (a: Point, b: Point): Point => [a[0] + b[0], a[1] + b[1]];
 export const sub = (a: Point, b: Point): Point => [a[0] - b[0], a[1] - b[1]];

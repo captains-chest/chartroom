@@ -1,7 +1,8 @@
 // The editor's tools as pure steps: (state, pointer input) → the next state, plus the plan change
 // to commit. plan-editor.ts turns DOM events into inputs, commits through History and renders.
 import { add, dist, roundPointToMm, sub } from '../geometry';
-import type { Plan, Point, Wall } from '../plan';
+import type { Plan, Wall } from '../plan/models';
+import type { Point } from '../plan/types';
 import {
   addDevice,
   addOpening,
@@ -12,7 +13,7 @@ import {
   snap,
   snapTargets,
   wallAt,
-} from '../plan-ops';
+} from '../plan/ops';
 import { findItem, GRID, type Item, type Kind, kindOps, type Selection } from './kinds';
 
 export type Tool =

@@ -30,19 +30,9 @@ import {
 } from './editor/tools';
 import { History } from './history';
 import { areaChoices, entityArea, sourceChoices } from './model';
-import {
-  type Device,
-  type Door,
-  limitWarnings,
-  materialsOf,
-  type Plan,
-  type Point,
-  type Room,
-  type Source,
-  type SourceKind,
-  type Wall,
-  type Window,
-} from './plan';
+import { limitWarnings, materialsOf } from './plan/functions';
+import type { Device, Door, Plan, Room, Source, Wall } from './plan/models';
+import type { Point, SourceKind, Window } from './plan/types';
 import {
   addDevice,
   addSource,
@@ -56,7 +46,7 @@ import {
   updateRoom,
   updateSource,
   updateWall,
-} from './plan-ops';
+} from './plan/ops';
 import type { PlanView } from './plan-view';
 import { signalLimitWarnings } from './signal';
 import { count } from './text';

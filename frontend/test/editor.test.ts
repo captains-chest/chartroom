@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vite-plus/test';
 import { exteriorLoop, outlineFromWalls, polygonArea, solidSpans } from '../src/geometry';
 import { History } from '../src/history';
-import { emptyPlan, normalizePlan, type Plan, validatePlan } from '../src/plan';
+import { emptyPlan, normalizePlan, validatePlan } from '../src/plan/functions';
+import type { Plan } from '../src/plan/models';
 import {
   addOpening,
   addRoom,
@@ -24,7 +25,7 @@ import {
   updateRoom,
   updateWall,
   wallAt,
-} from '../src/plan-ops';
+} from '../src/plan/ops';
 
 const fixture = JSON.parse(
   readFileSync(new URL('./fixtures/example-plan.json', import.meta.url), 'utf8'),

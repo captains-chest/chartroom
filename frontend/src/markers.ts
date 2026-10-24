@@ -2,7 +2,7 @@
 // classes for the state (active, unavailable…) that the styles below colour.
 import type { Hass } from './ha-types';
 import { deviceLook, type Glyph } from './devices';
-import type { Device } from './plan';
+import type { Device } from './plan/models';
 import { s } from './ui';
 
 /** Our own line glyphs on a 24-unit grid (no icon library). */

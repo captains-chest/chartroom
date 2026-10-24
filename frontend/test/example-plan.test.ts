@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vite-plus/test';
-import { type Plan, type Point, PLAN_SCHEMA_VERSION, pointAlong, validatePlan } from '../src/plan';
+import { PLAN_SCHEMA_VERSION } from '../src/plan/constants';
+import { pointAlong, validatePlan } from '../src/plan/functions';
+import type { Plan } from '../src/plan/models';
+import type { Point } from '../src/plan/types';
 import { polygonArea } from '../src/geometry';
 import { planToSvg } from '../src/plan-svg';
 

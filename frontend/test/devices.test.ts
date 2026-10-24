@@ -2,15 +2,10 @@ import { describe, expect, it } from 'vite-plus/test';
 import { pointInPolygon } from '../src/geometry';
 import type { EntityState, Hass } from '../src/ha-types';
 import { autoPlace, deviceChoices, deviceLook, spotsInRoom, tapAction } from '../src/devices';
-import {
-  emptyPlan,
-  LIMITS,
-  limitWarnings,
-  normalizePlan,
-  type Plan,
-  validatePlan,
-} from '../src/plan';
-import { addDevice, deleteDevice, moveDevice, scalePlan, updateDevice } from '../src/plan-ops';
+import { LIMITS } from '../src/plan/constants';
+import { emptyPlan, limitWarnings, normalizePlan, validatePlan } from '../src/plan/functions';
+import type { Plan } from '../src/plan/models';
+import { addDevice, deleteDevice, moveDevice, scalePlan, updateDevice } from '../src/plan/ops';
 
 const st = (
   entity_id: string,

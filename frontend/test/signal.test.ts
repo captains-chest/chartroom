@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vite-plus/test';
 import { fieldGrid } from '../src/field';
 import type { Hass } from '../src/ha-types';
 import { layerCounts, layerData, layerDomain } from '../src/heat';
-import { emptyPlan, type Plan, type Point } from '../src/plan';
+import { emptyPlan } from '../src/plan/functions';
+import type { Plan } from '../src/plan/models';
+import type { Point } from '../src/plan/types';
 import {
   MAX_SIGNAL_SEGMENTS,
   MAX_SIGNAL_SOURCES,

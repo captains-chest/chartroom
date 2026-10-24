@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { fieldGrid } from '../src/field';
-import type { Point } from '../src/plan';
+import type { Point } from '../src/plan/types';
 import { CanvasRenderer } from '../src/heat/canvas-renderer';
 import { FieldClient } from '../src/heat/field-client';
 import type { Layout } from '../src/heat/models';

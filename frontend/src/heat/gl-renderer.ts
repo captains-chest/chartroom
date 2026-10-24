@@ -10,7 +10,7 @@
 // fallback runs them, and the e2e agreement tests (e2e/heat-debug.ts) check the two match.
 import { FADE_DISTANCE, OUTSIDE_ALPHA, nodeValues, type FieldGrid, type FieldMesh } from '../field';
 import type { FieldPlan } from '../field-plan';
-import type { Point } from '../plan';
+import type { Point } from '../plan/types';
 import {
   MAX_SIGNAL_SEGMENTS,
   MAX_SIGNAL_SOURCES,

@@ -24,7 +24,7 @@ import {
   type LayerData,
 } from './heat';
 import type { Hass } from './ha-types';
-import type { Plan } from './plan';
+import type { Plan } from './plan/models';
 import { barrierSegments, SIGNAL_CELLS, signalInput, signalKey } from './signal';
 import { h } from './ui';
 import type { View } from './viewport';

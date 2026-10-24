@@ -1,7 +1,7 @@
 // Pan and zoom as an SVG viewBox in metres. The viewBox always has the element's aspect ratio,
 // so screen and plan coordinates map linearly.
 import type { Bounds } from './geometry';
-import type { Point } from './plan';
+import type { Point } from './plan/types';
 
 export interface View {
   x: number;

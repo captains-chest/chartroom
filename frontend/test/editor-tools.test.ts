@@ -16,8 +16,10 @@ import {
   up,
   withTool,
 } from '../src/editor/tools';
-import { emptyPlan, type Plan, type Point } from '../src/plan';
-import { addDevice, addRoom, addSource, addWall } from '../src/plan-ops';
+import { emptyPlan } from '../src/plan/functions';
+import type { Plan } from '../src/plan/models';
+import type { Point } from '../src/plan/types';
+import { addDevice, addRoom, addSource, addWall } from '../src/plan/ops';
 
 /** Snap radius used throughout, in metres. */
 const RADIUS = 0.1;

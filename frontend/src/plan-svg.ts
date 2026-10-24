@@ -3,7 +3,8 @@
 // well as in the panel. Every element carries `data-kind` / `data-id` for hit testing. Only type
 // imports (plus geometry), so Node can load this file with type stripping.
 import { doorGeometry, frame, pointInPolygon, wallPieces, wallRect } from './geometry.ts';
-import type { Opening, Plan, Point, Room } from './plan';
+import type { Opening, Plan, Room } from './plan/models';
+import type { Point } from './plan/types';
 
 export interface PlanSvgOptions {
   /** Pixels per metre for the standalone SVG's width and height. */

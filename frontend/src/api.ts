@@ -2,7 +2,8 @@
 // Assistant's connection itself and its tests can hand it a fake.
 import type { HassConnection, PlanSummary } from './ha-types';
 import type { Topology } from './mesh-layer';
-import { normalizePlan, type Plan } from './plan';
+import { normalizePlan } from './plan/functions';
+import type { Plan } from './plan/models';
 
 /** What `chartroom/plans/subscribe` sends whenever a plan is saved or deleted. */
 export interface PlanEvent {

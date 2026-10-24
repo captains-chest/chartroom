@@ -15,7 +15,7 @@ import {
 } from '../src/field';
 import { signedArea } from '../src/geometry';
 import { NO_DATA, fillField, planField } from '../src/field-plan';
-import type { Point } from '../src/plan';
+import type { Point } from '../src/plan/types';
 
 /** A deterministic pseudo-random generator for the property tests. */
 function rng(seed: number): () => number {

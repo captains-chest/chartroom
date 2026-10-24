@@ -22,7 +22,7 @@ import {
   type FieldGrid,
   type FieldMesh,
 } from './field';
-import type { Point } from './plan';
+import type { Point } from './plan/types';
 
 /** Confidence marking a cell with no data (drawn grey, not coloured). */
 export const NO_DATA = -1;

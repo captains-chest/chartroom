@@ -2,7 +2,7 @@
 // (the image view needs the user's token, which an <image href> cannot send).
 import { planBounds } from './geometry';
 import type { Hass } from './ha-types';
-import type { Plan, Underlay } from './plan';
+import type { Plan, Underlay } from './plan/models';
 
 /** Longest side kept for raster images. */
 export const MAX_SIDE = 2048;

@@ -265,7 +265,7 @@ Websocket commands: `chartroom/info` (returns `{version}`, used for the update p
 [![Example plan: two bedrooms, kitchen-living, bath and hall, about 62 m²](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/example-plan.svg)](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/example-plan.svg)
 
 [`frontend/test/fixtures/example-plan.json`](https://github.com/captains-chest/chartroom/blob/main/frontend/test/fixtures/example-plan.json) is a real
-one-floor flat of about 62 m², traced by hand into the plan model (`frontend/src/plan.ts`): walls in
+one-floor flat of about 62 m², traced by hand into the plan model (`frontend/src/plan/models.ts`): walls in
 metres with material and thickness, rooms, doors with their swing, windows, and sample
 temperature/humidity sensors. Only the geometry and generic room types were kept; the source
 drawing is not in the repository. Tests check each room against the area stated on the drawing.

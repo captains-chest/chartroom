@@ -9,7 +9,8 @@ import {
   planField,
   visibility,
 } from '../src/field-plan';
-import type { Plan, Point } from '../src/plan';
+import type { Plan } from '../src/plan/models';
+import type { Point } from '../src/plan/types';
 import { barrierSegments } from '../src/signal';
 
 /** A 10 x 4 m box split at x = 5 by a wall (optionally with a door gap from y = 1.5 to 2.5). */

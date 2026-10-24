@@ -2,7 +2,7 @@
 // Loaded with the heat layer (heat-layer.ts re-exports them for plan-view.ts).
 import { LAYERS, type LayerData } from '../heat';
 import { AREA_SIZE, declutter, NAME_SIZE } from '../labels';
-import type { Point } from '../plan';
+import type { Point } from '../plan/types';
 import { s } from '../ui';
 
 /** Value labels next to the sensors of the active layer, at a constant size on screen. */

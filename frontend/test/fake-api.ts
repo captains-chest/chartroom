@@ -2,7 +2,7 @@
 import type { ChartroomApi, PlanEvent } from '../src/api';
 import type { PlanSummary } from '../src/ha-types';
 import type { Topology } from '../src/mesh-layer';
-import type { Plan } from '../src/plan';
+import type { Plan } from '../src/plan/models';
 
 export class FakeApi implements ChartroomApi {
   readonly plans = new Map<string, Plan>();

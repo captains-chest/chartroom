@@ -5,7 +5,7 @@ import { wsApi, type ChartroomApi } from './api';
 import type { Hass, HassConnection } from './ha-types';
 import { layerCounts, type HeatLayerId } from './heat';
 import { LayerToggles } from './layer-toggles';
-import type { Plan } from './plan';
+import type { Plan } from './plan/models';
 import type { PlanView } from './plan-view';
 import type { TimeBar } from './time-bar';
 import { button, h } from './ui';

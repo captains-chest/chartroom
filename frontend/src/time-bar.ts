@@ -3,7 +3,8 @@
 // shows the plan as it was at the chosen time by handing the view a `hass` whose states are the
 // recorded ones. Heatmaps, signal (a source that was unavailable) and markers follow from that.
 import type { EntityState, Hass, HassConnection } from './ha-types';
-import { planEntities, type Plan } from './plan';
+import { planEntities } from './plan/functions';
+import type { Plan } from './plan/models';
 import { button, h } from './ui';
 
 /** Per entity: times (ms, ascending) and the state from each time on. */

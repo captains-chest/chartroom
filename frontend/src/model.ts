@@ -1,5 +1,5 @@
 import type { AreaEntry, Hass, PlanSummary } from './ha-types';
-import type { SourceKind } from './plan';
+import type { SourceKind } from './plan/types';
 
 export interface FloorGroup {
   id: string | null;

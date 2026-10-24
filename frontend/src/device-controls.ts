@@ -2,7 +2,7 @@
 // right-click or the context-menu key open Home Assistant's more-info dialog.
 import { tapAction } from './devices';
 import type { Hass } from './ha-types';
-import type { Point } from './plan';
+import type { Point } from './plan/types';
 import type { PlanView, PointerDelegate } from './plan-view';
 import { button, h } from './ui';
 

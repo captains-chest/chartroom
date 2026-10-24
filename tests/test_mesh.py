@@ -27,7 +27,7 @@ def _links(links: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]
 
 def test_parse_zha() -> None:
     nodes, links = mesh.parse_zha(_load("zha_devices.json"))
-    by_id = {n["id"]: n for n in nodes}
+    by_id = {n.id: n.as_wire() for n in nodes}
     assert set(by_id) == {
         "zha:00:12:4b:00:00:00:00:01",
         "zha:00:15:8d:00:00:00:00:02",
@@ -57,11 +57,12 @@ def test_parse_zha() -> None:
 
 def test_parse_zwave() -> None:
     nodes, links = mesh.parse_zwave(_load("zwave_nodes.json"))
-    by_id = {n["id"]: n for n in nodes}
+    by_id = {n.id: n for n in nodes}
     home = 3735928559
-    assert by_id[f"zwave_js:{home}-1"]["role"] == "coordinator"
-    assert by_id[f"zwave_js:{home}-2"]["role"] == "router"
-    assert by_id[f"zwave_js:{home}-4"]["name"] == "Node 4"
+    assert by_id[f"zwave_js:{home}-1"].role == "coordinator"
+    assert by_id[f"zwave_js:{home}-2"].role == "router"
+    assert by_id[f"zwave_js:{home}-4"].name == "Node 4"
+    assert by_id[f"zwave_js:{home}-4"].identifiers == (("zwave_js", f"{home}-4"),)
     got = _links(links)
     ctl, dimmer, attic, n4 = (f"zwave_js:{home}-{i}" for i in (1, 2, 3, 4))
     assert set(got) == {(ctl, dimmer), (dimmer, attic), (ctl, n4)}
@@ -74,7 +75,7 @@ def test_parse_zwave() -> None:
 
 def test_parse_z2m() -> None:
     nodes, links = mesh.parse_z2m(_load("z2m_networkmap.json"))
-    assert {n["id"]: n["role"] for n in nodes} == {
+    assert {n.id: n.role for n in nodes} == {
         "z2m:0x00124b0000000001": "coordinator",
         "z2m:0x00158d0000000002": "router",
         "z2m:0x00158d0000000003": "end_device",
@@ -86,10 +87,12 @@ def test_parse_z2m() -> None:
     }
     assert got[("z2m:0x00124b0000000001", "z2m:0x00158d0000000002")]["lqi"] == 150
     assert got[("z2m:0x00158d0000000002", "z2m:0x00158d0000000003")]["lqi"] == 70
+    assert nodes[0].identifiers == (("mqtt", "zigbee2mqtt_0x00124b0000000001"),)
 
 
 def test_parsers_tolerate_junk() -> None:
-    assert mesh.parse_zha([{}, {"ieee": "x", "neighbors": [{}]}, "nope"]) == (
+    nodes, links = mesh.parse_zha([{}, {"ieee": "x", "neighbors": [{}]}, "nope"])
+    assert ([n.as_wire() for n in nodes], links) == (
         [
             {
                 "id": "zha:x",

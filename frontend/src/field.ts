@@ -1,24 +1,20 @@
-// The heatmap field, as pure maths shared by the worker, the WebGL2 renderer and the tests: the
-// grid, confidence, the outside fade, and the sensor nodes (buildMesh merges sensors at the same
-// spot and names the layout's mode).
+// The heatmap field's shared pieces, pure maths used by the worker, the renderers and field-plan.ts:
+// the sensor nodes, confidence, the outside fade and the grid.
 //
-// The linear interpolation here is the Phase 0 design (docs/render-design.md), kept as a tested
-// reference; the field drawn today is field-plan.ts's inverse path distance:
-// - 3+ sensors spread out: a Delaunay triangulation (Bowyer-Watson, written here) and barycentric
-//   interpolation inside each triangle; outside the convex hull, the value of the nearest point
-//   on the nearest hull edge.
-// - 2 sensors, or 3+ nearly on a line: segment mode. Project onto the line through them, lerp
-//   between neighbours, clamp at the ends. That is the same "nearest edge" rule over a chain.
-// - 1 sensor: flat. 0 sensors: nothing.
+// buildMesh turns sensors into nodes. Sensors at one spot merge into one node (their mean value).
+// 3+ sensors spread out are a mesh, confirmed by a Delaunay triangulation (Bowyer-Watson, written
+// here); 2, or 3+ nearly on a line, are projected onto that line and chained along it (segment);
+// 1 is flat, 0 is nothing. The field itself is field-plan.ts's inverse path distance over these
+// nodes (docs/render-design.md).
 import { polygonArea, signedArea } from './geometry';
 import type { Point } from './plan/types';
 
 export type FieldMode = 'none' | 'flat' | 'segment' | 'mesh';
 
 /** Sensors closer than this (metres) are one node with their mean value. */
-export const MERGE_DISTANCE = 0.001;
+const MERGE_DISTANCE = 0.001;
 /** Hull area below this times the squared spread counts as a line (segment mode). */
-export const COLLINEAR_RATIO = 0.02;
+const COLLINEAR_RATIO = 0.02;
 /** Confidence falls from 1 to `CONF_MIN` between these distances (m) from the nearest sensor. */
 export const CONF_NEAR = 3;
 export const CONF_FAR = 8;
@@ -27,22 +23,15 @@ export const CONF_MIN = 0.3;
 export const OUTSIDE_ALPHA = 0.45;
 export const FADE_DISTANCE = 2.5;
 /** Grid cells along the longer side of the plan. */
-export const GRID_CELLS = 256;
+const GRID_CELLS = 256;
 
-/** The triangulated (or degenerate) sensor layout. Indices refer to `nodes`. */
+/** The sensor nodes of a layout and how they lie: none, one, along a line, or spread out. */
 export interface FieldMesh {
   mode: FieldMode;
   /** Node positions; in segment mode projected onto the line. */
   nodes: Point[];
   /** For each node, the indices of the input sensors it averages. */
   members: number[][];
-  /** Triangles, three node indices each, counter-clockwise (mesh mode). */
-  tris: number[];
-  /**
-   * Edges the outside rule projects onto, two node indices each: the hull (mesh), the chain
-   * (segment) or one degenerate edge (flat).
-   */
-  edges: number[];
 }
 
 const orient = (a: Point, b: Point, c: Point): number =>
@@ -154,22 +143,7 @@ function bowyerWatson(pts: readonly Point[], big: number): number[] {
   return out;
 }
 
-/** Boundary edges of a triangle set (each counter-clockwise edge without a twin). */
-export function hullEdges(tris: readonly number[]): number[] {
-  const seen = new Set<string>();
-  for (let t = 0; t < tris.length; t += 3)
-    for (let k = 0; k < 3; k++) seen.add(`${tris[t + k]},${tris[t + ((k + 1) % 3)]}`);
-  const out: number[] = [];
-  for (let t = 0; t < tris.length; t += 3)
-    for (let k = 0; k < 3; k++) {
-      const u = tris[t + k]!;
-      const v = tris[t + ((k + 1) % 3)]!;
-      if (!seen.has(`${v},${u}`)) out.push(u, v);
-    }
-  return out;
-}
-
-/** Merge sensors at the same spot, then choose the mode and build triangles and edges. */
+/** Merge sensors at the same spot, then choose the mode (segment mode chains the nodes). */
 export function buildMesh(sensors: readonly Point[]): FieldMesh {
   const nodes: Point[] = [];
   const members: number[][] = [];
@@ -182,17 +156,15 @@ export function buildMesh(sensors: readonly Point[]): FieldMesh {
       members.push([i]);
     }
   });
-  if (nodes.length === 0) return { mode: 'none', nodes, members, tris: [], edges: [] };
-  if (nodes.length === 1) return { mode: 'flat', nodes, members, tris: [], edges: [0, 0] };
+  if (nodes.length === 0) return { mode: 'none', nodes, members };
+  if (nodes.length === 1) return { mode: 'flat', nodes, members };
   if (nodes.length >= 3) {
     let spread = 0;
     for (const a of nodes)
       for (const b of nodes) spread = Math.max(spread, Math.hypot(a[0] - b[0], a[1] - b[1]));
     const area = polygonArea(convexHull(nodes).map((i) => nodes[i]!));
     if (area >= COLLINEAR_RATIO * spread * spread) {
-      const tris = delaunay(nodes);
-      if (tris && tris.length > 0)
-        return { mode: 'mesh', nodes, members, tris, edges: hullEdges(tris) };
+      if (delaunay(nodes)?.length) return { mode: 'mesh', nodes, members };
     }
   }
   return segmentMesh(nodes, members);
@@ -233,11 +205,7 @@ function segmentMesh(nodes: Point[], members: number[][]): FieldMesh {
       lastT = t;
     }
   }
-  if (out.length === 1)
-    return { mode: 'flat', nodes: out, members: outMembers, tris: [], edges: [0, 0] };
-  const edges: number[] = [];
-  for (let i = 0; i + 1 < out.length; i++) edges.push(i, i + 1);
-  return { mode: 'segment', nodes: out, members: outMembers, tris: [], edges };
+  return { mode: out.length === 1 ? 'flat' : 'segment', nodes: out, members: outMembers };
 }
 
 /** Node values: the mean of each node's member sensors. */
@@ -251,91 +219,10 @@ export function nodeValues(mesh: FieldMesh, values: ArrayLike<number>): Float64A
   return out;
 }
 
-/** Weights of up to three nodes whose mix gives the field at a point. */
-export interface Weights {
-  idx: [number, number, number];
-  w: [number, number, number];
-}
-
-/** Clamped projection onto the nearest edge: the outside-the-hull rule. */
-export function nearestEdge(
-  mesh: FieldMesh,
-  x: number,
-  y: number,
-): { a: number; b: number; t: number; d2: number } {
-  let best = { a: 0, b: 0, t: 0, d2: Infinity };
-  const { nodes, edges } = mesh;
-  for (let e = 0; e < edges.length; e += 2) {
-    const [ax, ay] = nodes[edges[e]!]!;
-    const [bx, by] = nodes[edges[e + 1]!]!;
-    const ex = bx - ax;
-    const ey = by - ay;
-    const l2 = ex * ex + ey * ey;
-    const t = l2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * ex + (y - ay) * ey) / l2)) : 0;
-    const d2 = (x - ax - t * ex) ** 2 + (y - ay - t * ey) ** 2;
-    if (d2 < best.d2) best = { a: edges[e]!, b: edges[e + 1]!, t, d2 };
-  }
-  return best;
-}
-
-/** Barycentric weights in the first triangle containing the point, or null outside the hull. */
-export function locate(mesh: FieldMesh, x: number, y: number): Weights | null {
-  const { nodes, tris } = mesh;
-  const p: Point = [x, y];
-  for (let t = 0; t < tris.length; t += 3) {
-    const ia = tris[t]!;
-    const ib = tris[t + 1]!;
-    const ic = tris[t + 2]!;
-    const a = nodes[ia]!;
-    const b = nodes[ib]!;
-    const c = nodes[ic]!;
-    const area = orient(a, b, c);
-    const wa = orient(b, c, p) / area;
-    const wb = orient(c, a, p) / area;
-    const wc = 1 - wa - wb;
-    const eps = -1e-9;
-    if (wa >= eps && wb >= eps && wc >= eps) return { idx: [ia, ib, ic], w: [wa, wb, wc] };
-  }
-  return null;
-}
-
-/** Weights for the field at a point, for any mode. */
-export function weightsAt(mesh: FieldMesh, x: number, y: number): Weights | null {
-  if (mesh.mode === 'none') return null;
-  if (mesh.mode === 'flat') return { idx: [0, 0, 0], w: [1, 0, 0] };
-  if (mesh.mode === 'mesh') {
-    const inside = locate(mesh, x, y);
-    if (inside) return inside;
-  }
-  const e = nearestEdge(mesh, x, y);
-  return { idx: [e.a, e.b, e.b], w: [1 - e.t, e.t, 0] };
-}
-
-/** The interpolated value at a point (NaN without sensors). Reference for both renderers. */
-export function evalField(
-  mesh: FieldMesh,
-  values: ArrayLike<number>,
-  x: number,
-  y: number,
-): number {
-  const w = weightsAt(mesh, x, y);
-  if (!w) return NaN;
-  const v = nodeValues(mesh, values);
-  return w.w[0] * v[w.idx[0]]! + w.w[1] * v[w.idx[1]]! + w.w[2] * v[w.idx[2]]!;
-}
-
 export const smoothstep = (e0: number, e1: number, x: number): number => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
 };
-
-/** 1 near a sensor, falling to `CONF_MIN` far from every sensor: where the map is a guess. */
-export function confidenceAt(mesh: FieldMesh, x: number, y: number): number {
-  let d2 = Infinity;
-  for (const [nx, ny] of mesh.nodes) d2 = Math.min(d2, (x - nx) ** 2 + (y - ny) ** 2);
-  if (d2 === Infinity) return 0;
-  return 1 - (1 - CONF_MIN) * smoothstep(CONF_NEAR, CONF_FAR, Math.sqrt(d2));
-}
 
 /** Point in polygon (even-odd) and distance to its boundary. */
 export function outlineDistance(

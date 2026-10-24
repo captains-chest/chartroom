@@ -12,8 +12,8 @@ import {
   hullEdges,
   nearestEdge,
   nodeValues,
-  polygonArea,
 } from '../src/field';
+import { signedArea } from '../src/geometry';
 import { NO_DATA, fillField, planField } from '../src/field-plan';
 import type { Point } from '../src/plan';
 
@@ -56,7 +56,7 @@ describe('Delaunay triangulation', () => {
     expect(tris).toHaveLength(6);
     let area = 0;
     for (let t = 0; t < 6; t += 3)
-      area += polygonArea([pts[tris[t]!]!, pts[tris[t + 1]!]!, pts[tris[t + 2]!]!]);
+      area += signedArea([pts[tris[t]!]!, pts[tris[t + 1]!]!, pts[tris[t + 2]!]!]);
     expect(area).toBeCloseTo(12, 9);
   });
 
@@ -69,12 +69,12 @@ describe('Delaunay triangulation', () => {
       expect(tris).not.toBeNull();
       let area = 0;
       for (let t = 0; t < tris.length; t += 3) {
-        const a = polygonArea([pts[tris[t]!]!, pts[tris[t + 1]!]!, pts[tris[t + 2]!]!]);
+        const a = signedArea([pts[tris[t]!]!, pts[tris[t + 1]!]!, pts[tris[t + 2]!]!]);
         expect(a).toBeGreaterThan(0);
         area += a;
       }
       const hull = convexHull(pts);
-      expect(area).toBeCloseTo(polygonArea(hull.map((i) => pts[i]!)), 6);
+      expect(area).toBeCloseTo(signedArea(hull.map((i) => pts[i]!)), 6);
       expect(circumcircleEmpty(pts, tris)).toBe(true);
       // Euler: triangles = 2n - 2 - hull vertices (no collinear hull points in random data).
       expect(tris.length / 3).toBe(2 * n - 2 - hull.length);

@@ -1,13 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vite-plus/test';
-import {
-  type Plan,
-  type Point,
-  PLAN_SCHEMA_VERSION,
-  pointAlong,
-  polygonArea,
-  validatePlan,
-} from '../src/plan';
+import { type Plan, type Point, PLAN_SCHEMA_VERSION, pointAlong, validatePlan } from '../src/plan';
+import { polygonArea } from '../src/geometry';
 import { planToSvg } from '../src/plan-svg';
 
 interface Fixture extends Plan {

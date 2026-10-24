@@ -174,38 +174,6 @@ export function normalizePlan(raw: unknown): Plan {
   };
 }
 
-/** Signed area of a polygon (shoelace); positive when clockwise in y-down plan space. */
-export function signedArea(polygon: readonly Point[]): number {
-  let sum = 0;
-  for (let i = 0; i < polygon.length; i++) {
-    const [x1, y1] = polygon[i]!;
-    const [x2, y2] = polygon[(i + 1) % polygon.length]!;
-    sum += x1 * y2 - x2 * y1;
-  }
-  return sum / 2;
-}
-
-/** Area of a simple polygon in square metres. */
-export function polygonArea(polygon: readonly Point[]): number {
-  return Math.abs(signedArea(polygon));
-}
-
-/** Area-weighted centroid of a simple polygon. */
-export function polygonCentroid(polygon: readonly Point[]): Point {
-  let cx = 0;
-  let cy = 0;
-  let a2 = 0;
-  for (let i = 0; i < polygon.length; i++) {
-    const [x1, y1] = polygon[i]!;
-    const [x2, y2] = polygon[(i + 1) % polygon.length]!;
-    const cross = x1 * y2 - x2 * y1;
-    a2 += cross;
-    cx += (x1 + x2) * cross;
-    cy += (y1 + y2) * cross;
-  }
-  return [cx / (3 * a2), cy / (3 * a2)];
-}
-
 /** Length of a wall's centreline. */
 export function wallLength(wall: Wall): number {
   return Math.hypot(wall.b[0] - wall.a[0], wall.b[1] - wall.a[1]);

@@ -1,9 +1,9 @@
 // Device markers: what state an entity is in, what tapping it does, which entities can go on a
 // plan and where auto-placement puts them. Pure functions, shared by the panel, card and editor.
-import { pointInPolygon } from './geometry';
+import { pointInPolygon, polygonArea, polygonCentroid } from './geometry';
 import type { EntityState, Hass } from './ha-types';
 import { entityArea } from './model';
-import { type Plan, type Point, polygonArea, polygonCentroid } from './plan';
+import type { Plan, Point } from './plan';
 import { labelPoint } from './plan-svg';
 
 /** Domains that can go on the plan as device markers. */

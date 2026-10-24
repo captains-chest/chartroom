@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vite-plus/test';
-import { exteriorLoop, outlineFromWalls, solidSpans } from '../src/geometry';
+import { exteriorLoop, outlineFromWalls, polygonArea, solidSpans } from '../src/geometry';
 import { History } from '../src/history';
-import { emptyPlan, normalizePlan, type Plan, polygonArea, validatePlan } from '../src/plan';
+import { emptyPlan, normalizePlan, type Plan, validatePlan } from '../src/plan';
 import {
   addOpening,
   addRoom,

@@ -43,6 +43,7 @@ export interface HassConnection {
   ): Promise<() => Promise<void> | void>;
   /** home-assistant-js-websocket: 'ready' fires when the connection is back after a restart. */
   addEventListener?(event: 'ready', listener: () => void): void;
+  removeEventListener?(event: 'ready', listener: () => void): void;
 }
 
 export interface Hass {

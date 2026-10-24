@@ -14,10 +14,10 @@ import type { Point } from '../plan';
 import {
   MAX_SIGNAL_SEGMENTS,
   MAX_SIGNAL_SOURCES,
-  SEG,
+  SEGMENT_STRIDE,
   SIGNAL_FLOOR,
   SIGNAL_N,
-  SRC,
+  SOURCE_STRIDE,
   type SignalInput,
 } from '../signal';
 import type { View } from '../viewport';
@@ -382,17 +382,18 @@ export class GlRenderer implements FieldRenderer {
     const prog = (this.#signal ??= compile(gl, FIELD_VS, SIGNAL_FS));
     this.#walls ??= this.#dataTexture();
     const t = this.#begin(grid, outline, keepPrevious);
-    const n = Math.min(MAX_SIGNAL_SEGMENTS, input.walls.length / SEG);
+    const n = Math.min(MAX_SIGNAL_SEGMENTS, input.walls.length / SEGMENT_STRIDE);
     // Two rows: the segment ends, then its loss.
     const walls = new Float32Array(Math.max(1, n) * 8);
     for (let w = 0; w < n; w++) {
-      walls.set(input.walls.subarray(w * SEG, w * SEG + 4), w * 4);
-      walls[(Math.max(1, n) + w) * 4] = input.walls[w * SEG + 4]!;
+      walls.set(input.walls.subarray(w * SEGMENT_STRIDE, w * SEGMENT_STRIDE + 4), w * 4);
+      walls[(Math.max(1, n) + w) * 4] = input.walls[w * SEGMENT_STRIDE + 4]!;
     }
     this.#upload(this.#walls, walls, Math.max(1, n), 2);
-    const k = Math.min(MAX_SIGNAL_SOURCES, input.aps.length / SRC);
+    const k = Math.min(MAX_SIGNAL_SOURCES, input.aps.length / SOURCE_STRIDE);
     const aps = new Float32Array(MAX_SIGNAL_SOURCES * 4);
-    for (let i = 0; i < k; i++) aps.set(input.aps.subarray(i * SRC, i * SRC + SRC), i * 4);
+    for (let i = 0; i < k; i++)
+      aps.set(input.aps.subarray(i * SOURCE_STRIDE, i * SOURCE_STRIDE + SOURCE_STRIDE), i * 4);
     this.#fieldPass(prog, t, grid, outline.length);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.#walls);

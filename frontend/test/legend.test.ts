@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { LayerData, LayerReading } from '../src/heat';
 import { legendContent, signalNote } from '../src/heat/legend';
-import { SEG, SRC } from '../src/signal';
+import { SEGMENT_STRIDE, SOURCE_STRIDE } from '../src/signal';
 
 const reading = (id: string, value: number): LayerReading => ({
   id,
@@ -52,8 +52,8 @@ describe('legend', () => {
 
 describe('signalNote', () => {
   const input = (sources: number, segments: number, leftOut = { sources: 0, segments: 0 }) => ({
-    aps: new Float32Array(sources * SRC),
-    walls: new Float32Array(segments * SEG),
+    aps: new Float32Array(sources * SOURCE_STRIDE),
+    walls: new Float32Array(segments * SEGMENT_STRIDE),
     leftOut,
   });
 

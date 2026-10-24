@@ -4,7 +4,13 @@
 import { nodeValues, type FieldGrid, type FieldMesh } from './field';
 import { fillField, planField, type FieldPlan } from './field-plan';
 import type { Point } from './plan';
-import { MAX_SIGNAL_SEGMENTS, MAX_SIGNAL_SOURCES, SEG, SRC, signalField } from './signal';
+import {
+  MAX_SIGNAL_SEGMENTS,
+  MAX_SIGNAL_SOURCES,
+  SEGMENT_STRIDE,
+  SOURCE_STRIDE,
+  signalField,
+} from './signal';
 
 export type WorkerRequest =
   | { type: 'ping'; id: number }
@@ -100,8 +106,11 @@ export function createHandler(): (req: WorkerRequest) => WorkerResponse {
             message: `grid must be 1..${MAX_FIELD_SIZE} cells a side`,
           };
         const input = {
-          walls: Float32Array.from(req.walls ?? []).subarray(0, MAX_SIGNAL_SEGMENTS * SEG),
-          aps: Float32Array.from(req.aps ?? []).subarray(0, MAX_SIGNAL_SOURCES * SRC),
+          walls: Float32Array.from(req.walls ?? []).subarray(
+            0,
+            MAX_SIGNAL_SEGMENTS * SEGMENT_STRIDE,
+          ),
+          aps: Float32Array.from(req.aps ?? []).subarray(0, MAX_SIGNAL_SOURCES * SOURCE_STRIDE),
         };
         const field = signalField(input, req.grid, req.outline ?? []);
         return { type: 'field', id: req.id, key: req.key, grid: req.grid, field };

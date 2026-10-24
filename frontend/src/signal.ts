@@ -27,8 +27,8 @@ export const MAX_SIGNAL_SEGMENTS = 2048;
 /** Grid cells along the longer side: the signal pass is heavier than the sensor field. */
 export const SIGNAL_CELLS = 128;
 /** Floats per wall segment (ax, ay, bx, by, loss dB) and per source (x, y, level dBm). */
-export const SEG = 5;
-export const SRC = 3;
+export const SEGMENT_STRIDE = 5;
+export const SOURCE_STRIDE = 3;
 
 export interface SignalInput {
   walls: Float32Array;
@@ -137,11 +137,11 @@ export function signalInput(
     .flatMap((s) => [s.position[0], s.position[1], s.value]);
   const walls = wallSegments(plan, hass);
   return {
-    walls: new Float32Array(walls.slice(0, MAX_SIGNAL_SEGMENTS * SEG)),
+    walls: new Float32Array(walls.slice(0, MAX_SIGNAL_SEGMENTS * SEGMENT_STRIDE)),
     aps: new Float32Array(aps),
     leftOut: {
       sources: Math.max(0, sources.length - MAX_SIGNAL_SOURCES),
-      segments: Math.max(0, walls.length / SEG - MAX_SIGNAL_SEGMENTS),
+      segments: Math.max(0, walls.length / SEGMENT_STRIDE - MAX_SIGNAL_SEGMENTS),
     },
   };
 }
@@ -149,7 +149,7 @@ export function signalInput(
 /** The editor's warning when the walls make more segments than the signal map takes. */
 export function signalLimitWarnings(plan: Plan): string[] {
   // Without states every door counts as closed: the most segments the plan can have.
-  const segments = wallSegments(plan).length / SEG;
+  const segments = wallSegments(plan).length / SEGMENT_STRIDE;
   return segments > MAX_SIGNAL_SEGMENTS
     ? [
         `${segments} wall segments on this floor (more than ${MAX_SIGNAL_SEGMENTS}): the signal map uses the first ${MAX_SIGNAL_SEGMENTS} and leaves out the rest.`,
@@ -161,14 +161,14 @@ export function signalLimitWarnings(plan: Plan): string[] {
 export function signalAt(input: SignalInput, x: number, y: number, n = SIGNAL_N): number {
   const { walls, aps } = input;
   let best = SIGNAL_FLOOR;
-  for (let k = 0; k + SRC <= aps.length; k += SRC) {
+  for (let k = 0; k + SOURCE_STRIDE <= aps.length; k += SOURCE_STRIDE) {
     const ax = aps[k]!;
     const ay = aps[k + 1]!;
     const rx0 = x - ax;
     const ry0 = y - ay;
     let rx = aps[k + 2]! - 10 * n * Math.log10(Math.max(Math.hypot(rx0, ry0), 1));
     if (rx <= best) continue;
-    for (let w = 0; w + SEG <= walls.length; w += SEG) {
+    for (let w = 0; w + SEGMENT_STRIDE <= walls.length; w += SEGMENT_STRIDE) {
       const qx = walls[w]! - ax;
       const qy = walls[w + 1]! - ay;
       const ex = walls[w + 2]! - walls[w]!;
@@ -213,5 +213,5 @@ export function signalKey(input: SignalInput): string {
   for (const a of [input.walls, input.aps])
     for (const v of new Uint32Array(a.buffer, a.byteOffset, a.length))
       h = Math.imul(h ^ v, 16777619);
-  return `${input.walls.length / SEG}w${input.aps.length / SRC}s${(h >>> 0).toString(36)}`;
+  return `${input.walls.length / SEGMENT_STRIDE}w${input.aps.length / SOURCE_STRIDE}s${(h >>> 0).toString(36)}`;
 }

@@ -6,10 +6,10 @@ import { emptyPlan, type Plan, type Point } from '../src/plan';
 import {
   MAX_SIGNAL_SEGMENTS,
   MAX_SIGNAL_SOURCES,
-  SEG,
+  SEGMENT_STRIDE,
   SIGNAL_FLOOR,
   SIGNAL_N,
-  SRC,
+  SOURCE_STRIDE,
   signalAt,
   signalField,
   signalInput,
@@ -91,9 +91,9 @@ describe('wall segments', () => {
   it('splits walls at their openings with each part’s own loss', () => {
     const { plan, hass } = setup();
     const segs = wallSegments(plan, hass);
-    expect(segs.length / SEG).toBe(4);
-    const rows = Array.from({ length: segs.length / SEG }, (_, i) =>
-      segs.slice(i * SEG, i * SEG + SEG),
+    expect(segs.length / SEGMENT_STRIDE).toBe(4);
+    const rows = Array.from({ length: segs.length / SEGMENT_STRIDE }, (_, i) =>
+      segs.slice(i * SEGMENT_STRIDE, i * SEGMENT_STRIDE + SEGMENT_STRIDE),
     );
     // partition 0.3 dB/cm x 10 cm; door 0.75 x 4; exterior 0.5 x 30.
     expect(rows[0]).toEqual([3, 0, 3, 1, 3]);
@@ -106,7 +106,7 @@ describe('wall segments', () => {
   it('drops an open door (it costs nothing)', () => {
     const { plan, hass } = setup();
     hass.states!['binary_sensor.door']!.state = 'on';
-    expect(wallSegments(plan, hass).length / SEG).toBe(3);
+    expect(wallSegments(plan, hass).length / SEGMENT_STRIDE).toBe(3);
   });
 
   /** A plan with `n` separate partition walls, one segment each. */
@@ -124,7 +124,7 @@ describe('wall segments', () => {
 
   it('caps the segment count and says how many it left out', () => {
     const input = signalInput(walls(MAX_SIGNAL_SEGMENTS + 10), undefined, []);
-    expect(input.walls.length).toBe(MAX_SIGNAL_SEGMENTS * SEG);
+    expect(input.walls.length).toBe(MAX_SIGNAL_SEGMENTS * SEGMENT_STRIDE);
     expect(input.leftOut).toEqual({ sources: 0, segments: 10 });
   });
 
@@ -134,7 +134,7 @@ describe('wall segments', () => {
       value: -40,
     }));
     const input = signalInput(walls(1), undefined, sources);
-    expect(input.aps.length).toBe(MAX_SIGNAL_SOURCES * SRC);
+    expect(input.aps.length).toBe(MAX_SIGNAL_SOURCES * SOURCE_STRIDE);
     expect(input.leftOut).toEqual({ sources: 8, segments: 0 });
     expect(signalInput(walls(1), undefined, sources.slice(0, 2)).leftOut.sources).toBe(0);
   });

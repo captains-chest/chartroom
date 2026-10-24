@@ -197,7 +197,8 @@ export const AREAS = [
 
 /**
  * Floors and areas the tests link rooms to. Existing ones (on a developer's instance) are left
- * exactly as they are; only missing ids are created, which on a fresh instance gives these ids.
+ * as they are, except that an area without a floor gets one; only missing ids are created, which
+ * on a fresh instance gives these ids.
  */
 export async function ensureFloorsAndAreas(token: string): Promise<void> {
   await withSocket(token, async (send) => {
@@ -206,9 +207,15 @@ export async function ensureFloorsAndAreas(token: string): Promise<void> {
       if (floors.some((x) => x.floor_id === f.floor_id)) continue;
       await send({ type: 'config/floor_registry/create', name: f.name, level: f.level });
     }
-    const areas = await send<{ area_id: string }[]>({ type: 'config/area_registry/list' });
+    const areas = await send<{ area_id: string; floor_id: string | null }[]>({
+      type: 'config/area_registry/list',
+    });
     for (const a of AREAS) {
-      if (areas.some((x) => x.area_id === a.area_id)) continue;
+      const found = areas.find((x) => x.area_id === a.area_id);
+      // Onboarding creates some of these areas without a floor: put them on theirs.
+      if (found && !found.floor_id)
+        await send({ type: 'config/area_registry/update', area_id: a.area_id, floor_id: a.floor });
+      if (found) continue;
       await send({ type: 'config/area_registry/create', name: a.name, floor_id: a.floor });
     }
   });

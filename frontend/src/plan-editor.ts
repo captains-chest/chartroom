@@ -59,7 +59,8 @@ import {
 } from './plan-ops';
 import type { PlanView } from './plan-view';
 import { signalLimitWarnings } from './signal';
-import { button, count, field, h, numberInput, s, select, textInput } from './ui';
+import { count } from './text';
+import { button, field, h, numberInput, s, select, textInput } from './ui';
 import { importUnderlay, loadUnderlay } from './underlay';
 
 export type { Tool } from './editor/tools';

@@ -91,6 +91,24 @@ export interface Source {
   tx_dbm?: number;
 }
 
+/**
+ * A raster or SVG drawing shown under the plan to trace over. The file itself is stored by the
+ * integration (`/api/chartroom/underlay/<plan_id>`); the plan only says where it sits.
+ */
+export interface Underlay {
+  /** URL path of the stored image, relative to Home Assistant. */
+  url: string;
+  /** Natural size of the image in pixels. */
+  width_px: number;
+  height_px: number;
+  /** Metres per image pixel. */
+  scale: number;
+  /** Plan position of the image's top-left corner, in metres. */
+  origin: Point;
+  /** 0..1 */
+  opacity: number;
+}
+
 export interface Plan {
   schema_version: typeof PLAN_SCHEMA_VERSION;
   name: string;
@@ -104,6 +122,46 @@ export interface Plan {
   sources: Source[];
   /** Materials added to or overriding DEFAULT_MATERIALS. */
   materials?: Material[];
+  underlay?: Underlay | null;
+}
+
+/** A new, empty plan. */
+export function emptyPlan(name: string, floor_id: string | null = null): Plan {
+  return {
+    schema_version: PLAN_SCHEMA_VERSION,
+    name,
+    floor_id,
+    outline: [],
+    walls: [],
+    rooms: [],
+    doors: [],
+    windows: [],
+    sources: [],
+  };
+}
+
+/**
+ * A stored plan as the panel uses it: missing lists filled in, the storage `id` and any extra keys
+ * kept as they are. Throws on a schema version this build does not know.
+ */
+export function normalizePlan(raw: unknown): Plan {
+  if (!raw || typeof raw !== 'object') throw new Error('not a plan');
+  const r = raw as Partial<Plan> & { schema_version?: unknown; name?: unknown };
+  const version = r.schema_version ?? PLAN_SCHEMA_VERSION;
+  if (version !== PLAN_SCHEMA_VERSION)
+    throw new Error(`unsupported schema_version ${String(version)}`);
+  return {
+    ...r,
+    schema_version: PLAN_SCHEMA_VERSION,
+    name: typeof r.name === 'string' ? r.name : 'Plan',
+    floor_id: r.floor_id ?? null,
+    outline: r.outline ?? [],
+    walls: r.walls ?? [],
+    rooms: r.rooms ?? [],
+    doors: r.doors ?? [],
+    windows: r.windows ?? [],
+    sources: r.sources ?? [],
+  };
 }
 
 /** Signed area of a polygon (shoelace); positive when clockwise in y-down plan space. */
@@ -199,6 +257,8 @@ export function validatePlan(plan: Plan): string[] {
     if (r.polygon.length < 3) problems.push(`room ${r.id} has fewer than 3 corners`);
   }
   for (const s of plan.sources) unique('source', s.id);
-  if (plan.outline.length < 3) problems.push('outline has fewer than 3 corners');
+  if (plan.outline.length < 3 && plan.walls.length > 0) {
+    problems.push('outline has fewer than 3 corners');
+  }
   return problems;
 }

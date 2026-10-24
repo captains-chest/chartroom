@@ -19,4 +19,13 @@ export interface Hass {
   floors?: Record<string, FloorEntry>;
   areas?: Record<string, AreaEntry>;
   connection?: HassConnection;
+  user?: { is_admin: boolean };
+  /** fetch() with the user's access token, for the integration's HTTP views. */
+  fetchWithAuth?: (path: string, init?: RequestInit) => Promise<Response>;
+}
+
+export interface PlanSummary {
+  id: string;
+  name: string;
+  floor_id: string | null;
 }

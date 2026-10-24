@@ -291,6 +291,7 @@ export class ChartroomPanel extends HTMLElement {
     localStorage.setItem(TAB_KEY, key);
     this.#markTab();
     if (!tab.plan_id) {
+      this.#viewer.begin();
       this.#viewer.closeTime();
       this.#planId = null;
       this.#plan = null;

@@ -196,6 +196,7 @@ export class ChartroomPanel extends HTMLElement {
       () => this.#setStatus('worker', 'worker unavailable'),
     );
     window.addEventListener('keydown', this.#onKey);
+    this.#update.watch(this.#hass?.connection);
     void this.#view.resume();
   }
 
@@ -204,11 +205,12 @@ export class ChartroomPanel extends HTMLElement {
     window.removeEventListener('keydown', this.#onKey);
     this.#view.dispose();
     this.#time?.pause();
+    this.#update.dispose();
   }
 
   set hass(hass: Hass) {
     this.#hass = hass;
-    this.#update.watch(hass.connection);
+    if (this.isConnected) this.#update.watch(hass.connection);
     this.#view.setHass(this.#shown());
     this.#renderLayers();
     if (!this.#plansRequested && hass.connection) {

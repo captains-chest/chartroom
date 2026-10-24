@@ -22,10 +22,14 @@ export async function versionMismatch(
   }
 }
 
-/** The "Chartroom was updated" prompt. Checks on first connection and whenever it reconnects. */
+/**
+ * The "Chartroom was updated" prompt. Checks on first connection and whenever it reconnects, until
+ * `dispose` (the connection is shared and outlives the card or panel).
+ */
 export class UpdateNotice {
   readonly el: HTMLElement;
   #conn?: HassConnection;
+  #check = (): void => {};
 
   constructor(reload: () => void = () => location.reload()) {
     this.el = h(
@@ -38,15 +42,21 @@ export class UpdateNotice {
 
   watch(c: HassConnection | undefined, build: string = BUILD_VERSION): void {
     if (!c || c === this.#conn) return;
+    this.dispose();
     this.#conn = c;
-    const check = (): void =>
+    this.#check = (): void =>
       void versionMismatch(c, build).then((v) => {
         if (!v) return;
         this.el.dataset['version'] = v;
         this.el.hidden = false;
       });
-    check();
-    c.addEventListener?.('ready', check);
+    this.#check();
+    c.addEventListener?.('ready', this.#check);
+  }
+
+  dispose(): void {
+    this.#conn?.removeEventListener?.('ready', this.#check);
+    this.#conn = undefined;
   }
 }
 

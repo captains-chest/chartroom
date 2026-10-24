@@ -25,8 +25,8 @@ export class DeviceControls implements PointerDelegate {
   readonly dialog: HTMLDialogElement;
   #press: Press | null = null;
   #lastInfo = 0;
-  #confirmText: HTMLElement;
-  #confirmButton: HTMLButtonElement;
+  readonly #confirmText: HTMLElement;
+  readonly #confirmButton: HTMLButtonElement;
   #answer: ((ok: boolean) => void) | null = null;
 
   constructor(
@@ -53,7 +53,7 @@ export class DeviceControls implements PointerDelegate {
     view.el.addEventListener('contextmenu', (e) => {
       const el = this.#marker(e.target);
       // A long touch fires contextmenu too; the hold already opened the dialog.
-      if (el && this.active && !this.#press?.held) this.moreInfo(el.dataset['entity']!);
+      if (el && this.active && !this.#press?.held) this.#moreInfo(el.dataset['entity']!);
     });
   }
 
@@ -83,7 +83,7 @@ export class DeviceControls implements PointerDelegate {
       moved: false,
       timer: setTimeout(() => {
         press.held = true;
-        this.moreInfo(entity);
+        this.#moreInfo(entity);
       }, HOLD_MS),
     };
     this.#press = press;
@@ -124,12 +124,12 @@ export class DeviceControls implements PointerDelegate {
       void this.tap(el.dataset['id']!, el.dataset['entity']!);
     } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
       e.preventDefault();
-      this.moreInfo(el.dataset['entity']!);
+      this.#moreInfo(el.dataset['entity']!);
     }
   }
 
   /** Home Assistant's own details dialog for an entity. */
-  moreInfo(entityId: string): void {
+  #moreInfo(entityId: string): void {
     const now = performance.now();
     if (now - this.#lastInfo < 400) return;
     this.#lastInfo = now;
@@ -142,7 +142,7 @@ export class DeviceControls implements PointerDelegate {
     const hass = this.hass();
     const action = tapAction(entityId, hass?.states?.[entityId]);
     if (action.type === 'more-info' || !hass?.callService) {
-      this.moreInfo(entityId);
+      this.#moreInfo(entityId);
       return;
     }
     if (action.confirm && !(await this.confirm(action.confirm, action.service))) return;

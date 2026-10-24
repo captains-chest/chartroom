@@ -28,15 +28,15 @@ export interface ChartroomCardConfig {
 /** The Chartroom dashboard card: one floor's plan with live device markers. */
 export class ChartroomCard extends HTMLElement {
   #config?: ChartroomCardConfig;
-  #view = new PlanView(true);
-  #viewer = new ViewerController(this.#view, {
+  readonly #view = new PlanView(true);
+  readonly #viewer = new ViewerController(this.#view, {
     el: this,
     place: (bar) => this.#stage.after(bar),
   });
-  #controls = new DeviceControls(this.#view, this, () => this.#viewer.shown());
-  #title: HTMLElement;
-  #stage: HTMLElement;
-  #message: HTMLElement;
+  readonly #controls = new DeviceControls(this.#view, this, () => this.#viewer.shown());
+  readonly #title: HTMLElement;
+  readonly #stage: HTMLElement;
+  readonly #message: HTMLElement;
   #loaded = '';
   #unsubscribe: Promise<Unsubscribe | null> | null = null;
 

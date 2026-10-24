@@ -135,11 +135,11 @@ export class PlanEditor {
   readonly #history: History<Plan>;
   #s: ToolState = initialState;
   readonly #saver: Autosaver<Plan>;
-  #saveState: HTMLElement;
-  #hint: HTMLElement;
-  #undoButton: HTMLButtonElement;
-  #redoButton: HTMLButtonElement;
-  #toolButtons = new Map<Tool, HTMLButtonElement>();
+  readonly #saveState: HTMLElement;
+  readonly #hint: HTMLElement;
+  readonly #undoButton: HTMLButtonElement;
+  readonly #redoButton: HTMLButtonElement;
+  readonly #toolButtons = new Map<Tool, HTMLButtonElement>();
   #underlayUrl: string | null = null;
   #lastClick = { t: 0, x: 0, y: 0 };
   /** What the Source tool places next. */
@@ -172,7 +172,7 @@ export class PlanEditor {
     this.#underlayUrl = host.view.underlayUrl;
     for (const t of TOOLS) {
       const label = titleOf(t.tool);
-      const b = button(label, () => this.setTool(t.tool), {
+      const b = button(label, () => this.#setTool(t.tool), {
         'data-tool': t.tool,
         title: `${label} (${t.key.toUpperCase()})`,
       });
@@ -207,7 +207,7 @@ export class PlanEditor {
     });
     this.#view.el.addEventListener('dragover', this.#onDragOver);
     this.#view.el.addEventListener('drop', this.#onDrop);
-    this.setTool('select');
+    this.#setTool('select');
     void this.#loadUnderlay();
   }
 
@@ -236,7 +236,7 @@ export class PlanEditor {
     if (!k || k === 'room' || k === 'source') this.#renderInspector();
   }
 
-  setTool(tool: Tool): void {
+  #setTool(tool: Tool): void {
     this.#apply({ state: withTool(this.#s, tool) });
   }
 
@@ -314,14 +314,14 @@ export class PlanEditor {
       this.#apply(closeRoom(this.#s, this.plan));
     } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.#s.selection) {
       e.preventDefault();
-      this.deleteSelection();
+      this.#deleteSelection();
     } else {
       const t = TOOLS.find((x) => x.key === k);
-      if (t) this.setTool(t.tool);
+      if (t) this.#setTool(t.tool);
     }
   }
 
-  deleteSelection(): void {
+  #deleteSelection(): void {
     const sel = this.#s.selection;
     if (!sel) return;
     this.#s = { ...this.#s, selection: null };
@@ -462,7 +462,7 @@ export class PlanEditor {
       label,
       sel.kind,
       ...(this.#panels[sel.kind] as (item: Item) => Fields)(item),
-      button(`Delete ${label.toLowerCase()}`, () => this.deleteSelection(), {
+      button(`Delete ${label.toLowerCase()}`, () => this.#deleteSelection(), {
         class: 'danger',
         'data-action': 'delete',
       }),

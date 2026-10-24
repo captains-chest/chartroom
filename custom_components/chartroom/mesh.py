@@ -274,6 +274,8 @@ class _Z2MState:
     received: float = 0.0
     requested: float = 0.0
     arrived: asyncio.Event = field(default_factory=asyncio.Event)
+    # Held while subscribing, so concurrent requests subscribe once and no unsub is lost.
+    subscribing: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 def _has_z2m_devices(hass: HomeAssistant) -> bool:
@@ -292,22 +294,23 @@ async def _z2m(hass: HomeAssistant) -> Topology | str | None:
     if not mqtt.is_connected(hass):
         return "error"
     state: _Z2MState = hass.data.setdefault(DATA_Z2M, _Z2MState())
-    if state.unsub is None:
+    async with state.subscribing:
+        if state.unsub is None:
 
-        @callback
-        def received(msg: Any) -> None:
-            try:
-                payload = json.loads(msg.payload)
-            except ValueError:
-                return
-            if isinstance(payload, dict) and payload.get("status", "ok") == "ok":
-                state.networkmap = payload
-                state.received = time.monotonic()
-                state.arrived.set()
+            @callback
+            def received(msg: Any) -> None:
+                try:
+                    payload = json.loads(msg.payload)
+                except ValueError:
+                    return
+                if isinstance(payload, dict) and payload.get("status", "ok") == "ok":
+                    state.networkmap = payload
+                    state.received = time.monotonic()
+                    state.arrived.set()
 
-        state.unsub = await mqtt.async_subscribe(
-            hass, f"{Z2M_BASE_TOPIC}/bridge/response/networkmap", received
-        )
+            state.unsub = await mqtt.async_subscribe(
+                hass, f"{Z2M_BASE_TOPIC}/bridge/response/networkmap", received
+            )
     now = time.monotonic()
     if state.networkmap is None or now - state.received > Z2M_REFRESH_S:
         if now - state.requested > Z2M_REFRESH_S or state.requested == 0.0:

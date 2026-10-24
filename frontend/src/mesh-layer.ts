@@ -196,5 +196,6 @@ export class MeshLayer {
 
   dispose(): void {
     clearInterval(this.#timer);
+    this.#timer = 0;
   }
 }

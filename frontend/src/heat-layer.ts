@@ -270,6 +270,7 @@ export class HeatLayer {
   #lut: Uint8Array = rampLut(LAYERS.temperature.ramp);
   #segments = 0;
   #idle: (() => void)[] = [];
+  #disposed = false;
   #reduced =
     typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   /** Called when the set of readings changes (the view marks sensors and draws value labels). */
@@ -319,8 +320,8 @@ export class HeatLayer {
         this.#gl = new GlRenderer(canvas);
         canvas.addEventListener('webglcontextlost', (e) => {
           e.preventDefault();
-          // A context we dropped ourselves (dispose) is lost too, after the switch: ignore it.
-          if (canvas === this.#canvas) this.setRenderer('canvas');
+          // A context we dropped ourselves (switch, dispose) is lost too, later: ignore it.
+          if (canvas === this.#canvas && !this.#disposed) this.setRenderer('canvas');
         });
       } catch {
         this.#gl = null;
@@ -521,7 +522,7 @@ export class HeatLayer {
   }
 
   #start(): void {
-    if (!this.#raf) this.#raf = requestAnimationFrame((t) => this.#frame(t));
+    if (!this.#raf && !this.#disposed) this.#raf = requestAnimationFrame((t) => this.#frame(t));
   }
 
   #frame(_t: number): void {
@@ -660,6 +661,7 @@ export class HeatLayer {
   }
 
   dispose(): void {
+    this.#disposed = true;
     cancelAnimationFrame(this.#raf);
     this.#raf = 0;
     this.#gl?.dispose();

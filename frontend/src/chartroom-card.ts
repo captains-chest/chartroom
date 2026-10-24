@@ -133,14 +133,18 @@ export class ChartroomCard extends HTMLElement {
     if (this.isConnected) this.#subscribe();
   }
 
+  // Lovelace moves cards by removing and re-adding them: release on removal, rebuild on return.
   connectedCallback(): void {
     if (this.#hass) this.#subscribe();
+    void this.#view.resume();
   }
 
   disconnectedCallback(): void {
     const unsub = this.#unsubscribe;
     this.#unsubscribe = null;
     void unsub?.then((u) => u?.());
+    this.#view.dispose();
+    this.#time?.pause();
   }
 
   /** Reload when a plan is saved or deleted elsewhere (the editor in the panel), so edits show live. */

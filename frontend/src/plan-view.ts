@@ -42,12 +42,16 @@ export class PlanView {
   /** The live heatmap, once a layer has been switched on (loaded on demand). */
   heat: HeatLayer | null = null;
   #heatLayer: HeatLayerId | null = null;
-  #heatLoad: Promise<HeatLayer> | null = null;
+  #heatLoad: Promise<HeatLayer | null> | null = null;
   #labelHeat: ((g: SVGGElement, data: LayerData | null) => void) | null = null;
   /** Mesh links between placed devices, once the Mesh layer has been switched on. */
   mesh: MeshLayer | null = null;
   #meshOn = false;
-  #meshLoad: Promise<MeshLayer> | null = null;
+  #meshLoad: Promise<MeshLayer | null> | null = null;
+  /** Layers released (the element left the page): loads wait for `resume`. */
+  #released = false;
+  /** Bumped by `dispose`, so a layer that finishes loading after it is dropped. */
+  #generation = 0;
   readonly #meshSlot: SVGGElement;
   readonly overlay: SVGGElement;
   readonly #underlay: SVGGElement;
@@ -153,9 +157,9 @@ export class PlanView {
   /** Show a heatmap layer, or none. The renderer loads the first time a layer is shown. */
   async setLayer(layer: HeatLayerId | null): Promise<void> {
     this.#heatLayer = layer;
-    if (!layer && !this.heat) return;
+    if (this.#released || (!layer && !this.heat)) return;
     const heat = await this.#loadHeat();
-    heat.setLayer(this.#heatLayer);
+    if (heat && heat === this.heat) heat.setLayer(this.#heatLayer);
   }
 
   get layer(): HeatLayerId | null {
@@ -165,8 +169,10 @@ export class PlanView {
   /** Show or hide the mesh links. Their code loads the first time they are shown. */
   async setMesh(on: boolean): Promise<void> {
     this.#meshOn = on;
-    if (!on && !this.mesh) return;
+    if (this.#released || (!on && !this.mesh)) return;
+    const generation = this.#generation;
     this.#meshLoad ??= import('./mesh-layer').then((m) => {
+      if (generation !== this.#generation) return null;
       const mesh = new m.MeshLayer();
       this.#meshSlot.append(mesh.g);
       this.el.append(mesh.note);
@@ -176,15 +182,17 @@ export class PlanView {
       return mesh;
     });
     const mesh = await this.#meshLoad;
-    await mesh.setOn(this.#meshOn);
+    if (mesh && mesh === this.mesh) await mesh.setOn(this.#meshOn);
   }
 
   get meshOn(): boolean {
     return this.#meshOn;
   }
 
-  #loadHeat(): Promise<HeatLayer> {
+  #loadHeat(): Promise<HeatLayer | null> {
+    const generation = this.#generation;
     this.#heatLoad ??= import('./heat-layer').then((m) => {
+      if (generation !== this.#generation) return null;
       const heat = new m.HeatLayer(this.#heatBox, this.heatLegend);
       this.#labelHeat = m.renderValueLabels;
       this.#declutter = m.declutterLabels;
@@ -196,6 +204,30 @@ export class PlanView {
       return heat;
     });
     return this.#heatLoad;
+  }
+
+  /**
+   * Release the heatmap and mesh layers (worker, WebGL context, refresh timer) when the element
+   * leaves the page. The chosen layer and mesh switch are kept: `resume` builds them again.
+   */
+  dispose(): void {
+    this.#released = true;
+    this.#generation++;
+    this.heat?.dispose();
+    this.heat = null;
+    this.#heatLoad = null;
+    this.mesh?.dispose();
+    this.mesh?.g.remove();
+    this.mesh?.note.remove();
+    this.mesh = null;
+    this.#meshLoad = null;
+  }
+
+  /** Back on the page after `dispose`: load the layers that were on. */
+  async resume(): Promise<void> {
+    if (!this.#released) return;
+    this.#released = false;
+    await Promise.all([this.setLayer(this.#heatLayer), this.setMesh(this.#meshOn)]);
   }
 
   /** Value labels next to the layer's sensors; sensors left out are marked. */

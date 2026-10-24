@@ -127,7 +127,7 @@ export class TimeBar {
     );
     this.#slider = h('input', { type: 'range', step: 1000, 'aria-label': 'Time' });
     this.#slider.addEventListener('input', () => {
-      this.#pause();
+      this.pause();
       this.#seek(this.#slider.valueAsNumber);
     });
     this.#when = h('output', { class: 'when', 'aria-live': 'polite' });
@@ -183,7 +183,7 @@ export class TimeBar {
   }
 
   #toggle(): void {
-    if (this.#timer) return this.#pause();
+    if (this.#timer) return this.pause();
     const min = +this.#slider.min;
     const max = +this.#slider.max;
     if (this.#at >= max) this.#seek(min);
@@ -193,11 +193,12 @@ export class TimeBar {
     this.#timer = window.setInterval(() => {
       const t = Math.min(max, this.#at + (max - min) / 120);
       this.#seek(t);
-      if (t >= max) this.#pause();
+      if (t >= max) this.pause();
     }, 250);
   }
 
-  #pause(): void {
+  /** Stop playing (also when the element leaves the page). */
+  pause(): void {
     clearInterval(this.#timer);
     this.#timer = 0;
     this.#play.textContent = '▶';
@@ -205,7 +206,7 @@ export class TimeBar {
   }
 
   close(): void {
-    this.#pause();
+    this.pause();
     this.#load++;
     this.el.remove();
   }

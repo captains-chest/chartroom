@@ -1,5 +1,6 @@
+import type { Unsubscribe } from './api';
 import { DeviceControls, deviceControlStyles } from './device-controls';
-import type { Hass, PlanSummary } from './ha-types';
+import type { Hass } from './ha-types';
 import { isHeatLayer, type HeatLayerId } from './heat';
 import { PlanView, planViewStyles } from './plan-view';
 import { updateNoticeStyles } from './version';
@@ -37,7 +38,7 @@ export class ChartroomCard extends HTMLElement {
   #stage: HTMLElement;
   #message: HTMLElement;
   #loaded = '';
-  #unsubscribe: Promise<(() => Promise<void> | void) | null> | null = null;
+  #unsubscribe: Promise<Unsubscribe | null> | null = null;
 
   constructor() {
     super();
@@ -125,31 +126,26 @@ export class ChartroomCard extends HTMLElement {
 
   /** Reload when a plan is saved or deleted elsewhere (the editor in the panel), so edits show live. */
   #subscribe(): void {
-    const c = this.#viewer.hass?.connection;
-    if (this.#unsubscribe || !c?.subscribeMessage) return;
-    this.#unsubscribe = c
-      .subscribeMessage<{ plan_id: string; deleted: boolean }>(
-        (e) => {
-          const shown = this.dataset['plan'];
-          if (!shown || e.plan_id === shown || !this.#config?.plan_id) {
-            this.#loaded = '';
-            void this.#loadPlan(true);
-          }
-        },
-        { type: 'chartroom/plans/subscribe' },
-      )
+    const api = this.#viewer.api;
+    if (this.#unsubscribe || !api) return;
+    this.#unsubscribe = api
+      .subscribePlans((e) => {
+        const shown = this.dataset['plan'];
+        if (!shown || e.plan_id === shown || !this.#config?.plan_id) {
+          this.#loaded = '';
+          void this.#loadPlan(true);
+        }
+      })
       .catch(() => null);
   }
 
   async #loadPlan(live = false): Promise<void> {
-    const c = this.#viewer.hass?.connection;
-    if (!c || !this.#config) return;
+    const api = this.#viewer.api;
+    if (!api || !this.#config) return;
     this.#loaded = `${this.#config.plan_id ?? ''}|${this.#config.floor_id ?? ''}`;
     const current = this.#viewer.begin();
     try {
-      const { plans } = await c.sendMessagePromise<{ plans: PlanSummary[] }>({
-        type: 'chartroom/plans/list',
-      });
+      const plans = await api.listPlans();
       const cfg = this.#config;
       const summary = cfg.plan_id
         ? plans.find((p) => p.id === cfg.plan_id)

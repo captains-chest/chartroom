@@ -1,3 +1,4 @@
+import type { ChartroomApi } from './api';
 import type { Hass, PlanSummary } from './ha-types';
 import { pingWorker } from './field-worker';
 import { emptyPlan, type Plan } from './plan';
@@ -224,17 +225,17 @@ export class ChartroomPanel extends HTMLElement {
     return this.#viewer.hass?.user?.is_admin ?? true;
   }
 
-  #ws<T>(message: { type: string; [key: string]: unknown }): Promise<T> {
-    const c = this.#viewer.hass?.connection;
-    if (!c) return Promise.reject(new Error('not connected'));
-    return c.sendMessagePromise<T>(message);
+  #api(): ChartroomApi {
+    const api = this.#viewer.api;
+    if (!api) throw new Error('not connected');
+    return api;
   }
 
   async #refreshPlans(): Promise<void> {
     try {
-      const r = await this.#ws<{ plans: PlanSummary[] }>({ type: 'chartroom/plans/list' });
-      this.#plans = r.plans;
-      this.#setStatus('plans', `${r.plans.length} saved plan(s)`);
+      const plans = await this.#api().listPlans();
+      this.#plans = plans;
+      this.#setStatus('plans', `${plans.length} saved plan(s)`);
     } catch {
       this.#plans = [];
       this.#setStatus('plans', 'plans unavailable');
@@ -370,11 +371,7 @@ export class ChartroomPanel extends HTMLElement {
   async #createPlan(tab: FloorTab): Promise<void> {
     if (!tab.floor_id) return;
     const id = planIdForFloor(tab.floor_id);
-    await this.#ws({
-      type: 'chartroom/plans/save',
-      plan_id: id,
-      plan: emptyPlan(tab.label, tab.floor_id),
-    });
+    await this.#api().savePlan(id, emptyPlan(tab.label, tab.floor_id));
     this.#planId = null;
     await this.#refreshPlans();
     await this.#selectTab(tab.key);
@@ -383,8 +380,7 @@ export class ChartroomPanel extends HTMLElement {
 
   async #savePlan(plan: Plan): Promise<void> {
     if (!this.#planId) throw new Error('no plan');
-    const { id: _id, ...body } = plan as Plan & { id?: string };
-    await this.#ws({ type: 'chartroom/plans/save', plan_id: this.#planId, plan: body });
+    await this.#api().savePlan(this.#planId, plan);
     const before = this.#plan;
     this.#plan = plan;
     if (

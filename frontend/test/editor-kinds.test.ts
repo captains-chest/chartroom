@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { findItem, type Kind, KINDS, kindOps } from '../src/editor/kinds';
+import { findItem, type Kind, KINDS, kindOps, titleOf } from '../src/editor/kinds';
 import { emptyPlan, type Plan } from '../src/plan';
 import { addDevice, addOpening, addRoom, addSource, addWall } from '../src/plan-ops';
 
@@ -64,8 +64,8 @@ describe('KINDS', () => {
     expect(kindOps('door').drag(orphan, door, [0, 0], [2, 1])).toBeUndefined();
   });
 
-  it('labels each kind for the inspector', () => {
-    expect(Object.values(KINDS).map((k) => k.label)).toEqual([
+  it('titles each kind by its name for the inspector', () => {
+    expect(Object.keys(KINDS).map(titleOf)).toEqual([
       'Wall',
       'Room',
       'Door',

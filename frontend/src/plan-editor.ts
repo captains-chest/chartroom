@@ -4,7 +4,7 @@ import { autoPlace, deviceChoices, deviceLook } from './devices';
 import { add, dist, frame, mm, sub } from './geometry';
 import type { Hass } from './ha-types';
 import { type Autosaver, autosaver } from './editor/autosaver';
-import { findItem, type Kind, KINDS, kindOps, type Item, type Selection } from './editor/kinds';
+import { findItem, type Item, type Kind, kindOps, type Selection, titleOf } from './editor/kinds';
 import { History } from './history';
 import { areaChoices, entityArea, sourceChoices } from './model';
 import {
@@ -73,48 +73,41 @@ export interface EditorHost {
   plan: Plan;
 }
 
-const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
+const TOOLS: { tool: Tool; key: string; hint: string }[] = [
   {
     tool: 'select',
-    label: 'Select',
     key: 'v',
     hint: 'Click to select, drag to move. Drag empty space to pan.',
   },
   {
     tool: 'wall',
-    label: 'Wall',
     key: 'w',
     hint: 'Click to start, click for each corner. Esc or double-click ends.',
   },
   {
     tool: 'room',
-    label: 'Room',
     key: 'r',
     hint: 'Click each corner; click the first corner or press Enter to close.',
   },
-  { tool: 'door', label: 'Door', key: 'd', hint: 'Click on a wall to put a door there.' },
-  { tool: 'window', label: 'Window', key: 'n', hint: 'Click on a wall to put a window there.' },
+  { tool: 'door', key: 'd', hint: 'Click on a wall to put a door there.' },
+  { tool: 'window', key: 'n', hint: 'Click on a wall to put a window there.' },
   {
     tool: 'source',
-    label: 'Source',
     key: 's',
     hint: 'Click to place a sensor, access point or radio; pick its entity on the right.',
   },
   {
     tool: 'device',
-    label: 'Device',
     key: 'e',
     hint: 'Drag an entity from the list onto the plan, or pick it and click. Auto-place uses areas.',
   },
   {
     tool: 'measure',
-    label: 'Measure',
     key: 'm',
     hint: 'Click two points a known distance apart to calibrate the scale.',
   },
   {
     tool: 'underlay',
-    label: 'Underlay',
     key: 'u',
     hint: 'Import a drawing to trace over; drag to line it up.',
   },
@@ -184,9 +177,10 @@ export class PlanEditor {
     // The panel may already have loaded the picture.
     this.#underlayUrl = host.view.underlayUrl;
     for (const t of TOOLS) {
-      const b = button(t.label, () => this.setTool(t.tool), {
+      const label = titleOf(t.tool);
+      const b = button(label, () => this.setTool(t.tool), {
         'data-tool': t.tool,
-        title: `${t.label} (${t.key.toUpperCase()})`,
+        title: `${label} (${t.key.toUpperCase()})`,
       });
       this.#toolButtons.set(t.tool, b);
     }
@@ -715,7 +709,7 @@ export class PlanEditor {
 
   #itemPanel({ kind, id }: Selection): HTMLElement | null {
     const fields = this.#panels[kind](id);
-    const { label } = KINDS[kind];
+    const label = titleOf(kind);
     return (
       fields &&
       this.#section(

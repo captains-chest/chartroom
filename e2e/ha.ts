@@ -222,12 +222,33 @@ export const SENSOR_AREAS: Record<string, string> = {
   'sensor.hall_sensor_rssi': 'hall',
 };
 
-/** Put the test sensors in their areas, only where an entity exists and has no area yet. */
-export async function ensureSensorAreas(token: string): Promise<void> {
+/** Wait until Home Assistant has finished starting (integrations such as template are set up). */
+export async function waitForRunning(token: string, timeoutMs = 120_000): Promise<void> {
+  const end = Date.now() + timeoutMs;
+  while ((await api<{ state?: string }>(token, '/api/config')).state !== 'RUNNING') {
+    if (Date.now() > end) throw new Error('Home Assistant did not finish starting');
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+/**
+ * Put the test sensors in their areas, only where an entity exists and has no area yet. In CI the
+ * sensors come from .ci/configuration.yaml, so wait for them to be registered.
+ */
+export async function ensureSensorAreas(token: string, timeoutMs = 60_000): Promise<void> {
+  await waitForRunning(token);
+  const end = Date.now() + timeoutMs;
   await withSocket(token, async (send) => {
-    const entities = await send<{ entity_id: string; area_id: string | null }[]>({
-      type: 'config/entity_registry/list',
-    });
+    const list = (): Promise<{ entity_id: string; area_id: string | null }[]> =>
+      send({ type: 'config/entity_registry/list' });
+    let entities = await list();
+    const missing = (): string[] =>
+      Object.keys(SENSOR_AREAS).filter((id) => !entities.some((e) => e.entity_id === id));
+    while (process.env['CI'] && missing().length > 0) {
+      if (Date.now() > end) throw new Error(`test sensors missing: ${missing().join(', ')}`);
+      await new Promise((r) => setTimeout(r, 1000));
+      entities = await list();
+    }
     for (const [entity_id, area_id] of Object.entries(SENSOR_AREAS)) {
       const e = entities.find((x) => x.entity_id === entity_id);
       if (!e || e.area_id) continue;

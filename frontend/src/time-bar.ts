@@ -3,7 +3,7 @@
 // shows the plan as it was at the chosen time by handing the view a `hass` whose states are the
 // recorded ones. Heatmaps, signal (a source that was unavailable) and markers follow from that.
 import type { EntityState, Hass, HassConnection } from './ha-types';
-import type { Plan } from './plan';
+import { planEntities, type Plan } from './plan';
 import { button, h } from './ui';
 
 /** Per entity: times (ms, ascending) and the state from each time on. */
@@ -14,17 +14,6 @@ export const RANGES = [
   { label: '24h', ms: 24 * 3600_000, period: null },
   { label: '7d', ms: 7 * 24 * 3600_000, period: 'hour' },
 ] as const;
-
-/** The entities a plan shows: its sources' and devices' (sensors first, for statistics). */
-export const planEntities = (plan: Plan | null): { sensors: string[]; others: string[] } => {
-  const sensors = new Set<string>();
-  const others = new Set<string>();
-  for (const s of plan?.sources ?? [])
-    if (s.entity_id) (s.kind === 'sensor' ? sensors : others).add(s.entity_id);
-  for (const d of plan?.devices ?? []) others.add(d.entity_id);
-  for (const id of sensors) others.delete(id);
-  return { sensors: [...sensors], others: [...others] };
-};
 
 type Stats = Record<string, { start: number; mean?: number | null }[]>;
 type History = Record<string, { s: string; lu?: number; lc?: number }[]>;

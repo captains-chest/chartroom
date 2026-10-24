@@ -1,10 +1,11 @@
 // What the panel and the card share around the plan view: the layer buttons, the History slider
 // (loaded on first use), the hass the plan shows, loading a plan, and releasing the view's layers
 // while the element is off the page.
-import type { Hass } from './ha-types';
+import { wsApi, type ChartroomApi } from './api';
+import type { Hass, HassConnection } from './ha-types';
 import { layerCounts, type HeatLayerId } from './heat';
 import { LayerToggles } from './layer-toggles';
-import { normalizePlan, type Plan } from './plan';
+import type { Plan } from './plan';
 import type { PlanView } from './plan-view';
 import type { TimeBar } from './time-bar';
 import { button, h } from './ui';
@@ -24,6 +25,7 @@ export class ViewerController {
   readonly timeButton: HTMLButtonElement;
   readonly notice = new UpdateNotice();
   readonly #host: ViewerHost;
+  readonly #api: (c: HassConnection) => ChartroomApi;
   #hass?: Hass;
   #layer: HeatLayerId | null = null;
   #time: TimeBar | null = null;
@@ -33,8 +35,10 @@ export class ViewerController {
   constructor(
     readonly view: PlanView,
     host: ViewerHost,
+    api: (c: HassConnection) => ChartroomApi = wsApi,
   ) {
     this.#host = host;
+    this.#api = api;
     const changed = (): void => host.changed?.(this.#layer, this.view.meshOn);
     this.layers = new LayerToggles(
       (layer) => {
@@ -72,6 +76,12 @@ export class ViewerController {
     return this.#time ? this.#time.view(this.#hass) : this.#hass;
   }
 
+  /** The integration's commands, once Home Assistant is connected. */
+  get api(): ChartroomApi | null {
+    const c = this.#hass?.connection;
+    return c ? this.#api(c) : null;
+  }
+
   setLayer(layer: HeatLayerId | null): void {
     this.#layer = layer;
     this.#renderLayers();
@@ -90,13 +100,9 @@ export class ViewerController {
 
   /** Fetch a plan and show it; null when a later load started meanwhile. */
   async load(planId: string, current = this.begin()): Promise<Plan | null> {
-    const c = this.#hass?.connection;
-    if (!c) throw new Error('not connected');
-    const raw = await c.sendMessagePromise<unknown>({
-      type: 'chartroom/plans/get',
-      plan_id: planId,
-    });
-    const plan = normalizePlan(raw);
+    const api = this.api;
+    if (!api) throw new Error('not connected');
+    const plan = await api.getPlan(planId);
     if (!current()) return null;
     this.view.setPlan(plan);
     if (planId !== this.#planId) void this.#time?.load();

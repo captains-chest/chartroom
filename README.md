@@ -258,7 +258,7 @@ JavaScript dependencies; everything it needs ships in this repository.
 | `.ci/configuration.yaml`               | The CI Home Assistant: template sensors, lights, switches, a lock and a cover for e2e.    |
 | `tests/`, `frontend/test/`, `e2e/`     | pytest, Vitest, and Playwright against a real Home Assistant.                             |
 
-Websocket commands: `chartroom/info` (returns `{version}`, used for the update prompt), `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin), and `chartroom/plans/subscribe`, which sends `{plan_id, deleted}` whenever a plan is saved or deleted. `chartroom/mesh/get` returns the mesh topology `{nodes, links, sources}` (`chartroom/mesh/test_source`, admin only, swaps in a fake one for tests). Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB).
+Websocket commands: `chartroom/info` (returns `{version}`, used for the update prompt), `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin), and `chartroom/plans/subscribe`, which sends `{plan_id, deleted}` whenever a plan is saved or deleted. `chartroom/mesh/get` returns the mesh topology `{nodes, links, sources}` (`chartroom/mesh/test_source`, admin only, swaps in a fake one for tests). Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB). The frontend sends the `chartroom/*` commands through one port, `ChartroomApi` in `frontend/src/api.ts`; the panel and the card share their viewer (layers, History slider, plan loading) in `frontend/src/viewer.ts`.
 
 ## Example data
 

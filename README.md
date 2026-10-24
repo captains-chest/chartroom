@@ -138,7 +138,7 @@ windows with a sensor block heat and signal as they did then. Play runs through 
   Only the plan's placed sensors, sources and devices, and its doors' and windows' sensors, are
   fetched.
 - While you look at the past, tapping a marker opens its details instead of toggling it.
-- The history code is loaded only when you first open it (1.9 KB gzip).
+- The history code is loaded only when you first open it (1.8 KB gzip).
 - What you can go back to depends on your recorder settings (`purge_keep_days`, 10 days by
   default); long-term statistics are kept beyond that.
 
@@ -250,13 +250,20 @@ JavaScript dependencies; everything it needs ships in this repository.
 
 ## What's inside
 
-| Path                                   | What                                                                                      |
-| -------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `custom_components/chartroom/`         | The integration: config flow (single instance), plan storage, websocket API, panel, card. |
-| `custom_components/chartroom/frontend` | Built frontend, committed so HACS can serve it. Do not edit by hand.                      |
-| `frontend/src/`                        | `<chartroom-panel>` and `<chartroom-card>`: TypeScript Web Components, no framework.      |
-| `.ci/configuration.yaml`               | The CI Home Assistant: template sensors, lights, switches, a lock and a cover for e2e.    |
-| `tests/`, `frontend/test/`, `e2e/`     | pytest, Vitest, and Playwright against a real Home Assistant.                             |
+| Path                                                              | What                                                                                                                                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `custom_components/chartroom/`                                    | The integration: config flow (single instance), plan storage, websocket API, panel, card.                                                                    |
+| `custom_components/chartroom/frontend`                            | Built frontend, committed so HACS can serve it. Do not edit by hand.                                                                                         |
+| `frontend/src/`                                                   | `<chartroom-panel>` and `<chartroom-card>`: TypeScript Web Components, no framework.                                                                         |
+| `frontend/src/plan/`                                              | The plan schema: models, types, constants (limits, schema version), normalising and validation (`functions.ts`) and the editor's plan operations (`ops.ts`). |
+| `frontend/src/editor/`                                            | The editor's pure parts: tools, snapping, item kinds and the autosaver. `plan-editor.ts` is its DOM side.                                                    |
+| `frontend/src/heat/`                                              | The heatmap: one `FieldRenderer` interface with WebGL2 and Canvas2D renderers, the worker client, legend and value labels. `heat-layer.ts` drives it.        |
+| `frontend/src/field.ts`, `field-plan.ts`, `signal.ts`             | The field maths, shared by the worker, the renderers and the tests.                                                                                          |
+| `frontend/src/worker.ts`, `worker-protocol.ts`, `field-worker.ts` | The field worker, its messages, and starting it. Nothing it loads touches the DOM.                                                                           |
+| `frontend/src/viewer.ts`, `api.ts`                                | What the panel and the card share around the plan view (`ViewerController`), and the websocket port (`ChartroomApi`).                                        |
+| `frontend/src/geometry.ts`, `text.ts`, `ui.ts`                    | Pure geometry, pure text helpers, and DOM helpers.                                                                                                           |
+| `.ci/configuration.yaml`                                          | The CI Home Assistant: template sensors, lights, switches, a lock and a cover for e2e.                                                                       |
+| `tests/`, `frontend/test/`, `e2e/`                                | pytest, Vitest, and Playwright against a real Home Assistant.                                                                                                |
 
 Websocket commands: `chartroom/info` (returns `{version}`, used for the update prompt), `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin), and `chartroom/plans/subscribe`, which sends `{plan_id, deleted}` whenever a plan is saved or deleted. `chartroom/mesh/get` returns the mesh topology `{nodes, links, sources}` (`chartroom/mesh/test_source`, admin only, swaps in a fake one for tests). Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB). The frontend sends the `chartroom/*` commands through one port, `ChartroomApi` in `frontend/src/api.ts`; the panel and the card share their viewer (layers, History slider, plan loading) in `frontend/src/viewer.ts`.
 

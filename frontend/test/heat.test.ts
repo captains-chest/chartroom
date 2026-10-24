@@ -12,7 +12,8 @@ import {
   rampLut,
   STALE_MS,
 } from '../src/heat';
-import { emptyPlan, type Plan, type Source } from '../src/plan';
+import { emptyPlan } from '../src/plan/functions';
+import type { Plan, Source } from '../src/plan/models';
 
 const NOW = Date.parse('2026-10-24T08:00:00Z');
 

@@ -1,7 +1,10 @@
 // Heatmap layers: which sensors feed each layer, their values, the colour ramps and the value
 // range. Pure functions (no DOM), shared by the panel, the card and the tests.
 import type { EntityState, Hass } from './ha-types';
-import { DEFAULT_TX_DBM, isSignalSource, type Plan, type Point } from './plan';
+import { DEFAULT_TX_DBM } from './plan/constants';
+import { isSignalSource } from './plan/functions';
+import type { Plan } from './plan/models';
+import type { Point } from './plan/types';
 
 export type HeatLayerId = 'temperature' | 'humidity' | 'signal';
 export const HEAT_LAYERS: readonly HeatLayerId[] = ['temperature', 'humidity', 'signal'];

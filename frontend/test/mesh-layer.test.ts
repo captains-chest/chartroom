@@ -7,7 +7,7 @@ import {
   sourceNote,
   type Topology,
 } from '../src/mesh-layer';
-import { emptyPlan } from '../src/plan';
+import { emptyPlan } from '../src/plan/functions';
 
 const topology: Topology = {
   nodes: [

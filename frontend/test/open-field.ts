@@ -1,4 +1,4 @@
-import type { Point } from '../src/plan';
+import type { Point } from '../src/plan/types';
 
 /**
  * The open-plan field planField should give where nothing is in the way: inverse distance over

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { Hass } from '../src/ha-types';
 import { entityArea, sourceChoices } from '../src/model';
-import { emptyPlan, LIMITS, limitWarnings, type Plan, validatePlan } from '../src/plan';
+import { LIMITS } from '../src/plan/constants';
+import { emptyPlan, limitWarnings, validatePlan } from '../src/plan/functions';
+import type { Plan } from '../src/plan/models';
 import { MAX_SIGNAL_SOURCES } from '../src/signal';
 import {
   addSource,
@@ -10,7 +12,7 @@ import {
   moveSource,
   scalePlan,
   updateSource,
-} from '../src/plan-ops';
+} from '../src/plan/ops';
 
 const sensor = (entity_id: string, device_class: string, name: string) => ({
   entity_id,

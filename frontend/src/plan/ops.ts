@@ -13,28 +13,17 @@ import {
   same,
   sub,
   wallRect,
-} from './geometry';
-import {
-  DEFAULT_TX_DBM,
-  type Door,
-  type Material,
-  type Opening,
-  type Plan,
-  type Point,
-  type Room,
-  type Source,
-  type SourceKind,
-  type Wall,
-  type Window,
-} from './plan';
+} from '../geometry';
+import { DEFAULT_TX_DBM } from './constants';
+import type { Door, Material, Opening, Plan, Room, Source, Wall } from './models';
+import type { OpeningKind, Point, SourceKind, Window } from './types';
 
-export type OpeningKind = 'door' | 'window';
-
-export const DEFAULT_WALL = { thickness: 0.1, material: 'partition' } as const;
-export const DEFAULT_DOOR = { width: 0.8, material: 'wood_door', thickness: 0.04 } as const;
-export const DEFAULT_WINDOW = { width: 1.2, material: 'glass', thickness: 0.024 } as const;
+/** What new walls, doors and windows start with (metres). */
+const DEFAULT_WALL = { thickness: 0.1, material: 'partition' } as const;
+const DEFAULT_DOOR = { width: 0.8, material: 'wood_door', thickness: 0.04 } as const;
+const DEFAULT_WINDOW = { width: 1.2, material: 'glass', thickness: 0.024 } as const;
 /** Walls shorter than this are not created. */
-export const MIN_WALL = 0.05;
+const MIN_WALL = 0.05;
 /** Smallest wall thickness, opening width and opening thickness the inspector accepts (m). */
 const MIN_WALL_THICKNESS = 0.01;
 const MIN_OPENING_WIDTH = 0.1;

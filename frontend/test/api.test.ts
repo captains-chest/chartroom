@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { wsApi } from '../src/api';
 import type { HassConnection } from '../src/ha-types';
-import { emptyPlan } from '../src/plan';
+import { emptyPlan } from '../src/plan/functions';
 
 type Message = { type: string; [key: string]: unknown };
 

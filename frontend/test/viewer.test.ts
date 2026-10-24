@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Hass, HassConnection } from '../src/ha-types';
-import { emptyPlan, type Plan } from '../src/plan';
+import { emptyPlan } from '../src/plan/functions';
+import type { Plan } from '../src/plan/models';
 import { PlanView } from '../src/plan-view';
 import { TimeBar } from '../src/time-bar';
 import { ViewerController } from '../src/viewer';

@@ -6,16 +6,9 @@
 import { fadeAt, type FieldGrid } from './field';
 import { closestOnSegment } from './geometry';
 import type { Hass } from './ha-types';
-import {
-  lossDb,
-  materialsOf,
-  pointAlong,
-  wallLength,
-  type Opening,
-  type Plan,
-  type Point,
-  type Wall,
-} from './plan';
+import { lossDb, materialsOf, pointAlong, wallLength } from './plan/functions';
+import type { Opening, Plan, Wall } from './plan/models';
+import type { Point } from './plan/types';
 
 /** Path-loss exponent: 2 in free space, 2-3 indoors. */
 export const SIGNAL_N = 2.2;

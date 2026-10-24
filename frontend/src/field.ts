@@ -9,7 +9,7 @@
 // - 1 sensor: flat. 0 sensors: nothing.
 // Walls are boundaries: field-plan.ts picks, per cell, the sensors this runs over.
 import { polygonArea, signedArea } from './geometry';
-import type { Point } from './plan';
+import type { Point } from './plan/types';
 
 export type FieldMode = 'none' | 'flat' | 'segment' | 'mesh';
 

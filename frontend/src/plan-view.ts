@@ -6,7 +6,8 @@ import type { HeatLayerId, LayerData } from './heat';
 import type { HeatLayer } from './heat-layer';
 import type { MeshLayer } from './mesh-layer';
 import { MarkerLayer, markerStyles } from './markers';
-import type { Plan, Point } from './plan';
+import type { Plan } from './plan/models';
+import type { Point } from './plan/types';
 import { planBody } from './plan-svg';
 import { h, s } from './ui';
 import {

@@ -1,6 +1,6 @@
 import type { FieldGrid, FieldMesh } from '../field';
 import type { FieldPlan } from '../field-plan';
-import type { Point } from '../plan';
+import type { Point } from '../plan/types';
 import type { SignalInput } from '../signal';
 import type { View } from '../viewport';
 import type { RendererKind } from './types';

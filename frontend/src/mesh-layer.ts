@@ -3,7 +3,8 @@
 // Loaded on demand, the first time the Mesh layer is switched on.
 import { wsApi } from './api';
 import type { Hass } from './ha-types';
-import type { Plan, Point } from './plan';
+import type { Plan } from './plan/models';
+import type { Point } from './plan/types';
 import { count } from './text';
 import { h, s } from './ui';
 

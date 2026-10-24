@@ -1,7 +1,8 @@
 // The kinds of plan item the editor selects, with how to find, delete and drag each. Adding a kind
 // is an entry here plus its inspector panel in plan-editor.ts.
 import { add, along } from '../geometry';
-import type { Device, Door, Plan, Point, Room, Source, Wall, Window } from '../plan';
+import type { Device, Door, Plan, Room, Source, Wall } from '../plan/models';
+import type { Point, Window } from '../plan/types';
 import {
   deleteDevice,
   deleteOpening,
@@ -14,7 +15,7 @@ import {
   moveSource,
   moveWall,
   snap,
-} from '../plan-ops';
+} from '../plan/ops';
 
 /** The snapping grid for drawing and for dragged walls and rooms, in metres. */
 export const GRID = 0.05;

@@ -1,7 +1,8 @@
 import type { ChartroomApi } from './api';
 import type { Hass, PlanSummary } from './ha-types';
 import { pingWorker } from './field-worker';
-import { emptyPlan, type Plan } from './plan';
+import { emptyPlan } from './plan/functions';
+import type { Plan } from './plan/models';
 import { type FloorTab, floorTabs, planIdForFloor } from './model';
 import type { PlanEditor } from './plan-editor';
 import { updateNoticeStyles } from './version';

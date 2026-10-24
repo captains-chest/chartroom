@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import { openField } from './open-field';
 import { fieldGrid, nodeValues } from '../src/field';
 import { MAX_FIELD_SIZE, WORKER_VERSION, createHandler } from '../src/worker-protocol';
-import type { Point } from '../src/plan';
+import type { Point } from '../src/plan/types';
 
 describe('worker protocol', () => {
   it('answers a ping', () => {

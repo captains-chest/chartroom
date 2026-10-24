@@ -3,7 +3,8 @@
 import { pointInPolygon, polygonArea, polygonCentroid } from './geometry';
 import type { EntityState, Hass } from './ha-types';
 import { entityArea } from './model';
-import type { Plan, Point } from './plan';
+import type { Plan } from './plan/models';
+import type { Point } from './plan/types';
 import { labelPoint } from './plan-svg';
 
 /** Domains that can go on the plan as device markers. */

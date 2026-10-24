@@ -3,7 +3,7 @@
 // the signal layer it traces the whole field in one go ('signal', the Canvas2D fallback).
 import { nodeValues, type FieldGrid, type FieldMesh } from './field';
 import { fillField, planField, type FieldPlan } from './field-plan';
-import type { Point } from './plan';
+import type { Point } from './plan/types';
 import {
   MAX_SIGNAL_SEGMENTS,
   MAX_SIGNAL_SOURCES,

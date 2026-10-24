@@ -28,24 +28,24 @@ export interface PointerDelegate {
   hover?(p: Point, e: PointerEvent): void;
   /** The browser took the pointer (a scroll started): drop the gesture without acting. */
   cancel?(): void;
+  /** After every pan or zoom (the editor rescales its handles). */
+  viewChanged?(): void;
 }
 
 export class PlanView {
   /** The plan box: the underlay, the heatmap canvas over it, the plan SVG, and the legend. */
   readonly el: HTMLDivElement;
-  readonly svg: SVGSVGElement;
+  readonly #svg: SVGSVGElement;
   /** The underlay drawing, a separate SVG under the heatmap canvas with the same viewBox. */
   readonly #underlaySvg: SVGSVGElement;
   readonly heatLegend: HTMLDivElement;
   readonly #heatBox: HTMLDivElement;
   readonly #heatValues: SVGGElement;
-  /** The live heatmap, once a layer has been switched on (loaded on demand). */
-  heat: HeatLayer | null = null;
+  #heat: HeatLayer | null = null;
   #heatLayer: HeatLayerId | null = null;
   #heatLoad: Promise<HeatLayer | null> | null = null;
   #labelHeat: ((g: SVGGElement, data: LayerData | null) => void) | null = null;
-  /** Mesh links between placed devices, once the Mesh layer has been switched on. */
-  mesh: MeshLayer | null = null;
+  #mesh: MeshLayer | null = null;
   #meshOn = false;
   #meshLoad: Promise<MeshLayer | null> | null = null;
   /** Layers released (the element left the page): loads wait for `resume`. */
@@ -53,7 +53,7 @@ export class PlanView {
   /** Bumped by `dispose`, so a layer that finishes loading after it is dropped. */
   #generation = 0;
   readonly #meshSlot: SVGGElement;
-  readonly overlay: SVGGElement;
+  readonly #overlay: SVGGElement;
   readonly #underlay: SVGGElement;
   readonly #body: SVGGElement;
   /** Live device markers, above the plan and below the editor's handles. */
@@ -67,11 +67,8 @@ export class PlanView {
   #pointers = new Map<number, { x: number; y: number }>();
   #gesture: 'pan' | 'delegate' | 'pinch' | null = null;
   #last: { x: number; y: number; d?: number } | null = null;
-  delegate: PointerDelegate | null = null;
-  /** Called after every setPlan (the panel refreshes its layer buttons). */
-  onPlan: (() => void) | null = null;
-  /** Called after every pan or zoom (the editor rescales its handles). */
-  onViewChange: (() => void) | null = null;
+  #delegate: PointerDelegate | null = null;
+  #onPlan: (() => void) | null = null;
 
   /**
    * `fixed`: the dashboard card. No pan or zoom, so the page still scrolls over it, and the plan is
@@ -80,7 +77,7 @@ export class PlanView {
   constructor(readonly fixed = false) {
     this.#underlay = s('g', { class: 'underlay' });
     this.#body = s('g', { class: 'body' });
-    this.overlay = s('g', { class: 'overlay' });
+    this.#overlay = s('g', { class: 'overlay' });
     this.#heatValues = s('g', { class: 'heat-values', 'aria-hidden': 'true' });
     this.#meshSlot = s('g', { class: 'mesh-slot' });
     this.#underlaySvg = s(
@@ -88,7 +85,7 @@ export class PlanView {
       { class: 'underlay-svg', 'aria-hidden': 'true', preserveAspectRatio: 'none' },
       this.#underlay,
     );
-    this.svg = s(
+    this.#svg = s(
       'svg',
       // A group, not an image, so the device markers inside are buttons screen readers reach.
       { class: 'plan', role: 'group', 'aria-label': 'Floor plan', preserveAspectRatio: 'none' },
@@ -96,7 +93,7 @@ export class PlanView {
       this.#meshSlot,
       this.#heatValues,
       this.markers.g,
-      this.overlay,
+      this.#overlay,
     );
     this.#heatBox = h('div', { class: 'heat-box', hidden: true });
     this.heatLegend = h('div', { class: 'heat-legend', role: 'img', hidden: true });
@@ -105,19 +102,54 @@ export class PlanView {
       { class: 'plan-box' },
       this.#underlaySvg,
       this.#heatBox,
-      this.svg,
+      this.#svg,
       this.heatLegend,
     );
     if (fixed) {
-      this.svg.classList.add('fixed');
+      this.#svg.classList.add('fixed');
       this.el.classList.add('fixed');
-    } else this.svg.addEventListener('wheel', (e) => this.#wheel(e), { passive: false });
-    this.svg.addEventListener('pointerdown', (e) => this.#down(e));
-    this.svg.addEventListener('pointermove', (e) => this.#move(e));
-    this.svg.addEventListener('pointerup', (e) => this.#up(e));
-    this.svg.addEventListener('pointercancel', (e) => this.#up(e, true));
-    this.svg.addEventListener('contextmenu', (e) => e.preventDefault());
-    new ResizeObserver(() => this.#resize()).observe(this.svg);
+    } else this.#svg.addEventListener('wheel', (e) => this.#wheel(e), { passive: false });
+    this.#svg.addEventListener('pointerdown', (e) => this.#down(e));
+    this.#svg.addEventListener('pointermove', (e) => this.#move(e));
+    this.#svg.addEventListener('pointerup', (e) => this.#up(e));
+    this.#svg.addEventListener('pointercancel', (e) => this.#up(e, true));
+    this.#svg.addEventListener('contextmenu', (e) => e.preventDefault());
+    new ResizeObserver(() => this.#resize()).observe(this.#svg);
+  }
+
+  /** The live heatmap, once a layer has been switched on (loaded on demand). */
+  get heat(): HeatLayer | null {
+    return this.#heat;
+  }
+
+  /** Mesh links between placed devices, once the Mesh layer has been switched on. */
+  get mesh(): MeshLayer | null {
+    return this.#mesh;
+  }
+
+  get delegate(): PointerDelegate | null {
+    return this.#delegate;
+  }
+
+  /** Hand pointer handling to `delegate` (the editor or the device controls). */
+  setDelegate(delegate: PointerDelegate | null): void {
+    this.#delegate = delegate;
+  }
+
+  /** Call `fn` after every setPlan (the viewer refreshes its layer buttons). */
+  onPlan(fn: () => void): void {
+    this.#onPlan = fn;
+  }
+
+  /** The editor's handles and drafts, drawn above everything else. */
+  drawOverlay(...nodes: SVGElement[]): void {
+    this.#overlay.replaceChildren(...nodes);
+  }
+
+  /** Mark the plan as edited with `tool` (for the cursor), or not edited. */
+  setEditing(tool: string | null): void {
+    this.#svg.classList.toggle('editing', !!tool);
+    this.#svg.dataset['tool'] = tool ?? '';
   }
 
   get view(): View {
@@ -130,7 +162,7 @@ export class PlanView {
 
   /** Metres per screen pixel at the current zoom. */
   get mpp(): number {
-    return metresPerPixel(this.#view, Math.max(1, this.svg.clientWidth));
+    return metresPerPixel(this.#view, Math.max(1, this.#svg.clientWidth));
   }
 
   setPlan(plan: Plan | null, selected?: { kind: string; id: string } | null): void {
@@ -148,18 +180,18 @@ export class PlanView {
     this.markers.render(plan?.devices ?? [], this.#hass, this.#selectedDevice);
     this.#renderUnderlay();
     if (!this.#fitted) this.fit();
-    this.heat?.setPlan(plan);
-    this.mesh?.setPlan(plan);
+    this.#heat?.setPlan(plan);
+    this.#mesh?.setPlan(plan);
     this.#tidyLabels();
-    this.onPlan?.();
+    this.#onPlan?.();
   }
 
   /** Show a heatmap layer, or none. The renderer loads the first time a layer is shown. */
   async setLayer(layer: HeatLayerId | null): Promise<void> {
     this.#heatLayer = layer;
-    if (this.#released || (!layer && !this.heat)) return;
+    if (this.#released || (!layer && !this.#heat)) return;
     const heat = await this.#loadHeat();
-    if (heat && heat === this.heat) heat.setLayer(this.#heatLayer);
+    if (heat && heat === this.#heat) heat.setLayer(this.#heatLayer);
   }
 
   get layer(): HeatLayerId | null {
@@ -169,7 +201,7 @@ export class PlanView {
   /** Show or hide the mesh links. Their code loads the first time they are shown. */
   async setMesh(on: boolean): Promise<void> {
     this.#meshOn = on;
-    if (this.#released || (!on && !this.mesh)) return;
+    if (this.#released || (!on && !this.#mesh)) return;
     const generation = this.#generation;
     this.#meshLoad ??= import('./mesh-layer').then((m) => {
       if (generation !== this.#generation) return null;
@@ -178,11 +210,11 @@ export class PlanView {
       this.el.append(mesh.note);
       mesh.setHass(this.#hass);
       mesh.setPlan(this.#plan);
-      this.mesh = mesh;
+      this.#mesh = mesh;
       return mesh;
     });
     const mesh = await this.#meshLoad;
-    if (mesh && mesh === this.mesh) await mesh.setOn(this.#meshOn);
+    if (mesh && mesh === this.#mesh) await mesh.setOn(this.#meshOn);
   }
 
   get meshOn(): boolean {
@@ -197,10 +229,10 @@ export class PlanView {
       this.#labelHeat = m.renderValueLabels;
       this.#declutter = m.declutterLabels;
       heat.onReadings = (data) => this.#markHeat(data);
-      heat.setView(this.#view, this.svg.clientWidth, this.svg.clientHeight);
+      heat.setView(this.#view, this.#svg.clientWidth, this.#svg.clientHeight);
       heat.setHass(this.#hass);
       heat.setPlan(this.#plan);
-      this.heat = heat;
+      this.#heat = heat;
       return heat;
     });
     return this.#heatLoad;
@@ -213,13 +245,13 @@ export class PlanView {
   dispose(): void {
     this.#released = true;
     this.#generation++;
-    this.heat?.dispose();
-    this.heat = null;
+    this.#heat?.dispose();
+    this.#heat = null;
     this.#heatLoad = null;
-    this.mesh?.dispose();
-    this.mesh?.g.remove();
-    this.mesh?.note.remove();
-    this.mesh = null;
+    this.#mesh?.dispose();
+    this.#mesh?.g.remove();
+    this.#mesh?.note.remove();
+    this.#mesh = null;
     this.#meshLoad = null;
   }
 
@@ -255,8 +287,8 @@ export class PlanView {
   setHass(hass: Hass | undefined): void {
     this.#hass = hass;
     this.markers.update(hass);
-    this.heat?.setHass(hass);
-    this.mesh?.setHass(hass);
+    this.#heat?.setHass(hass);
+    this.#mesh?.setHass(hass);
   }
 
   /** The underlay image as a URL the browser can load (a blob URL). */
@@ -301,8 +333,8 @@ export class PlanView {
   }
 
   fit(): void {
-    const w = this.svg.clientWidth;
-    const h = this.svg.clientHeight;
+    const w = this.#svg.clientWidth;
+    const h = this.#svg.clientHeight;
     if (w === 0 || h === 0) {
       this.#fitted = false;
       return;
@@ -318,24 +350,24 @@ export class PlanView {
 
   /** Plan coordinates of a pointer event. */
   toPlan(e: { clientX: number; clientY: number }): Point {
-    const r = this.svg.getBoundingClientRect();
+    const r = this.#svg.getBoundingClientRect();
     return toPlan(this.#view, e.clientX - r.left, e.clientY - r.top, r.width || 1, r.height || 1);
   }
 
   #setView(v: View): void {
     this.#view = v;
-    this.svg.setAttribute('viewBox', viewBoxOf(v));
+    this.#svg.setAttribute('viewBox', viewBoxOf(v));
     this.#underlaySvg.setAttribute('viewBox', viewBoxOf(v));
-    this.svg.style.setProperty('--mpp', String(this.mpp));
+    this.#svg.style.setProperty('--mpp', String(this.mpp));
     this.markers.setScale(this.mpp);
-    this.heat?.setView(v, this.svg.clientWidth, this.svg.clientHeight);
+    this.#heat?.setView(v, this.#svg.clientWidth, this.#svg.clientHeight);
     this.#tidyLabels();
-    this.onViewChange?.();
+    this.#delegate?.viewChanged?.();
   }
 
   #resize(): void {
-    const w = this.svg.clientWidth;
-    const h = this.svg.clientHeight;
+    const w = this.#svg.clientWidth;
+    const h = this.#svg.clientHeight;
     if (w === 0 || h === 0) return;
     if (!this.#fitted || this.fixed) this.fit();
     else this.#setView(withAspect(this.#view, w / h));
@@ -350,30 +382,30 @@ export class PlanView {
 
   #down(e: PointerEvent): void {
     if (this.fixed) {
-      if (this.#pointers.size === 0 && this.delegate?.down(this.toPlan(e), e)) {
+      if (this.#pointers.size === 0 && this.#delegate?.down(this.toPlan(e), e)) {
         this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         this.#gesture = 'delegate';
       }
       return;
     }
-    this.svg.setPointerCapture?.(e.pointerId);
+    this.#svg.setPointerCapture?.(e.pointerId);
     this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (this.#pointers.size === 2) {
       // A second finger turns any gesture into pinch-zoom.
-      if (this.#gesture === 'delegate') this.delegate?.up(this.toPlan(e), e);
+      if (this.#gesture === 'delegate') this.#delegate?.up(this.toPlan(e), e);
       this.#gesture = 'pinch';
       this.#last = this.#pinchState();
       return;
     }
     if (this.#pointers.size > 2) return;
     const panButton = e.button === 1 || e.button === 2 || e.shiftKey;
-    if (!panButton && this.delegate?.down(this.toPlan(e), e)) {
+    if (!panButton && this.#delegate?.down(this.toPlan(e), e)) {
       this.#gesture = 'delegate';
       return;
     }
     this.#gesture = 'pan';
     this.#last = { x: e.clientX, y: e.clientY };
-    this.svg.classList.add('panning');
+    this.#svg.classList.add('panning');
   }
 
   #pinchState(): { x: number; y: number; d: number } {
@@ -385,7 +417,7 @@ export class PlanView {
     if (this.#pointers.has(e.pointerId))
       this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (this.#gesture === 'delegate') {
-      this.delegate?.move(this.toPlan(e), e);
+      this.#delegate?.move(this.toPlan(e), e);
     } else if (this.#gesture === 'pan' && this.#last) {
       const k = this.mpp;
       this.#setView(
@@ -403,20 +435,20 @@ export class PlanView {
       this.#setView(v);
       this.#last = now;
     } else if (this.#gesture === null) {
-      this.delegate?.hover?.(this.toPlan(e), e);
+      this.#delegate?.hover?.(this.toPlan(e), e);
     }
   }
 
   #up(e: PointerEvent, cancelled = false): void {
     if (!this.#pointers.delete(e.pointerId) && this.fixed) return;
     if (this.#gesture === 'delegate') {
-      if (cancelled && this.delegate?.cancel) this.delegate.cancel();
-      else this.delegate?.up(this.toPlan(e), e);
+      if (cancelled && this.#delegate?.cancel) this.#delegate.cancel();
+      else this.#delegate?.up(this.toPlan(e), e);
     }
     if (this.#pointers.size === 0) {
       this.#gesture = null;
       this.#last = null;
-      this.svg.classList.remove('panning');
+      this.#svg.classList.remove('panning');
     } else if (this.#gesture === 'pinch') {
       // One finger left: carry on panning with it.
       this.#gesture = 'pan';

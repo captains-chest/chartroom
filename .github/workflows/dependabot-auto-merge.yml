@@ -2,8 +2,8 @@ name: Dependabot auto-merge
 
 # Turns on GitHub auto-merge (squash) for Dependabot PRs. The PR merges only once the
 # required CI checks in the branch ruleset pass; a red build blocks it. Without a ruleset that
-# requires checks (for example while the repository is private on the free plan), `--auto` would
-# merge immediately, so the job does nothing and the PR waits for a human.
+# requires checks, `--auto` merges at once; the private repo on the free plan cannot have one, so
+# the job only runs on a public repository. Major-version bumps are never auto-merged.
 on: pull_request_target
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   auto-merge:
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && !github.event.repository.private
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -23,16 +23,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enable auto-merge
-        run: |
-          required=$(gh api "repos/$REPO/rules/branches/$BASE" \
-            --jq '[.[] | select(.type == "required_status_checks")] | length' 2>/dev/null || echo 0)
-          if [ "${required:-0}" = 0 ]; then
-            echo "::notice::No required status checks on $BASE; not enabling auto-merge."
-            exit 0
-          fi
-          gh pr merge --auto --squash "$PR_URL"
+        # Major bumps always wait for a human.
+        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
-          REPO: ${{ github.repository }}
-          BASE: ${{ github.event.pull_request.base.ref }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

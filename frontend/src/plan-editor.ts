@@ -1,15 +1,15 @@
 // The wall and room editor: tools, selection, dragging with snapping, an inspector for the
 // selection, undo/redo and autosave. Loaded on demand by the panel (its own chunk).
 import { autoPlace, deviceChoices, deviceLook } from './devices';
-import { add, along, dist, frame, mm, sub } from './geometry';
+import { add, dist, frame, mm, sub } from './geometry';
 import type { Hass } from './ha-types';
+import { findItem, type Kind, KINDS, kindOps, type Item, type Selection } from './editor/kinds';
 import { History } from './history';
 import { areaChoices, entityArea, sourceChoices } from './model';
 import {
   type Door,
   limitWarnings,
   materialsOf,
-  type Opening,
   type Plan,
   type Point,
   polygonArea,
@@ -22,19 +22,9 @@ import {
   addSource,
   addWall,
   areaFactor,
-  deleteDevice,
-  deleteOpening,
-  deleteRoom,
-  deleteSource,
-  deleteWall,
   DEFAULT_WALL,
-  moveDevice,
   moveEndpoint,
-  moveOpening,
-  moveRoom,
   moveRoomVertex,
-  moveSource,
-  moveWall,
   scalePlan,
   setMaterial,
   snap,
@@ -62,25 +52,15 @@ export type Tool =
   | 'device'
   | 'measure'
   | 'underlay';
-type Kind = 'wall' | 'room' | 'door' | 'window' | 'source' | 'device';
 
 const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
   { value: 'sensor', label: 'Temperature / humidity sensor' },
   { value: 'access_point', label: 'Wi-Fi access point' },
   { value: 'radio', label: 'Radio (Zigbee, Z-Wave, Thread…)' },
 ];
-interface Selection {
-  kind: Kind;
-  id: string;
-}
-
 type Drag =
+  | { type: 'item'; base: Plan; kind: Kind; item: Item; start: Point }
   | { type: 'endpoint'; base: Plan; from: Point }
-  | { type: 'wall'; base: Plan; id: string; start: Point }
-  | { type: 'opening'; base: Plan; id: string }
-  | { type: 'source'; base: Plan; id: string; start: Point; from: Point }
-  | { type: 'device'; base: Plan; id: string; start: Point; from: Point }
-  | { type: 'room'; base: Plan; id: string; start: Point }
   | { type: 'vertex'; base: Plan; id: string; index: number }
   | { type: 'underlay'; base: Plan; start: Point };
 
@@ -144,6 +124,8 @@ const SNAP_PX = 10;
 const SAVE_DELAY = 600;
 
 const DOUBLE_CLICK_PX = 6;
+/** An inspector section's content. */
+type Fields = (HTMLElement | null)[];
 /** Drag-and-drop type for an entity dragged from the Device list onto the plan. */
 const ENTITY_MIME = 'application/x-chartroom-entity';
 
@@ -309,7 +291,7 @@ export class PlanEditor {
 
   #dropStaleSelection(): void {
     const sel = this.#selection;
-    if (sel && !this.#find(sel)) this.#selection = null;
+    if (sel && !findItem(this.plan, sel)) this.#selection = null;
   }
 
   #afterChange(): void {
@@ -387,19 +369,8 @@ export class PlanEditor {
   deleteSelection(): void {
     const sel = this.#selection;
     if (!sel) return;
-    const p = this.plan;
-    const next =
-      sel.kind === 'wall'
-        ? deleteWall(p, sel.id)
-        : sel.kind === 'room'
-          ? deleteRoom(p, sel.id)
-          : sel.kind === 'source'
-            ? deleteSource(p, sel.id)
-            : sel.kind === 'device'
-              ? deleteDevice(p, sel.id)
-              : deleteOpening(p, sel.id);
     this.#selection = null;
-    this.#commit(next);
+    this.#commit(kindOps(sel.kind).remove(this.plan, sel.id));
   }
 
   // ---- pointer ----
@@ -535,38 +506,21 @@ export class PlanEditor {
     const el = target?.closest<SVGElement>('[data-kind]');
     const kind = el?.dataset['kind'] as Kind | undefined;
     const id = el?.dataset['id'];
-    if (kind === 'device' && id) {
-      const dev = base.devices?.find((x) => x.id === id);
-      if (!dev) return false;
-      this.#selection = { kind, id };
-      this.#drag = { type: 'device', base, id, start: p, from: dev.position };
-      this.#render();
-      return true;
-    }
-    if (kind === 'source' && id) {
-      const src = base.sources.find((x) => x.id === id);
-      if (!src) return false;
-      this.#selection = { kind, id };
-      this.#drag = { type: 'source', base, id, start: p, from: src.position };
-      this.#render();
-      return true;
-    }
-    if (!kind || !id) {
+    let sel: Selection;
+    if (kind && id) sel = { kind, id };
+    else {
       // A click beside a wall still picks it, so thin walls are easy to hit.
       const near = wallAt(base, p, this.#snapRadius() / 2);
       if (!near) {
         if (this.#selection) this.select(null);
         return false;
       }
-      this.#selection = { kind: 'wall', id: near.wall.id };
-      this.#drag = { type: 'wall', base, id: near.wall.id, start: p };
-      this.#render();
-      return true;
+      sel = { kind: 'wall', id: near.wall.id };
     }
-    this.#selection = { kind, id };
-    if (kind === 'wall') this.#drag = { type: 'wall', base, id, start: p };
-    else if (kind === 'room') this.#drag = { type: 'room', base, id, start: p };
-    else this.#drag = { type: 'opening', base, id };
+    const item = findItem(base, sel);
+    if (!item) return false;
+    this.#selection = sel;
+    this.#drag = { type: 'item', base, kind: sel.kind, item, start: p };
     this.#render();
     return true;
   }
@@ -577,12 +531,11 @@ export class PlanEditor {
       this.#hoverAt(p, e);
       return;
     }
-    const grid = (v: Point): Point => [
-      mm(Math.round(v[0] / 0.05) * 0.05),
-      mm(Math.round(v[1] / 0.05) * 0.05),
-    ];
-    let next: Plan;
+    let next: Plan | undefined;
     switch (d.type) {
+      case 'item':
+        next = kindOps(d.kind).drag(d.base, d.item, sub(p, d.start), p);
+        break;
       case 'endpoint': {
         const q = snap(p, {
           radius: this.#snapRadius(),
@@ -593,12 +546,6 @@ export class PlanEditor {
         next = moveEndpoint(d.base, d.from, q);
         break;
       }
-      case 'wall':
-        next = moveWall(d.base, d.id, grid(sub(p, d.start)));
-        break;
-      case 'room':
-        next = moveRoom(d.base, d.id, grid(sub(p, d.start)));
-        break;
       case 'vertex': {
         const q = snap(p, {
           radius: this.#snapRadius(),
@@ -609,19 +556,6 @@ export class PlanEditor {
         next = moveRoomVertex(d.base, d.id, d.index, q);
         break;
       }
-      case 'opening': {
-        const o = findOpening(d.base, d.id);
-        const wall = o && d.base.walls.find((w) => w.id === o.wall);
-        if (!wall) return;
-        next = moveOpening(d.base, d.id, along(wall, p));
-        break;
-      }
-      case 'source':
-        next = moveSource(d.base, d.id, add(d.from, sub(p, d.start)));
-        break;
-      case 'device':
-        next = moveDevice(d.base, d.id, add(d.from, sub(p, d.start)));
-        break;
       case 'underlay': {
         const u = d.base.underlay;
         if (!u) return;
@@ -633,6 +567,7 @@ export class PlanEditor {
         break;
       }
     }
+    if (!next) return;
     this.#moved = true;
     this.#preview = next;
     this.#render();
@@ -675,15 +610,6 @@ export class PlanEditor {
     const sel = this.#selection;
     const wall = sel?.kind === 'wall' ? this.plan.walls.find((w) => w.id === sel.id) : undefined;
     return wall ? { thickness: wall.thickness, material: wall.material } : { ...DEFAULT_WALL };
-  }
-
-  #find(sel: Selection): unknown {
-    const p = this.plan;
-    if (sel.kind === 'wall') return p.walls.find((w) => w.id === sel.id);
-    if (sel.kind === 'room') return p.rooms.find((r) => r.id === sel.id);
-    if (sel.kind === 'source') return p.sources.find((x) => x.id === sel.id);
-    if (sel.kind === 'device') return p.devices?.find((x) => x.id === sel.id);
-    return findOpening(p, sel.id);
   }
 
   // ---- rendering ----
@@ -786,11 +712,7 @@ export class PlanEditor {
     if (this.#tool === 'source' && !sel) parts.push(this.#newSourcePanel());
     if (this.#tool === 'device' && !sel) parts.push(this.#devicesPanel());
     if (this.#measured) parts.push(this.#measurePanel(this.#measured));
-    if (sel?.kind === 'wall') parts.push(this.#wallPanel(sel.id));
-    else if (sel?.kind === 'room') parts.push(this.#roomPanel(sel.id));
-    else if (sel?.kind === 'door' || sel?.kind === 'window') parts.push(this.#openingPanel(sel.id));
-    else if (sel?.kind === 'source') parts.push(this.#sourcePanel(sel.id));
-    else if (sel?.kind === 'device') parts.push(this.#devicePanel(sel.id));
+    if (sel) parts.push(this.#itemPanel(sel));
     else if (this.#tool !== 'device') parts.push(this.#planPanel());
     if (this.#tool === 'device' || sel?.kind === 'device') this.#deviceKey = this.#deviceListKey();
     if (!sel && this.#tool !== 'source' && this.#tool !== 'device')
@@ -804,17 +726,42 @@ export class PlanEditor {
     return h('section', { 'data-panel': kind }, h('h2', {}, title), ...children);
   }
 
+  /** Each kind's inspector fields; `#itemPanel` adds the title and the Delete button. */
+  readonly #panels: Record<Kind, (id: string) => Fields | null> = {
+    wall: (id) => this.#wallPanel(id),
+    room: (id) => this.#roomPanel(id),
+    door: (id) => this.#openingPanel(id),
+    window: (id) => this.#openingPanel(id),
+    source: (id) => this.#sourcePanel(id),
+    device: (id) => this.#devicePanel(id),
+  };
+
+  #itemPanel({ kind, id }: Selection): HTMLElement | null {
+    const fields = this.#panels[kind](id);
+    const { label } = KINDS[kind];
+    return (
+      fields &&
+      this.#section(
+        label,
+        kind,
+        ...fields,
+        button(`Delete ${label.toLowerCase()}`, () => this.deleteSelection(), {
+          class: 'danger',
+          'data-action': 'delete',
+        }),
+      )
+    );
+  }
+
   #materialOptions(): { value: string; label: string }[] {
     return [...materialsOf(this.plan).values()].map((m) => ({ value: m.id, label: m.name }));
   }
 
-  #wallPanel(id: string): HTMLElement | null {
+  #wallPanel(id: string): Fields | null {
     const wall = this.plan.walls.find((w) => w.id === id);
     if (!wall) return null;
     const length = frame(wall).length;
-    return this.#section(
-      'Wall',
-      'wall',
+    return [
       field(
         'Material',
         select(
@@ -847,22 +794,17 @@ export class PlanEditor {
         ),
       ),
       h('p', { class: 'meta' }, `${wall.id}`),
-      button('Delete wall', () => this.deleteSelection(), {
-        class: 'danger',
-        'data-action': 'delete',
-      }),
-    );
+    ];
   }
 
-  #openingPanel(id: string): HTMLElement | null {
-    const o = findOpening(this.plan, id);
+  #openingPanel(id: string): Fields | null {
+    const o =
+      this.plan.doors.find((d) => d.id === id) ?? this.plan.windows.find((w) => w.id === id);
     if (!o) return null;
     const isDoor = 'hinge' in o;
     const set = (patch: Partial<Omit<Door, 'id' | 'wall'>>): void =>
       this.#commit(updateOpening(this.plan, id, patch));
-    return this.#section(
-      isDoor ? 'Door' : 'Window',
-      isDoor ? 'door' : 'window',
+    return [
       field(
         'Width (cm)',
         numberInput(mm(o.width * 100), (v) => set({ width: v / 100 }), {
@@ -904,22 +846,16 @@ export class PlanEditor {
             }),
           )
         : null,
-      button(`Delete ${isDoor ? 'door' : 'window'}`, () => this.deleteSelection(), {
-        class: 'danger',
-        'data-action': 'delete',
-      }),
-    );
+    ];
   }
 
-  #roomPanel(id: string): HTMLElement | null {
+  #roomPanel(id: string): Fields | null {
     const room = this.plan.rooms.find((r) => r.id === id);
     if (!room) return null;
     const areas = areaChoices(this.#host.hass(), this.plan.floor_id ?? null);
     const area = polygonArea(room.polygon);
     let target = area;
-    return this.#section(
-      'Room',
-      'room',
+    return [
       field(
         'Name',
         textInput(
@@ -965,11 +901,7 @@ export class PlanEditor {
           },
         ),
       ),
-      button('Delete room', () => this.deleteSelection(), {
-        class: 'danger',
-        'data-action': 'delete',
-      }),
-    );
+    ];
   }
 
   #measurePanel([a, b]: [Point, Point]): HTMLElement {
@@ -1067,7 +999,7 @@ export class PlanEditor {
     );
   }
 
-  #sourcePanel(id: string): HTMLElement | null {
+  #sourcePanel(id: string): Fields | null {
     const src = this.plan.sources.find((x) => x.id === id);
     if (!src) return null;
     const hass = this.#host.hass();
@@ -1108,9 +1040,7 @@ export class PlanEditor {
         list,
       );
     }
-    return this.#section(
-      'Source',
-      'source',
+    return [
       field(
         'Kind',
         select(SOURCE_KINDS, src.kind, (v) => set({ kind: v as SourceKind }), {
@@ -1134,11 +1064,7 @@ export class PlanEditor {
         { class: 'meta', 'data-area': src.area_id ?? '' },
         `${areaName ? `In ${areaName}` : 'No area'} · ${src.position[0].toFixed(2)}, ${src.position[1].toFixed(2)} m`,
       ),
-      button('Delete source', () => this.deleteSelection(), {
-        class: 'danger',
-        'data-action': 'delete',
-      }),
-    );
+    ];
   }
 
   // ---- devices ----
@@ -1250,7 +1176,7 @@ export class PlanEditor {
     );
   }
 
-  #devicePanel(id: string): HTMLElement | null {
+  #devicePanel(id: string): Fields | null {
     const dev = this.plan.devices?.find((d) => d.id === id);
     if (!dev) return null;
     const hass = this.#host.hass();
@@ -1262,9 +1188,7 @@ export class PlanEditor {
       opts.unshift({ value: dev.entity_id, label: `${dev.entity_id} (not on this floor)` });
     const area = hass ? entityArea(hass, dev.entity_id) : null;
     const look = deviceLook(dev.entity_id, hass?.states?.[dev.entity_id]);
-    return this.#section(
-      'Device',
-      'device',
+    return [
       field(
         'Entity',
         select(opts, dev.entity_id, (v) => this.#commit(updateDevice(this.plan, id, v)), {
@@ -1276,11 +1200,7 @@ export class PlanEditor {
         { class: 'meta', 'data-entity': dev.entity_id },
         `${look.label} · ${area ? (hass?.areas?.[area]?.name ?? area) : 'No area'} · ${dev.position[0].toFixed(2)}, ${dev.position[1].toFixed(2)} m`,
       ),
-      button('Delete device', () => this.deleteSelection(), {
-        class: 'danger',
-        'data-action': 'delete',
-      }),
-    );
+    ];
   }
 
   #materialsPanel(): HTMLElement {
@@ -1394,10 +1314,6 @@ export class PlanEditor {
     this.#underlayUrl = url;
     this.#render();
   }
-}
-
-function findOpening(plan: Plan, id: string): Opening | undefined {
-  return plan.doors.find((d) => d.id === id) ?? plan.windows.find((w) => w.id === id);
 }
 
 const editorStyles = `

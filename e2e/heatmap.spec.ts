@@ -29,14 +29,16 @@ async function openExample(page: Page): Promise<Locator> {
   return panel;
 }
 
-/** Wait for the heatmap to settle (layout, field and transitions done), then read its state. */
-const heat = (panel: Locator): Promise<Omit<Heat, 'idle'>> =>
-  panel.evaluate(async (el) => {
-    const h = (el as WithView).view.heat;
-    if (!h) throw new Error('no heat layer');
+/** Wait for the heatmap to load and settle (layout, field and transitions done), then read it. */
+async function heat(panel: Locator): Promise<Omit<Heat, 'idle'>> {
+  // Its code loads on demand, after the first click on a layer.
+  await expect.poll(() => panel.evaluate((el) => !!(el as WithView).view.heat)).toBe(true);
+  return panel.evaluate(async (el) => {
+    const h = (el as WithView).view.heat!;
     await h.idle();
     return { renderer: h.renderer, layer: h.layer, mode: h.mode, data: h.data };
   });
+}
 
 async function shot(page: Page, name: string): Promise<void> {
   if (!SHOTS) return;

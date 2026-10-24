@@ -24,6 +24,7 @@ import type {
   Wall,
   Window,
 } from './plan';
+import { DEFAULT_TX_DBM } from './plan';
 
 export type OpeningKind = 'door' | 'window';
 
@@ -396,8 +397,7 @@ export function setMaterial(plan: Plan, material: Material): Plan {
   };
 }
 
-/** Default reference level at 1 m for new access points and radios, in dBm. */
-export const DEFAULT_TX_DBM = { access_point: -40, radio: -45 } as const;
+export { DEFAULT_TX_DBM };
 
 /** Place a source; access points and radios get a default reference level. */
 export function addSource(

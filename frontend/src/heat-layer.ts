@@ -1,10 +1,12 @@
 // The live heatmap under the SVG plan: picks the sensors for the active layer, has the worker
 // triangulate them (only when the layout changes), eases values and the range, cross-fades layout
-// changes, and draws with WebGL2 or, failing that, Canvas2D from the worker's field grid.
+// changes, and draws with WebGL2 or, failing that, Canvas2D from the worker's field grid. The
+// signal layer is traced instead (signal.ts): in one WebGL2 pass, or by the worker for Canvas2D.
 // Loaded on demand, the first time a layer is switched on.
-import { fieldGrid, nodeValues, type FieldGrid, type FieldMesh } from './field';
+import { FADE_DISTANCE, fieldGrid, nodeValues, type FieldGrid, type FieldMesh } from './field';
 import { planBounds } from './geometry';
 import { GlRenderer } from './heat-gl';
+import { AREA_SIZE, declutter, NAME_SIZE } from './labels';
 import {
   LAYERS,
   TRANSITION_MS,
@@ -19,6 +21,7 @@ import {
 } from './heat';
 import type { Hass } from './ha-types';
 import type { Plan, Point } from './plan';
+import { SEG, SIGNAL_CELLS, signalInput, signalKey, type SignalInput } from './signal';
 import { h, s } from './ui';
 import type { View } from './viewport';
 import {
@@ -40,9 +43,11 @@ interface CanvasField {
 }
 interface Layout {
   key: string;
-  mesh: FieldMesh;
+  /** The sensor triangulation, or null for the traced signal layer. */
+  mesh: FieldMesh | null;
   grid: FieldGrid;
   ids: string[];
+  signal?: SignalInput;
 }
 
 /** Talks to the field worker; runs the same handler in this thread when workers are unavailable. */
@@ -237,6 +242,7 @@ export class HeatLayer {
   #fieldFor = '';
   #sig = '';
   #lut: Uint8Array = rampLut(LAYERS.temperature.ramp);
+  #segments = 0;
   #idle: (() => void)[] = [];
   #reduced =
     typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -261,7 +267,8 @@ export class HeatLayer {
   }
 
   get mode(): string {
-    return this.#layout?.mesh.mode ?? 'none';
+    const L = this.#layout;
+    return L ? (L.mesh?.mode ?? 'signal') : 'none';
   }
 
   get ms(): number {
@@ -282,10 +289,12 @@ export class HeatLayer {
     this.#resizeCanvas();
     if (kind === 'webgl2') {
       try {
-        this.#gl = new GlRenderer(this.#canvas);
-        this.#canvas.addEventListener('webglcontextlost', (e) => {
+        const canvas = this.#canvas;
+        this.#gl = new GlRenderer(canvas);
+        canvas.addEventListener('webglcontextlost', (e) => {
           e.preventDefault();
-          this.setRenderer('canvas');
+          // A context we dropped ourselves (dispose) is lost too, after the switch: ignore it.
+          if (canvas === this.#canvas) this.setRenderer('canvas');
         });
       } catch {
         this.#gl = null;
@@ -302,7 +311,13 @@ export class HeatLayer {
   setRenderer(kind: RendererKind): void {
     this.#pickRenderer(kind);
     const L = this.#layout;
-    if (L) this.#applyLayout(L, false);
+    if (L?.mesh) this.#applyLayout(L, false);
+    else if (L) {
+      // A traced field is not kept: trace it again for the new renderer.
+      this.#layout = null;
+      this.#wantKey = '';
+      this.#refresh();
+    }
   }
 
   setLayer(layer: HeatLayerId | null): void {
@@ -361,7 +376,9 @@ export class HeatLayer {
     this.#data = data;
     const bounds = planBounds(plan);
     const outline = plan.outline;
-    const key = `${layer}|${data.unit}|${layoutKey(data.readings, outline)}|${bounds ? [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].join(',') : ''}`;
+    const input = layer === 'signal' ? signalInput(plan, this.#hass, data.readings) : null;
+    this.#segments = input ? input.walls.length / SEG : 0;
+    const key = `${layer}|${data.unit}|${input ? signalKey(input) : ''}|${layoutKey(data.readings, outline)}|${bounds ? [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].join(',') : ''}`;
     const now = performance.now();
     const values = data.readings.map((r) => r.value);
     const target = layerDomain(layer, data.unit, values);
@@ -399,8 +416,25 @@ export class HeatLayer {
     this.box.hidden = false;
     if (key !== this.#wantKey) {
       this.#wantKey = key;
-      const grid = fieldGrid(bounds ?? { minX: 0, minY: 0, maxX: 1, maxY: 1 });
+      const box = bounds ?? { minX: 0, minY: 0, maxX: 1, maxY: 1 };
       const ids = data.readings.map((r) => r.id);
+      const crossFade = this.#layout !== null;
+      if (input) {
+        const grid = fieldGrid(box, FADE_DISTANCE, SIGNAL_CELLS);
+        const L: Layout = { key, mesh: null, grid, ids, signal: input };
+        if (this.#gl) return this.#applyLayout(L, crossFade);
+        this.#inflight = true;
+        void this.#client
+          .request({ type: 'signal', key, grid, outline, walls: input.walls, aps: input.aps })
+          .then((res) => {
+            this.#inflight = false;
+            if (res.type !== 'field' || res.key !== this.#wantKey) return this.#settle();
+            this.#applyLayout(L, crossFade);
+            this.#c2d?.setField(res.field, res.grid);
+          });
+        return;
+      }
+      const grid = fieldGrid(box);
       void this.#client
         .request({
           type: 'mesh',
@@ -411,7 +445,7 @@ export class HeatLayer {
         })
         .then((res) => {
           if (res.type !== 'mesh' || res.key !== this.#wantKey) return;
-          this.#applyLayout({ key, mesh: res.mesh, grid, ids }, this.#layout !== null);
+          this.#applyLayout({ key, mesh: res.mesh, grid, ids }, crossFade);
         });
     } else this.#start();
   }
@@ -422,7 +456,8 @@ export class HeatLayer {
     this.#fieldFor = '';
     const outline = this.#plan?.outline ?? [];
     const fade = crossFade && this.ms > 0;
-    if (this.#gl) this.#gl.setLayout(L.mesh, L.grid, outline, fade);
+    if (this.#gl && L.mesh) this.#gl.setLayout(L.mesh, L.grid, outline, fade);
+    else if (this.#gl && L.signal) this.#gl.setSignal(L.signal, L.grid, outline, fade);
     else this.#c2d?.setLayout(fade);
     this.#fade = fade ? { from: 0, to: 1, t0: performance.now() } : null;
     // Readings that left the layout stop animating.
@@ -468,11 +503,12 @@ export class HeatLayer {
     const mix = this.#fade ? current(this.#fade, now, this.ms) : 1;
     const domain = this.#domainAt(now);
     if (this.#gl) {
-      this.#gl.setValues(nodeValues(L.mesh, values));
+      if (L.mesh) this.#gl.setValues(nodeValues(L.mesh, values));
       this.#gl.draw(this.#view, domain, HEAT_OPACITY, mix);
     } else {
       const want = `${L.key}|${values.join(',')}`;
-      if (want !== this.#fieldFor && !this.#inflight) this.#requestField(L.key, values, want);
+      if (L.mesh && want !== this.#fieldFor && !this.#inflight)
+        this.#requestField(L.key, values, want);
       this.#c2d!.draw(this.#view, domain, HEAT_OPACITY, mix, this.#lut);
     }
     const moving = this.#moving(now);
@@ -523,7 +559,8 @@ export class HeatLayer {
     ];
     const bar = h('div', { class: 'heat-bar' });
     bar.style.background = rampCss(spec.ramp);
-    if (vals.length) {
+    const signal = data.layer === 'signal';
+    if (vals.length && !signal) {
       const lo = Math.min(...vals);
       const hi = Math.max(...vals);
       for (const [v, cls] of [
@@ -549,7 +586,13 @@ export class HeatLayer {
       ),
     );
     const note: string[] = [];
-    if (vals.length) {
+    const n = vals.length;
+    if (signal)
+      note.push(
+        n ? `${n} source${n === 1 ? '' : 's'}` : 'No sources',
+        `${this.#segments} wall segment${this.#segments === 1 ? '' : 's'}`,
+      );
+    else if (vals.length) {
       note.push(`${fmt(Math.min(...vals))}–${fmt(Math.max(...vals))} ${data.unit}`);
       note.push(`${vals.length} sensor${vals.length === 1 ? '' : 's'}`);
     } else note.push('No readings');
@@ -595,11 +638,23 @@ export class HeatLayer {
     const now = performance.now();
     const values = this.#values(now);
     const domain = this.#domainAt(now);
-    this.#gl.setValues(nodeValues(L.mesh, values));
+    if (L.mesh) this.#gl.setValues(nodeValues(L.mesh, values));
     this.#gl.draw(this.#view, domain, HEAT_OPACITY, 1);
     const glField = this.#gl.readField()!;
     const glPx = this.#gl.readPixels();
-    const res = await this.#client.request({ type: 'values', key: L.key, values });
+    const { signal } = L;
+    const res = await this.#client.request(
+      signal
+        ? {
+            type: 'signal',
+            key: L.key,
+            grid: L.grid,
+            outline: this.#plan?.outline ?? [],
+            walls: signal.walls,
+            aps: signal.aps,
+          }
+        : { type: 'values', key: L.key, values },
+    );
     if (res.type !== 'field') return null;
     const canvas = document.createElement('canvas');
     canvas.width = this.#canvas.width;
@@ -670,7 +725,8 @@ export class HeatLayer {
 
 /** Value labels next to the sensors of the active layer, at a constant size on screen. */
 export function renderValueLabels(g: SVGGElement, data: LayerData | null): void {
-  if (!data) {
+  // Signal sources carry a level at 1 m, not a reading worth labelling.
+  if (!data || data.layer === 'signal') {
     g.replaceChildren();
     return;
   }
@@ -697,4 +753,35 @@ export function renderValueLabels(g: SVGGElement, data: LayerData | null): void 
     );
   }
   g.replaceChildren(...out);
+}
+
+/**
+ * Keep value labels off the room names: move or hide them, and hide area labels they cover or
+ * that are too small to read. Rerun after the labels change and on every zoom.
+ */
+export function declutterLabels(body: SVGGElement, values: SVGGElement, mpp: number): void {
+  const num = (el: Element, a: string): number => Number(el.getAttribute(a)) || 0;
+  const label = (el: Element, size: number) => ({
+    x: num(el, 'x'),
+    y: num(el, 'y'),
+    size,
+    chars: el.textContent?.length ?? 0,
+  });
+  const names = [...body.querySelectorAll('text.name')];
+  const areas = [...body.querySelectorAll('text.area')];
+  const rooms = names.map((n, i) => ({
+    name: label(n, NAME_SIZE),
+    area: label(areas[i] ?? n, AREA_SIZE),
+  }));
+  const texts = [...values.querySelectorAll('text.heat-value')];
+  const r = declutter(
+    texts.map((t) => ({ x: num(t, 'x'), y: num(t, 'y'), chars: t.textContent?.length ?? 0 })),
+    rooms,
+    mpp,
+  );
+  texts.forEach((t, i) => {
+    t.classList.toggle('below', r.values[i] === 'below');
+    t.classList.toggle('crowded', r.values[i] === 'hidden');
+  });
+  areas.forEach((a, i) => a.classList.toggle('crowded', !!r.areas[i]));
 }

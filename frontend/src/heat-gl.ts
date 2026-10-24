@@ -3,6 +3,7 @@
 //   into an RGBA32F field target (value, confidence, fade);
 // pass 1b, the Delaunay mesh with a per-vertex value, so the rasteriser does the barycentric
 //   interpolation, overwriting the value channel inside the hull;
+// or, for the signal layer, one ray-tracing pass over the grid into the same target;
 // pass 2, the colour pass: bilinear field sample, 256x1 ramp, confidence and fade as alpha, the
 //   view transform, and a cross-fade with the previous field.
 import {
@@ -16,27 +17,59 @@ import {
   type FieldMesh,
 } from './field';
 import type { Point } from './plan';
+import {
+  MAX_SIGNAL_SEGMENTS,
+  MAX_SIGNAL_SOURCES,
+  SEG,
+  SIGNAL_FLOOR,
+  SIGNAL_N,
+  SRC,
+  type SignalInput,
+} from './signal';
 import type { View } from './viewport';
 
 const FIELD_VS = `#version 300 es
 in vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
-const FIELD_FS = `#version 300 es
+// Shared by the field passes: the outside fade from the outline (fadeAt in field.ts).
+const HEAD = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
-uniform sampler2D uNodes;   // x, y, value per node
-uniform sampler2D uEdges;   // node indices a, b per edge
 uniform sampler2D uOutline; // x, y per outline vertex
-uniform int uNodeCount;
-uniform int uEdgeCount;
 uniform int uOutlineCount;
 uniform vec3 uGrid;         // x0, y0, cell
-uniform vec3 uConf;         // near, far, min
 uniform vec2 uFade;         // outside alpha, distance
-uniform float uWallInfluence; // reserved hook: walls do not bend the field (always 0)
 out vec4 outField;
+float fadeAt(vec2 p) {
+  if (uOutlineCount < 3) return 1.0;
+  bool inside = false;
+  float od = 1e30;
+  vec2 prev = texelFetch(uOutline, ivec2(uOutlineCount - 1, 0), 0).xy;
+  for (int i = 0; i < 16384; i++) {
+    if (i >= uOutlineCount) break;
+    vec2 cur = texelFetch(uOutline, ivec2(i, 0), 0).xy;
+    if ((cur.y > p.y) != (prev.y > p.y) &&
+        p.x < (prev.x - cur.x) * (p.y - cur.y) / (prev.y - cur.y) + cur.x) inside = !inside;
+    vec2 e = cur - prev;
+    float l2 = dot(e, e);
+    float t = l2 > 0.0 ? clamp(dot(p - prev, e) / l2, 0.0, 1.0) : 0.0;
+    vec2 d = p - prev - t * e;
+    od = min(od, dot(d, d));
+    prev = cur;
+  }
+  return inside ? 1.0 : uFade.x * (1.0 - smoothstep(0.0, uFade.y, sqrt(od)));
+}
+`;
+
+const FIELD_FS = `${HEAD}
+uniform sampler2D uNodes;   // x, y, value per node
+uniform sampler2D uEdges;   // node indices a, b per edge
+uniform int uNodeCount;
+uniform int uEdgeCount;
+uniform vec3 uConf;         // near, far, min
+uniform float uWallInfluence; // reserved hook: walls do not bend the field (always 0)
 void main() {
   vec2 p = uGrid.xy + gl_FragCoord.xy * uGrid.z;
   float best = 1e30;
@@ -60,26 +93,43 @@ void main() {
     near = min(near, dot(q, q));
   }
   float conf = uNodeCount > 0 ? 1.0 - (1.0 - uConf.z) * smoothstep(uConf.x, uConf.y, sqrt(near)) : 0.0;
-  float fade = 1.0;
-  if (uOutlineCount >= 3) {
-    bool inside = false;
-    float od = 1e30;
-    vec2 prev = texelFetch(uOutline, ivec2(uOutlineCount - 1, 0), 0).xy;
-    for (int i = 0; i < 16384; i++) {
-      if (i >= uOutlineCount) break;
-      vec2 cur = texelFetch(uOutline, ivec2(i, 0), 0).xy;
-      if ((cur.y > p.y) != (prev.y > p.y) &&
-          p.x < (prev.x - cur.x) * (p.y - cur.y) / (prev.y - cur.y) + cur.x) inside = !inside;
-      vec2 e = cur - prev;
-      float l2 = dot(e, e);
-      float t = l2 > 0.0 ? clamp(dot(p - prev, e) / l2, 0.0, 1.0) : 0.0;
-      vec2 d = p - prev - t * e;
-      od = min(od, dot(d, d));
-      prev = cur;
+  outField = vec4(value + 0.0 * uWallInfluence, conf, fadeAt(p), 1.0);
+}`;
+
+// The signal pass (signalAt in signal.ts, line for line): per source, log-distance loss from its
+// level at 1 m, minus each wall segment the ray from it crosses; the strongest source wins.
+const SIGNAL_FS = `${HEAD}
+uniform sampler2D uWalls;   // row 0: ax, ay, bx, by; row 1: loss in dB
+uniform int uWallCount;
+uniform int uApCount;
+uniform vec4 uAps[${MAX_SIGNAL_SOURCES}]; // x, y, level at 1 m
+uniform vec2 uModel;        // path-loss exponent, floor
+void main() {
+  vec2 p = uGrid.xy + gl_FragCoord.xy * uGrid.z;
+  float best = uModel.y;
+  for (int k = 0; k < ${MAX_SIGNAL_SOURCES}; k++) {
+    if (k >= uApCount) break;
+    vec2 a = uAps[k].xy;
+    vec2 r = p - a;
+    float rx = uAps[k].z - 10.0 * uModel.x * log2(max(length(r), 1.0)) * 0.30102999566;
+    if (rx <= best) continue;
+    for (int w = 0; w < ${MAX_SIGNAL_SEGMENTS}; w++) {
+      if (w >= uWallCount) break;
+      vec4 s = texelFetch(uWalls, ivec2(w, 0), 0);
+      vec2 q = s.xy - a;
+      vec2 e = s.zw - s.xy;
+      float den = r.x * e.y - r.y * e.x;
+      if (abs(den) < 1e-12) continue;
+      float t = (q.x * e.y - q.y * e.x) / den;
+      float u = (q.x * r.y - q.y * r.x) / den;
+      if (t > 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0) {
+        rx -= texelFetch(uWalls, ivec2(w, 1), 0).x;
+        if (rx <= best) break;
+      }
     }
-    fade = inside ? 1.0 : uFade.x * (1.0 - smoothstep(0.0, uFade.y, sqrt(od)));
+    best = max(best, rx);
   }
-  outField = vec4(value + 0.0 * uWallInfluence, conf, fade, 1.0);
+  outField = vec4(best, 1.0, fadeAt(p), 1.0);
 }`;
 
 // The triangles: rasterised over the grid, each vertex carrying its triangle's three node
@@ -292,7 +342,7 @@ export class GlRenderer {
     return m.get(name)!;
   }
 
-  #upload(tex: WebGLTexture, data: Float32Array, width: number): void {
+  #upload(tex: WebGLTexture, data: Float32Array, width: number, height = 1): void {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(
@@ -300,11 +350,11 @@ export class GlRenderer {
       0,
       gl.RGBA32F,
       Math.max(1, width),
-      1,
+      height,
       0,
       gl.RGBA,
       gl.FLOAT,
-      data.length ? data : new Float32Array(4),
+      data.length ? data : new Float32Array(4 * height),
     );
   }
 
@@ -325,21 +375,13 @@ export class GlRenderer {
     keepPrevious: boolean,
   ): void {
     const gl = this.gl;
-    if (keepPrevious && this.#targets[this.#cur].grid) this.#cur = this.#other();
-    else this.#targets[this.#other()].grid = null;
-    const t = this.#targets[this.#cur];
-    gl.bindTexture(gl.TEXTURE_2D, t.tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, grid.nx, grid.ny, 0, gl.RGBA, gl.FLOAT, null);
-    t.grid = grid;
+    this.#begin(grid, outline, keepPrevious);
     this.#nodeData = new Float32Array(mesh.nodes.length * 4);
     mesh.nodes.forEach(([x, y], i) => this.#nodeData.set([x, y, 0, 0], i * 4));
     const edges = new Float32Array((mesh.edges.length / 2) * 4);
     for (let e = 0; e < mesh.edges.length / 2; e++)
       edges.set([mesh.edges[e * 2]!, mesh.edges[e * 2 + 1]!, 0, 0], e * 4);
     this.#upload(this.#edges, edges, mesh.edges.length / 2);
-    const out = new Float32Array(outline.length * 4);
-    outline.forEach(([x, y], i) => out.set([x, y, 0, 0], i * 4));
-    this.#upload(this.#outline, out, outline.length);
     // One vertex per triangle corner, each with its triangle's node indices.
     const pos = new Float32Array(mesh.tris.length * 2);
     const tri = new Uint32Array(mesh.tris.length * 3);
@@ -357,6 +399,78 @@ export class GlRenderer {
     this.#layout = { mesh, grid, outlineCount: outline.length };
   }
 
+  /** Switch field targets (keeping the current one for a cross-fade) and upload the outline. */
+  #begin(grid: FieldGrid, outline: readonly Point[], keepPrevious: boolean): Target {
+    const gl = this.gl;
+    if (keepPrevious && this.#targets[this.#cur].grid) this.#cur = this.#other();
+    else this.#targets[this.#other()].grid = null;
+    const t = this.#targets[this.#cur];
+    gl.bindTexture(gl.TEXTURE_2D, t.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, grid.nx, grid.ny, 0, gl.RGBA, gl.FLOAT, null);
+    t.grid = grid;
+    const out = new Float32Array(outline.length * 4);
+    outline.forEach(([x, y], i) => out.set([x, y, 0, 0], i * 4));
+    this.#upload(this.#outline, out, outline.length);
+    this.#layout = null;
+    return t;
+  }
+
+  /** Bind a field target and the uniforms every field pass shares. */
+  #fieldPass(prog: WebGLProgram, t: Target, grid: FieldGrid, outlineCount: number): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.viewport(0, 0, grid.nx, grid.ny);
+    gl.disable(gl.BLEND);
+    gl.colorMask(true, true, true, true);
+    gl.useProgram(prog);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.#outline);
+    gl.uniform1i(this.#loc(prog, 'uOutline'), 2);
+    gl.uniform1i(this.#loc(prog, 'uOutlineCount'), outlineCount >= 3 ? outlineCount : 0);
+    gl.uniform3f(this.#loc(prog, 'uGrid'), grid.x0, grid.y0, grid.cell);
+    gl.uniform2f(this.#loc(prog, 'uFade'), OUTSIDE_ALPHA, FADE_DISTANCE);
+  }
+
+  #signal: WebGLProgram | null = null;
+  #walls: WebGLTexture | null = null;
+
+  /**
+   * The signal layer: trace the whole field in one pass from the packed walls and sources
+   * (compiled the first time). With `keepPrevious` the current field becomes the cross-fade source.
+   */
+  setSignal(
+    input: SignalInput,
+    grid: FieldGrid,
+    outline: readonly Point[],
+    keepPrevious: boolean,
+  ): void {
+    const gl = this.gl;
+    const prog = (this.#signal ??= compile(gl, FIELD_VS, SIGNAL_FS));
+    this.#walls ??= this.#dataTexture();
+    const t = this.#begin(grid, outline, keepPrevious);
+    const n = Math.min(MAX_SIGNAL_SEGMENTS, input.walls.length / SEG);
+    // Two rows: the segment ends, then its loss.
+    const walls = new Float32Array(Math.max(1, n) * 8);
+    for (let w = 0; w < n; w++) {
+      walls.set(input.walls.subarray(w * SEG, w * SEG + 4), w * 4);
+      walls[(Math.max(1, n) + w) * 4] = input.walls[w * SEG + 4]!;
+    }
+    this.#upload(this.#walls, walls, Math.max(1, n), 2);
+    const k = Math.min(MAX_SIGNAL_SOURCES, input.aps.length / SRC);
+    const aps = new Float32Array(MAX_SIGNAL_SOURCES * 4);
+    for (let i = 0; i < k; i++) aps.set(input.aps.subarray(i * SRC, i * SRC + SRC), i * 4);
+    this.#fieldPass(prog, t, grid, outline.length);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.#walls);
+    gl.uniform1i(this.#loc(prog, 'uWalls'), 0);
+    gl.uniform1i(this.#loc(prog, 'uWallCount'), n);
+    gl.uniform1i(this.#loc(prog, 'uApCount'), k);
+    gl.uniform4fv(this.#loc(prog, 'uAps'), aps);
+    gl.uniform2f(this.#loc(prog, 'uModel'), SIGNAL_N, SIGNAL_FLOOR);
+    this.#drawQuad(prog, [-1, -1, 1, -1, -1, 1, 1, 1]);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
   /** Node values changed: recompute the field target (passes 1a and 1b). */
   setValues(nodeVals: ArrayLike<number>): void {
     const gl = this.gl;
@@ -365,14 +479,9 @@ export class GlRenderer {
     const { mesh, grid } = L;
     for (let i = 0; i < mesh.nodes.length; i++) this.#nodeData[i * 4 + 2] = nodeVals[i]!;
     this.#upload(this.#nodes, this.#nodeData, mesh.nodes.length);
-    const t = this.#targets[this.#cur];
-    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
-    gl.viewport(0, 0, grid.nx, grid.ny);
-    gl.disable(gl.BLEND);
-    gl.colorMask(true, true, true, true);
     // 1a: the hull-projection pass over every cell.
     const fp = this.#field;
-    gl.useProgram(fp);
+    this.#fieldPass(fp, this.#targets[this.#cur], grid, L.outlineCount);
     const tex = (unit: number, texture: WebGLTexture, name: string): void => {
       gl.activeTexture(gl.TEXTURE0 + unit);
       gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -380,13 +489,9 @@ export class GlRenderer {
     };
     tex(0, this.#nodes, 'uNodes');
     tex(1, this.#edges, 'uEdges');
-    tex(2, this.#outline, 'uOutline');
     gl.uniform1i(this.#loc(fp, 'uNodeCount'), mesh.nodes.length);
     gl.uniform1i(this.#loc(fp, 'uEdgeCount'), mesh.edges.length / 2);
-    gl.uniform1i(this.#loc(fp, 'uOutlineCount'), L.outlineCount >= 3 ? L.outlineCount : 0);
-    gl.uniform3f(this.#loc(fp, 'uGrid'), grid.x0, grid.y0, grid.cell);
     gl.uniform3f(this.#loc(fp, 'uConf'), CONF_NEAR, CONF_FAR, CONF_MIN);
-    gl.uniform2f(this.#loc(fp, 'uFade'), OUTSIDE_ALPHA, FADE_DISTANCE);
     gl.uniform1f(this.#loc(fp, 'uWallInfluence'), WALL_INFLUENCE);
     this.#drawQuad(fp, [-1, -1, 1, -1, -1, 1, 1, 1]);
     // 1b: the triangles, value channel only.
@@ -434,7 +539,7 @@ export class GlRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT);
     const cur = this.#targets[this.#cur];
     const prev = this.#targets[this.#other()];
-    if (!cur.grid || !this.#layout) return;
+    if (!cur.grid) return;
     const g = cur.grid;
     const cp = this.#colour;
     gl.useProgram(cp);

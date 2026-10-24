@@ -1,0 +1,67 @@
+[
+  {
+    "ieee": "00:12:4b:00:00:00:00:01",
+    "nwk": "0x0000",
+    "name": "Texas Instruments CC2652",
+    "user_given_name": null,
+    "device_type": "Coordinator",
+    "lqi": null,
+    "rssi": null,
+    "device_reg_id": "dev-coordinator",
+    "entities": [],
+    "neighbors": [
+      {
+        "ieee": "00:15:8d:00:00:00:00:02",
+        "nwk": "0x1a2b",
+        "lqi": "200",
+        "relationship": "Child",
+        "device_type": "Router"
+      },
+      {
+        "ieee": "00:15:8d:00:00:00:00:09",
+        "nwk": "0x9999",
+        "lqi": "40",
+        "relationship": "PreviousChild",
+        "device_type": "EndDevice"
+      }
+    ]
+  },
+  {
+    "ieee": "00:15:8D:00:00:00:00:02",
+    "nwk": "0x1a2b",
+    "name": "IKEA Plug",
+    "user_given_name": "Hall plug",
+    "device_type": "Router",
+    "lqi": 180,
+    "rssi": -61,
+    "device_reg_id": "dev-plug",
+    "entities": [{ "entity_id": "switch.hall_plug", "name": "Hall plug" }],
+    "neighbors": [
+      {
+        "ieee": "00:12:4b:00:00:00:00:01",
+        "nwk": "0x0000",
+        "lqi": "180",
+        "relationship": "Parent",
+        "device_type": "Coordinator"
+      },
+      {
+        "ieee": "00:15:8d:00:00:00:00:03",
+        "nwk": "0x3c4d",
+        "lqi": "90",
+        "relationship": "Child",
+        "device_type": "EndDevice"
+      }
+    ]
+  },
+  {
+    "ieee": "00:15:8d:00:00:00:00:03",
+    "nwk": "0x3c4d",
+    "name": "Aqara door sensor",
+    "device_type": "EndDevice",
+    "lqi": 90,
+    "rssi": -78,
+    "device_reg_id": "dev-door",
+    "entities": [{ "entity_id": "binary_sensor.front_door" }],
+    "neighbors": []
+  }
+]

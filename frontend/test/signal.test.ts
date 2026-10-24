@@ -1,0 +1,201 @@
+import { describe, expect, it } from 'vite-plus/test';
+import { fieldGrid } from '../src/field';
+import type { Hass } from '../src/ha-types';
+import { layerCounts, layerData, layerDomain } from '../src/heat';
+import { emptyPlan, type Plan } from '../src/plan';
+import {
+  MAX_SIGNAL_SEGMENTS,
+  SEG,
+  SIGNAL_FLOOR,
+  SIGNAL_N,
+  signalAt,
+  signalField,
+  signalInput,
+  signalKey,
+  wallSegments,
+} from '../src/signal';
+import { createHandler } from '../src/worker-protocol';
+
+/** A 6 m x 4 m room split by a partition at x = 3 with a door in it; an AP in the left half. */
+function setup(): { plan: Plan; hass: Hass } {
+  const plan = emptyPlan('Signal');
+  plan.walls = [
+    { id: 'p', a: [3, 0], b: [3, 4], thickness: 0.1, material: 'partition' },
+    { id: 'x', a: [5, 0], b: [5, 4], thickness: 0.3, material: 'exterior' },
+  ];
+  plan.doors = [
+    {
+      id: 'd',
+      wall: 'p',
+      offset: 1,
+      width: 1,
+      material: 'wood_door',
+      thickness: 0.04,
+      hinge: 'a',
+      swing: 1,
+      entity_id: 'binary_sensor.door',
+    },
+  ];
+  plan.sources = [
+    {
+      id: 'ap',
+      kind: 'access_point',
+      entity_id: 'device_tracker.ap',
+      position: [1, 3],
+      tx_dbm: -30,
+    },
+    { id: 'r', kind: 'radio', entity_id: '', position: [1, 0.5] },
+    { id: 's', kind: 'sensor', entity_id: 'sensor.t', position: [2, 2] },
+  ];
+  const hass: Hass = {
+    states: {
+      'binary_sensor.door': { entity_id: 'binary_sensor.door', state: 'off', attributes: {} },
+    },
+  };
+  return { plan, hass };
+}
+
+const free = (level: number, d: number): number =>
+  level - 10 * SIGNAL_N * Math.log10(Math.max(d, 1));
+
+describe('signal layer readings', () => {
+  it('uses access points and radios with their level at 1 m', () => {
+    const { plan, hass } = setup();
+    const data = layerData(plan, hass, 'signal');
+    expect(data.unit).toBe('dBm');
+    expect(data.readings.map((r) => [r.id, r.value])).toEqual([
+      ['ap', -30],
+      ['r', -45],
+    ]);
+    expect(layerCounts(plan, hass).signal).toBe(2);
+    expect(layerDomain('signal', 'dBm', [-10, -200])).toEqual([-90, -30]);
+  });
+
+  it('leaves out a source whose entity is unavailable', () => {
+    const { plan, hass } = setup();
+    hass.states!['device_tracker.ap'] = {
+      entity_id: 'device_tracker.ap',
+      state: 'unavailable',
+      attributes: {},
+    };
+    const data = layerData(plan, hass, 'signal');
+    expect(data.readings.map((r) => r.id)).toEqual(['r']);
+    expect(data.excluded.map((r) => r.id)).toEqual(['ap']);
+  });
+});
+
+describe('wall segments', () => {
+  it('splits walls at their openings with each part’s own loss', () => {
+    const { plan, hass } = setup();
+    const segs = wallSegments(plan, hass);
+    expect(segs.length / SEG).toBe(4);
+    const rows = Array.from({ length: segs.length / SEG }, (_, i) =>
+      segs.slice(i * SEG, i * SEG + SEG),
+    );
+    // partition 0.3 dB/cm x 10 cm; door 0.75 x 4; exterior 0.5 x 30.
+    expect(rows[0]).toEqual([3, 0, 3, 1, 3]);
+    expect(rows[1]![4]).toBeCloseTo(3);
+    expect(rows[1]!.slice(0, 4)).toEqual([3, 1, 3, 2]);
+    expect(rows[2]).toEqual([3, 2, 3, 4, 3]);
+    expect(rows[3]).toEqual([5, 0, 5, 4, 15]);
+  });
+
+  it('drops an open door (it costs nothing)', () => {
+    const { plan, hass } = setup();
+    hass.states!['binary_sensor.door']!.state = 'on';
+    expect(wallSegments(plan, hass).length / SEG).toBe(3);
+  });
+
+  it('caps the segment count', () => {
+    const plan = emptyPlan('Many');
+    plan.walls = Array.from({ length: MAX_SIGNAL_SEGMENTS + 10 }, (_, i) => ({
+      id: `w${i}`,
+      a: [i, 0] as [number, number],
+      b: [i, 1] as [number, number],
+      thickness: 0.1,
+      material: 'partition',
+    }));
+    expect(signalInput(plan, undefined, []).walls.length).toBe(MAX_SIGNAL_SEGMENTS * SEG);
+  });
+});
+
+describe('signalAt', () => {
+  const one = (plan: Plan, hass: Hass, id: string) =>
+    signalInput(
+      plan,
+      hass,
+      layerData(plan, hass, 'signal').readings.filter((r) => r.id === id),
+    );
+
+  it('is the level at 1 m within a metre, then falls with log distance', () => {
+    const { plan, hass } = setup();
+    const input = one(plan, hass, 'ap');
+    expect(signalAt(input, 1.5, 3)).toBeCloseTo(-30);
+    expect(signalAt(input, 1, 1)).toBeCloseTo(free(-30, 2));
+  });
+
+  it('subtracts every wall the ray crosses', () => {
+    const { plan, hass } = setup();
+    const input = one(plan, hass, 'ap');
+    // From (1,3) to (4,3): crosses the partition below the door.
+    expect(signalAt(input, 4, 3)).toBeCloseTo(free(-30, 3) - 3);
+    // To (6,3): the partition and the exterior wall.
+    expect(signalAt(input, 6, 3)).toBeCloseTo(free(-30, 5) - 3 - 15);
+    // Through the closed door at y = 1.5 (ray from (1,3) to (5,0) crosses x=3 at y=1.5)... then
+    // the exterior wall at x = 5 is reached at t = 1 (the end of the ray counts).
+    expect(signalAt(input, 4, 0.75)).toBeCloseTo(free(-30, Math.hypot(3, 2.25)) - 3);
+  });
+
+  it('takes the strongest source', () => {
+    const { plan, hass } = setup();
+    plan.sources[0]!.tx_dbm = -70;
+    const input = signalInput(plan, hass, layerData(plan, hass, 'signal').readings);
+    // Near the radio it wins; at the access point, the AP (-70) still beats the radio 2.5 m off.
+    expect(signalAt(input, 1, 0.6)).toBeCloseTo(-45);
+    expect(signalAt(input, 1, 3)).toBeCloseTo(Math.max(-70, free(-45, 2.5)));
+  });
+
+  it('is the floor with no sources', () => {
+    expect(signalAt({ walls: new Float32Array(), aps: new Float32Array() }, 0, 0)).toBe(
+      SIGNAL_FLOOR,
+    );
+  });
+});
+
+describe('signal field and worker', () => {
+  it('fills a grid, and the worker gives the same field', () => {
+    const { plan, hass } = setup();
+    const input = signalInput(plan, hass, layerData(plan, hass, 'signal').readings);
+    const grid = fieldGrid({ minX: 0, minY: 0, maxX: 6, maxY: 4 }, 0.5, 32);
+    const outline: [number, number][] = [
+      [0, 0],
+      [5, 0],
+      [5, 4],
+      [0, 4],
+    ];
+    const field = signalField(input, grid, outline);
+    expect(field.length).toBe(grid.nx * grid.ny * 3);
+    const handle = createHandler();
+    const res = handle({ type: 'signal', id: 1, key: 'k', grid, outline, ...input });
+    expect(res.type).toBe('field');
+    if (res.type === 'field') expect(Array.from(res.field)).toEqual(Array.from(field));
+    const bad = handle({
+      type: 'signal',
+      id: 2,
+      key: 'k',
+      grid: { ...grid, nx: 0 },
+      outline,
+      ...input,
+    });
+    expect(bad.type).toBe('error');
+  });
+
+  it('keys change with the walls, doors and sources', () => {
+    const { plan, hass } = setup();
+    const readings = layerData(plan, hass, 'signal').readings;
+    const a = signalKey(signalInput(plan, hass, readings));
+    expect(signalKey(signalInput(plan, hass, readings))).toBe(a);
+    hass.states!['binary_sensor.door']!.state = 'on';
+    expect(signalKey(signalInput(plan, hass, readings))).not.toBe(a);
+  });
+});

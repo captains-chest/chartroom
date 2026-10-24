@@ -1,9 +1,10 @@
-// The plan as live SVG: underlay image, the plan body, and an overlay group the editor draws
-// handles into. Handles pan (drag), zoom (wheel, pinch, buttons) and keeps the viewBox in metres.
+// The plan as live SVG: underlay image (its own SVG, under the heatmap canvas), the plan body, and
+// an overlay group the editor draws handles into. Handles pan (drag), zoom (wheel, pinch, buttons) and keeps the viewBox in metres.
 import { planBounds } from './geometry';
 import type { Hass } from './ha-types';
 import type { HeatLayerId, LayerData } from './heat';
 import type { HeatLayer } from './heat-layer';
+import type { MeshLayer } from './mesh-layer';
 import { MarkerLayer, markerStyles } from './markers';
 import type { Plan, Point } from './plan';
 import { planBody } from './plan-svg';
@@ -30,9 +31,11 @@ export interface PointerDelegate {
 }
 
 export class PlanView {
-  /** The plan box: the heatmap canvas under the SVG, and the heatmap legend. */
+  /** The plan box: the underlay, the heatmap canvas over it, the plan SVG, and the legend. */
   readonly el: HTMLDivElement;
   readonly svg: SVGSVGElement;
+  /** The underlay drawing, a separate SVG under the heatmap canvas with the same viewBox. */
+  readonly #underlaySvg: SVGSVGElement;
   readonly heatLegend: HTMLDivElement;
   readonly #heatBox: HTMLDivElement;
   readonly #heatValues: SVGGElement;
@@ -41,6 +44,11 @@ export class PlanView {
   #heatLayer: HeatLayerId | null = null;
   #heatLoad: Promise<HeatLayer> | null = null;
   #labelHeat: ((g: SVGGElement, data: LayerData | null) => void) | null = null;
+  /** Mesh links between placed devices, once the Mesh layer has been switched on. */
+  mesh: MeshLayer | null = null;
+  #meshOn = false;
+  #meshLoad: Promise<MeshLayer> | null = null;
+  readonly #meshSlot: SVGGElement;
   readonly overlay: SVGGElement;
   readonly #underlay: SVGGElement;
   readonly #body: SVGGElement;
@@ -70,19 +78,32 @@ export class PlanView {
     this.#body = s('g', { class: 'body' });
     this.overlay = s('g', { class: 'overlay' });
     this.#heatValues = s('g', { class: 'heat-values', 'aria-hidden': 'true' });
+    this.#meshSlot = s('g', { class: 'mesh-slot' });
+    this.#underlaySvg = s(
+      'svg',
+      { class: 'underlay-svg', 'aria-hidden': 'true', preserveAspectRatio: 'none' },
+      this.#underlay,
+    );
     this.svg = s(
       'svg',
       // A group, not an image, so the device markers inside are buttons screen readers reach.
       { class: 'plan', role: 'group', 'aria-label': 'Floor plan', preserveAspectRatio: 'none' },
-      this.#underlay,
       this.#body,
+      this.#meshSlot,
       this.#heatValues,
       this.markers.g,
       this.overlay,
     );
     this.#heatBox = h('div', { class: 'heat-box', hidden: true });
     this.heatLegend = h('div', { class: 'heat-legend', role: 'img', hidden: true });
-    this.el = h('div', { class: 'plan-box' }, this.#heatBox, this.svg, this.heatLegend);
+    this.el = h(
+      'div',
+      { class: 'plan-box' },
+      this.#underlaySvg,
+      this.#heatBox,
+      this.svg,
+      this.heatLegend,
+    );
     if (fixed) {
       this.svg.classList.add('fixed');
       this.el.classList.add('fixed');
@@ -124,6 +145,8 @@ export class PlanView {
     this.#renderUnderlay();
     if (!this.#fitted) this.fit();
     this.heat?.setPlan(plan);
+    this.mesh?.setPlan(plan);
+    this.#tidyLabels();
     this.onPlan?.();
   }
 
@@ -139,10 +162,32 @@ export class PlanView {
     return this.#heatLayer;
   }
 
+  /** Show or hide the mesh links. Their code loads the first time they are shown. */
+  async setMesh(on: boolean): Promise<void> {
+    this.#meshOn = on;
+    if (!on && !this.mesh) return;
+    this.#meshLoad ??= import('./mesh-layer').then((m) => {
+      const mesh = new m.MeshLayer();
+      this.#meshSlot.append(mesh.g);
+      this.el.append(mesh.note);
+      mesh.setHass(this.#hass);
+      mesh.setPlan(this.#plan);
+      this.mesh = mesh;
+      return mesh;
+    });
+    const mesh = await this.#meshLoad;
+    await mesh.setOn(this.#meshOn);
+  }
+
+  get meshOn(): boolean {
+    return this.#meshOn;
+  }
+
   #loadHeat(): Promise<HeatLayer> {
     this.#heatLoad ??= import('./heat-layer').then((m) => {
       const heat = new m.HeatLayer(this.#heatBox, this.heatLegend);
       this.#labelHeat = m.renderValueLabels;
+      this.#declutter = m.declutterLabels;
       heat.onReadings = (data) => this.#markHeat(data);
       heat.setView(this.#view, this.svg.clientWidth, this.svg.clientHeight);
       heat.setHass(this.#hass);
@@ -156,6 +201,7 @@ export class PlanView {
   /** Value labels next to the layer's sensors; sensors left out are marked. */
   #markHeat(data: LayerData | null): void {
     this.#labelHeat?.(this.#heatValues, data);
+    this.#tidyLabels();
     this.el.classList.toggle('heat-on', !!data && data.readings.length > 0);
     const used = new Set(data?.readings.map((r) => r.id));
     const left = new Set(data?.excluded.map((r) => r.id));
@@ -166,11 +212,19 @@ export class PlanView {
     }
   }
 
+  #declutter: ((body: SVGGElement, values: SVGGElement, mpp: number) => void) | null = null;
+
+  /** Value labels clear of the room names (once the heatmap code has loaded). */
+  #tidyLabels(): void {
+    this.#declutter?.(this.#body, this.#heatValues, this.mpp);
+  }
+
   /** New states from Home Assistant: restyle the markers whose entity changed. */
   setHass(hass: Hass | undefined): void {
     this.#hass = hass;
     this.markers.update(hass);
     this.heat?.setHass(hass);
+    this.mesh?.setHass(hass);
   }
 
   /** The underlay image as a URL the browser can load (a blob URL). */
@@ -197,7 +251,7 @@ export class PlanView {
     const u = this.#plan?.underlay;
     if (!u || !this.#underlayUrl || this.#display?.visible === false) {
       this.#underlay.replaceChildren();
-      this.svg.classList.remove('with-underlay');
+      this.el.classList.remove('with-underlay');
       return;
     }
     const img = s('image', {
@@ -211,7 +265,7 @@ export class PlanView {
     });
     this.#underlay.replaceChildren(img);
     // Rooms let the drawing show through.
-    this.svg.classList.add('with-underlay');
+    this.el.classList.add('with-underlay');
   }
 
   fit(): void {
@@ -239,9 +293,11 @@ export class PlanView {
   #setView(v: View): void {
     this.#view = v;
     this.svg.setAttribute('viewBox', viewBoxOf(v));
+    this.#underlaySvg.setAttribute('viewBox', viewBoxOf(v));
     this.svg.style.setProperty('--mpp', String(this.mpp));
     this.markers.setScale(this.mpp);
     this.heat?.setView(v, this.svg.clientWidth, this.svg.clientHeight);
+    this.#tidyLabels();
     this.onViewChange?.();
   }
 
@@ -365,7 +421,7 @@ export const planViewStyles = `
   .selected.wall, .selected.window { fill: var(--primary-color, #03a9f4); }
   .selected.room { fill: color-mix(in srgb, var(--primary-color, #03a9f4) 18%, transparent); stroke: var(--primary-color, #03a9f4); stroke-width: 2px; }
   .selected .door, .selected .swing { stroke: var(--primary-color, #03a9f4); }
-  .underlay { pointer-events: none; }
+  .underlay-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .heat-box { position: absolute; inset: 0; pointer-events: none; }
   .heat-box canvas { display: block; width: 100%; height: 100%; }
   .heat-on .room, .heat-on .room.linked { fill: var(--card-background-color, #fff); fill-opacity: 0.14; }
@@ -375,6 +431,8 @@ export const planViewStyles = `
   .heat-value { font-size: calc(var(--mpp, 0.01) * 12px); font-weight: 600; fill: var(--primary-text-color, #222);
     text-anchor: middle; pointer-events: none; }
   .heat-value { transform: translateY(calc(var(--mpp, 0.01) * -10px)); }
+  .heat-value.below { transform: translateY(calc(var(--mpp, 0.01) * 22px)); }
+  .heat-value.crowded, .area.crowded { display: none; }
   .heat-value.excluded { fill: var(--secondary-text-color, #777); pointer-events: auto; }
   .source.heat-excluded { fill: none; stroke: var(--secondary-text-color, #777); stroke-width: 1.5px; stroke-dasharray: 2 2; }
   .heat-legend { position: absolute; top: 10px; right: 10px; width: 190px; box-sizing: border-box; padding: 6px 10px 8px;
@@ -389,5 +447,11 @@ export const planViewStyles = `
     box-shadow: 0 0 0 1px var(--card-background-color, #fff); }
   .heat-scale { display: flex; justify-content: space-between; color: var(--secondary-text-color, #666); margin-top: 2px; }
   .heat-note { color: var(--secondary-text-color, #666); margin-top: 2px; }
+  .mesh[hidden] { display: none; }
+  .mesh-link { stroke-width: 2.5px; vector-effect: non-scaling-stroke; stroke-linecap: round; opacity: 0.85; pointer-events: stroke; }
+  .mesh-link.unknown { stroke-dasharray: 4 4; }
+  .mesh-note { position: absolute; left: 8px; bottom: 8px; max-width: 60%; font-size: 11px; padding: 2px 6px; border-radius: 4px;
+    background: var(--card-background-color, #fff); opacity: 0.9; color: var(--secondary-text-color, #555); }
+  .mesh-note[hidden] { display: none; }
   .heat-layers { display: flex; gap: 4px; }
 ${markerStyles}`;

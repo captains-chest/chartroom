@@ -1,10 +1,10 @@
 // Heatmap layers: which sensors feed each layer, their values, the colour ramps and the value
 // range. Pure functions (no DOM), shared by the panel, the card and the tests.
 import type { EntityState, Hass } from './ha-types';
-import type { Plan, Point } from './plan';
+import { DEFAULT_TX_DBM, isSignalSource, type Plan, type Point } from './plan';
 
-export type HeatLayerId = 'temperature' | 'humidity';
-export const HEAT_LAYERS: readonly HeatLayerId[] = ['temperature', 'humidity'];
+export type HeatLayerId = 'temperature' | 'humidity' | 'signal';
+export const HEAT_LAYERS: readonly HeatLayerId[] = ['temperature', 'humidity', 'signal'];
 
 /** Colour stops: position 0..1 and sRGB. */
 export type RampStop = readonly [number, number, number, number];
@@ -17,6 +17,8 @@ export interface LayerSpec {
   domain: Record<string, readonly [number, number]>;
   /** Decimals for labels. */
   digits: number;
+  /** The range is fixed (it does not grow to include the readings). */
+  fixed?: boolean;
 }
 
 export const LAYERS: Record<HeatLayerId, LayerSpec> = {
@@ -47,6 +49,21 @@ export const LAYERS: Record<HeatLayerId, LayerSpec> = {
     ],
     domain: { '%': [30, 70] },
     digits: 0,
+  },
+  signal: {
+    id: 'signal',
+    label: 'Signal',
+    // Dead grey-violet, red, amber, yellow-green, green: weak to strong.
+    ramp: [
+      [0, 70, 60, 90],
+      [0.25, 200, 50, 50],
+      [0.5, 245, 160, 40],
+      [0.75, 175, 210, 60],
+      [1, 40, 170, 80],
+    ],
+    domain: { dBm: [-90, -30] },
+    digits: 0,
+    fixed: true,
   },
 };
 
@@ -94,6 +111,20 @@ export function layerData(
 ): LayerData {
   const readings: LayerReading[] = [];
   const excluded: LayerData['excluded'] = [];
+  if (layer === 'signal') {
+    // Access points and radios: their level at 1 m. One whose entity is unavailable is down.
+    for (const src of plan?.sources ?? []) {
+      if (!isSignalSource(src)) continue;
+      const { id, entity_id, position } = src;
+      if (hass?.states?.[entity_id]?.state === 'unavailable')
+        excluded.push({ id, entity_id, position, reason: 'unavailable' });
+      else {
+        const value = src.tx_dbm ?? DEFAULT_TX_DBM[src.kind as 'radio'];
+        readings.push({ id, entity_id, position, value });
+      }
+    }
+    return { layer, unit: 'dBm', readings, excluded };
+  }
   let unit = '';
   const raw: { s: LayerReading; unit: string }[] = [];
   for (const src of plan?.sources ?? []) {
@@ -133,6 +164,7 @@ export function layerDomain(
   const d = spec.domain[unit] ?? Object.values(spec.domain)[0]!;
   let lo = d[0];
   let hi = d[1];
+  if (spec.fixed) return [lo, hi];
   for (const v of values) {
     if (v < lo) lo = Math.floor(v);
     if (v > hi) hi = Math.ceil(v);
@@ -173,13 +205,14 @@ export const layoutKey = (readings: readonly LayerReading[], outline: readonly P
   '|' +
   outline.map((p) => p.join(',')).join(';');
 
-/** Placed sensors per layer (whatever their state), to enable the layer buttons. */
+/** Placed sources per layer (whatever their state), to enable the layer buttons. */
 export function layerCounts(
   plan: Plan | null,
   hass: Hass | undefined,
 ): Record<HeatLayerId, number> {
-  const out: Record<HeatLayerId, number> = { temperature: 0, humidity: 0 };
+  const out: Record<HeatLayerId, number> = { temperature: 0, humidity: 0, signal: 0 };
   for (const src of plan?.sources ?? []) {
+    if (isSignalSource(src)) out.signal++;
     if (src.kind !== 'sensor' || !src.entity_id) continue;
     const st = hass?.states?.[src.entity_id];
     const layer = st ? layerOfState(st) : null;
@@ -188,5 +221,4 @@ export function layerCounts(
   return out;
 }
 
-export const isHeatLayer = (v: unknown): v is HeatLayerId =>
-  v === 'temperature' || v === 'humidity';
+export const isHeatLayer = (v: unknown): v is HeatLayerId => HEAT_LAYERS.includes(v as HeatLayerId);

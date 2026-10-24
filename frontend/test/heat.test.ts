@@ -105,8 +105,8 @@ describe('heat layers', () => {
 
   it('counts placed sensors per layer whatever their state', () => {
     const { plan, hass } = setup();
-    expect(layerCounts(plan, hass)).toEqual({ temperature: 6, humidity: 1 });
-    expect(layerCounts(null, hass)).toEqual({ temperature: 0, humidity: 0 });
+    expect(layerCounts(plan, hass)).toEqual({ temperature: 6, humidity: 1, signal: 1 });
+    expect(layerCounts(null, hass)).toEqual({ temperature: 0, humidity: 0, signal: 0 });
   });
 
   it('widens the default domain to whole numbers around the data', () => {

@@ -1,4 +1,4 @@
-"""Websocket commands: chartroom/plans/list, get, save, delete and subscribe."""
+"""Websocket commands: chartroom/plans/list, get, save, delete and subscribe; chartroom/mesh/*."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dis
 import voluptuous as vol
 
 from .const import DOMAIN, SIGNAL_PLAN_CHANGED
+from .mesh import DATA_MESH_TEST, async_get_topology
 from .store import ChartroomStore
 from .underlay import async_remove_underlay
 
@@ -24,6 +25,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_save_plan)
     websocket_api.async_register_command(hass, ws_delete_plan)
     websocket_api.async_register_command(hass, ws_subscribe_plans)
+    websocket_api.async_register_command(hass, ws_get_mesh)
+    websocket_api.async_register_command(hass, ws_test_mesh)
 
 
 def _store(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg_id: int):
@@ -119,3 +122,67 @@ def ws_subscribe_plans(
 
     connection.subscriptions[msg_id] = async_dispatcher_connect(hass, SIGNAL_PLAN_CHANGED, forward)
     connection.send_result(msg_id)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "chartroom/mesh/get"})
+@websocket_api.async_response
+async def ws_get_mesh(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Return the Zigbee and Z-Wave mesh: nodes, links and which sources answered."""
+    if _store(hass, connection, msg["id"]) is None:
+        return
+    connection.send_result(msg["id"], await async_get_topology(hass))
+
+
+_TEST_NODE = vol.Schema(
+    {
+        vol.Required("id"): str,
+        vol.Optional("source", default="test"): str,
+        vol.Optional("name", default=""): str,
+        vol.Optional("role", default=None): vol.Any(
+            None, vol.In(["coordinator", "router", "end_device"])
+        ),
+        vol.Optional("device_id", default=None): vol.Any(None, str),
+        vol.Optional("entities", default=[]): [str],
+    }
+)
+_TEST_LINK = vol.Schema(
+    {
+        vol.Required("a"): str,
+        vol.Required("b"): str,
+        vol.Optional("source", default="test"): str,
+        vol.Optional("lqi", default=None): vol.Any(None, vol.Coerce(float)),
+        vol.Optional("rssi", default=None): vol.Any(None, vol.Coerce(float)),
+    }
+)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "chartroom/mesh/test_source",
+        vol.Required("topology"): vol.Any(
+            None,
+            {
+                vol.Required("nodes"): vol.All([_TEST_NODE], vol.Length(max=1000)),
+                vol.Required("links"): vol.All([_TEST_LINK], vol.Length(max=5000)),
+            },
+        ),
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_test_mesh(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Test hook (admins only): serve this topology instead of the real sources, or stop (None).
+
+    Kept in memory only; a restart forgets it.
+    """
+    if _store(hass, connection, msg["id"]) is None:
+        return
+    if msg["topology"] is None:
+        hass.data.pop(DATA_MESH_TEST, None)
+    else:
+        hass.data[DATA_MESH_TEST] = msg["topology"]
+    connection.send_result(msg["id"], {"test": msg["topology"] is not None})

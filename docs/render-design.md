@@ -170,7 +170,90 @@ The temperature and humidity layers follow this note, with these differences:
   frame while anything moves; a new sensor layout cross-fades from the previous field target in
   the colour pass. With `prefers-reduced-motion` both are instant.
 
-The underlay image, if any, sits above the heat canvas.
+The underlay image, if any, sits **beneath** the heat canvas (its own SVG layer under the
+canvas), so the field tints the drawing instead of being hidden by it. Value labels next to sensor
+markers are decluttered: a label that would overlap a room name moves below its marker, and one
+that still overlaps (small cards) is hidden; the marker keeps its accessible name.
+
+## As built in Phase 4
+
+### Signal
+
+- **Model** (`frontend/src/signal.ts`, the reference): for each cell and source,
+  `rx = level_at_1m - 10 n log10(max(d, 1 m)) - sum(wall losses)`, then the max over sources.
+  `n = 2.2`, floor -120 dBm. `level_at_1m` is the source's `tx_dbm` (default -40 dBm for an access
+  point, -45 dBm for a radio), so `PL0` is folded into it. A source whose entity is unavailable is
+  left out.
+- **Walls** are split at their openings: wall parts lose `db_per_cm x thickness_cm` of the wall's
+  material, each door or window its own material's loss, and an opening whose entity is `on`,
+  `open`, `opening` or `closing` loses nothing. Zero-loss parts are dropped. The result is
+  `(ax, ay, bx, by, loss)` per segment, so the shader needs one RGBA32F texel pair per segment
+  (row 0 the endpoints, row 1 the loss) and no material table.
+- **Shader**: one full-grid fragment pass (`SIGNAL_FS` in `heat-gl.ts`) writes value, confidence
+  (always 1) and the outside fade into the same RGBA32F field target as the other layers, and the
+  same colour pass draws it. Access points are `uniform vec4 uAps[32]`. Per source it starts from
+  the free-space level, skips the source if that is already below the best so far, and stops
+  testing walls as soon as it drops below the best, which keeps the average far under
+  `cells x sources x walls`. The intersection test (`t in (0, 1]`, `u in [0, 1]`) is identical in
+  GLSL and TypeScript.
+- **Resolution**: a fixed grid of at most 128 cells on the long side, bilinear upscaled. Walls are
+  SVG on top, so the field does not need to be sharp.
+- **Canvas2D fallback**: the worker runs `signalField` on the same grid and posts the field back.
+- **Agreement** (e2e, example plan with an access point, a radio and 31 wall segments, 13 696
+  cells): WebGL2 against the worker, max difference 7.6e-6 dB, no cell over the tolerance.
+- **Fixed domain** -90 to -30 dBm on a violet, red, amber, yellow-green, green ramp; no value
+  labels (a level at 1 m is not a reading). The legend counts sources and wall segments.
+- Not done: calibration (fitting `n` and losses to measured RSSI), per-source radio parameters
+  from the integrations, per-source bounding-box culling.
+
+### Mesh links
+
+- The integration (`mesh.py`) reads ZHA (its gateway's devices and neighbour tables), Z-Wave JS
+  (each node's last working route through its repeaters, with RSSI) and Zigbee2MQTT
+  (`bridge/request/networkmap` over MQTT, at most every 10 minutes, since a scan loads the network) with the standard library and Home Assistant only.
+  Each source reports `ok`, `absent`, `pending` or `error`; a missing integration is `absent`, not
+  an error. `chartroom/mesh/get` returns `{nodes, links, sources}`; nodes carry the Home
+  Assistant device id and entities when known.
+- The panel layer (`mesh-layer.ts`, its own lazy chunk, loaded on first use) places a node where a
+  device marker or source shows one of its entities or another entity of its device, and draws a
+  line for each link with both ends on the plan: hue from red (bad) to green (good) by LQI/255, or
+  by RSSI from -90 to -40 dBm; dashed grey when unknown. It re-reads every 60 s while on.
+- `chartroom/mesh/test_source` (admin) swaps in a fake topology, in memory only, for e2e.
+
+### Old-wall-tablet check
+
+There is no wall tablet in CI, so this approximates one: headless Chrome at 1280 x 800, DPR 1,
+`prefers-reduced-motion` (no transition frames), Chrome DevTools CPU throttling 4x and 6x, on an
+8-core Xeon box. WebGL2 is SwiftShader (software Vulkan), i.e. a CPU rasteriser in the GPU process;
+CDP throttling slows the page's main thread but neither that GPU process nor the Web Worker.
+`PERF=1 pnpm e2e e2e/perf.spec.ts` reproduces it.
+
+Worst case at the soft caps: 512 wall segments, 32 sources (16 x 12 m of 1 m cells). Retrace =
+move one source, wait for the new field to be drawn and read back; median (p90), 12 runs.
+
+| CPU slowdown | WebGL2 retrace | Worker retrace | Pan frames (WebGL2 / worker) |
+| ------------ | -------------- | -------------- | ---------------------------- |
+| 1x           | 138 ms (155)   | 246 ms (257)   | 60 / 60 fps                  |
+| 4x           | 181 ms (202)   | 246 ms (250)   | 47 / 55 fps                  |
+| 6x           | 175 ms (196)   | 241 ms (245)   | 38 / 39 fps                  |
+
+A realistic flat (64 segments, 4 sources) at 6x: 50 ms (62) retrace with either renderer, 38-43 fps
+while panning (the frame cost is the SVG and the colour pass, not the field).
+
+Reading it:
+
+- A retrace happens only when a source moves, a door opens or a source goes unavailable, never per
+  frame; panning and zooming only redraw the colour pass.
+- The worker is not throttled here, so on a CPU 6x slower than this box expect about
+  `6 x 230 ms ~ 1.4 s` for the worst case in the Canvas2D fallback, and about 0.1 s for a realistic
+  flat. It runs off the main thread, so the panel stays responsive; the old field stays up until
+  the new one arrives.
+- **Rust/WebAssembly decision: not needed.** The fallback is within budget for realistic plans and
+  only slow at the caps on slow CPUs, where a straight port to WASM would buy perhaps 1.5-3x on
+  this scalar float loop. Cheaper wins come first: per-source bounding-box culling, a uniform grid
+  of walls so a ray only tests the cells it crosses, and tracing at 64 cells first and refining.
+  Revisit only if a real tablet without WebGL2 shows multi-second retraces on a plan under the
+  caps.
 
 ## What Phase 1 must provide
 

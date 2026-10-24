@@ -187,8 +187,11 @@ test.describe('plan editor', () => {
       buffer: gridPng(1200, 900),
     });
     await expect.poll(async () => (await livePlan(panel)).underlay?.width_px).toBe(1200);
-    await expect(panel.locator('svg.plan .underlay image')).toHaveCount(1);
-    await expect(panel.locator('svg.plan .underlay image')).toHaveAttribute('href', /^blob:/);
+    await expect(panel.locator('svg.underlay-svg .underlay image')).toHaveCount(1);
+    await expect(panel.locator('svg.underlay-svg .underlay image')).toHaveAttribute(
+      'href',
+      /^blob:/,
+    );
     const placed = (await livePlan(panel)).underlay!;
     expect(placed.url).toMatch(new RegExp(`^/api/chartroom/underlay/${PLAN_ID}\\?v=`));
 
@@ -246,7 +249,7 @@ test.describe('plan editor', () => {
     // The read-only panel shows the underlay too, with a show/hide toggle and an opacity slider.
     await panel.locator('button.edit').click();
     await expect(panel.locator('.toolbar')).toHaveCount(0);
-    const image = panel.locator('svg.plan .underlay image');
+    const image = panel.locator('svg.underlay-svg .underlay image');
     const toggle = panel.getByRole('button', { name: 'Underlay', exact: true });
     const opacity = panel.getByRole('slider', { name: 'Underlay opacity' });
     await expect(image).toHaveCount(1);
@@ -263,7 +266,7 @@ test.describe('plan editor', () => {
     await panel.locator(`[role=tab][data-plan="${PLAN_ID}"]`).click();
     await expect(image).toHaveAttribute('opacity', '0.8');
     await expect(image).toHaveAttribute('href', /^blob:/);
-    await expect(panel.locator('svg.plan')).toHaveClass(/with-underlay/);
+    await expect(panel.locator('.plan-box')).toHaveClass(/with-underlay/);
     await shot(page, 'panel-underlay.png');
     expect((await getPlan<PlanLike>(token(), PLAN_ID)).underlay).toMatchObject({ opacity: 0.5 });
 

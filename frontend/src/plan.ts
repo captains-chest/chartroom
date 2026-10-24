@@ -287,6 +287,9 @@ export function validatePlan(plan: Plan): string[] {
  */
 export const LIMITS = { walls: 512, accessPoints: 32, devices: 256 } as const;
 
+/** Default reference level at 1 m for new access points and radios, in dBm. */
+export const DEFAULT_TX_DBM = { access_point: -40, radio: -45 } as const;
+
 /** Access points and radios: the sources the signal layer traces rays from. */
 export const isSignalSource = (s: Source): boolean =>
   s.kind === 'access_point' || s.kind === 'radio';

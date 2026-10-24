@@ -14,9 +14,11 @@ export interface ChartroomCardConfig {
   floor_id?: string;
   /** CSS height of the plan, e.g. 320px. In the sections view the grid sets it. */
   height?: string;
-  /** Heatmap layer to show: temperature or humidity. Default: none. */
+  /** Heatmap layer to show: temperature, humidity or signal. Default: none. */
   layer?: HeatLayerId | 'none';
-  /** Show the Temperature / Humidity buttons on the card. */
+  /** Show the mesh links between placed Zigbee and Z-Wave devices. */
+  mesh?: boolean;
+  /** Show the layer buttons (Temperature, Humidity, Signal, Mesh) on the card. */
   layer_toggles?: boolean;
 }
 
@@ -31,10 +33,13 @@ export class ChartroomCard extends HTMLElement {
   #message: HTMLElement;
   #loaded = '';
   #load = 0;
-  #layers = new LayerToggles((layer) => {
-    this.#layer = layer;
-    this.#renderLayers();
-  });
+  #layers = new LayerToggles(
+    (layer) => {
+      this.#layer = layer;
+      this.#renderLayers();
+    },
+    (on) => this.#setMesh(on),
+  );
   #layer: HeatLayerId | null = null;
   #unsubscribe: Promise<(() => Promise<void> | void) | null> | null = null;
 
@@ -82,8 +87,9 @@ export class ChartroomCard extends HTMLElement {
     if (config.height) this.style.setProperty('--chartroom-height', config.height);
     else this.style.removeProperty('--chartroom-height');
     if (config.layer !== undefined && config.layer !== 'none' && !isHeatLayer(config.layer))
-      throw new Error('layer must be temperature, humidity or none');
+      throw new Error('layer must be temperature, humidity, signal or none');
     this.#layer = isHeatLayer(config.layer) ? config.layer : null;
+    this.#setMesh(config.mesh === true);
     this.#layers.el.hidden = config.layer_toggles !== true;
     this.#renderLayers();
     this.#loaded = '';
@@ -171,6 +177,11 @@ export class ChartroomCard extends HTMLElement {
     this.#message.hidden = message === null;
     this.#message.textContent = message ?? '';
     this.#view.el.classList.toggle('hidden', message !== null);
+  }
+
+  #setMesh(on: boolean): void {
+    this.#layers.setMesh(on);
+    if (on !== this.#view.meshOn) void this.#view.setMesh(on);
   }
 
   #renderLayers(): void {

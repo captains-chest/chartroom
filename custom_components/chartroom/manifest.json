@@ -1,6 +1,7 @@
 {
   "domain": "chartroom",
   "name": "Chartroom",
+  "after_dependencies": ["mqtt", "zha", "zwave_js"],
   "codeowners": ["@captainDuckay"],
   "config_flow": true,
   "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],

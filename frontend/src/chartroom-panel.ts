@@ -17,6 +17,7 @@ interface PanelInfo {
 const TAB_KEY = 'chartroom:tab';
 const UNDERLAY_KEY = 'chartroom:underlay';
 const LAYER_KEY = 'chartroom:layer';
+const MESH_KEY = 'chartroom:mesh';
 
 interface UnderlayPref {
   visible: boolean;
@@ -63,7 +64,10 @@ export class ChartroomPanel extends HTMLElement {
   #underlayToggle: HTMLButtonElement;
   #underlayOpacity: HTMLInputElement;
   #plansRequested = false;
-  #layers = new LayerToggles((layer) => this.#setLayer(layer));
+  #layers = new LayerToggles(
+    (layer) => this.#setLayer(layer),
+    (on) => this.#setMesh(on),
+  );
   #layer: HeatLayerId | null = null;
   narrow = false;
   panel?: PanelInfo;
@@ -121,6 +125,7 @@ export class ChartroomPanel extends HTMLElement {
     );
     const stored = localStorage.getItem(LAYER_KEY);
     this.#layer = isHeatLayer(stored) ? stored : null;
+    if (localStorage.getItem(MESH_KEY) === '1') this.#setMesh(true);
     this.#view.onPlan = () => this.#renderLayers();
     this.#layers.el.classList.add('layers');
     this.#stage = h(
@@ -402,6 +407,13 @@ export class ChartroomPanel extends HTMLElement {
     this.#view.setPlan(this.#plan);
     this.#controls.attach();
     this.#renderUnderlayControls();
+  }
+
+  #setMesh(on: boolean): void {
+    if (on) localStorage.setItem(MESH_KEY, '1');
+    else localStorage.removeItem(MESH_KEY);
+    this.#layers.setMesh(on);
+    void this.#view.setMesh(on);
   }
 
   #setLayer(layer: HeatLayerId | null): void {

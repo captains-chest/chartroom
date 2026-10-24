@@ -1,0 +1,38 @@
+[
+  {
+    "node_id": 1,
+    "home_id": 3735928559,
+    "name": "Controller",
+    "is_controller": true,
+    "is_routing": true,
+    "rssi": null,
+    "lwr": null
+  },
+  {
+    "node_id": 2,
+    "home_id": 3735928559,
+    "name": "Kitchen dimmer",
+    "is_controller": false,
+    "is_routing": true,
+    "rssi": -55,
+    "lwr": { "repeaters": [], "rssi": -52 }
+  },
+  {
+    "node_id": 3,
+    "home_id": 3735928559,
+    "name": "Attic sensor",
+    "is_controller": false,
+    "is_routing": false,
+    "rssi": -80,
+    "lwr": { "repeaters": [2], "rssi": 127 }
+  },
+  {
+    "node_id": 4,
+    "home_id": 3735928559,
+    "name": "",
+    "is_controller": false,
+    "is_routing": false,
+    "rssi": 127,
+    "lwr": null
+  }
+]

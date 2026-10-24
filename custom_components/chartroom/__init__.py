@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from . import websocket_api
+from . import mesh, websocket_api
 from .const import (
     CARD_JS,
     DOMAIN,
@@ -78,4 +78,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend.async_remove_panel(hass, PANEL_URL_PATH)
     frontend.remove_extra_js_url(hass, card_url())
     hass.data.pop(DOMAIN, None)
+    mesh.async_unload(hass)
     return True

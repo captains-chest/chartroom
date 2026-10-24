@@ -1,15 +1,17 @@
 # Chartroom
 
 Floor plans for Home Assistant: draw your home once, put your lights, switches, doors and windows
-on it, and see temperature and humidity (and, next, Wi-Fi signal) as live heatmaps over it — in
-a sidebar panel and as a dashboard card.
+on it, and see temperature, humidity and Wi-Fi/radio signal as live heatmaps over it, plus your
+Zigbee and Z-Wave mesh links — in a sidebar panel and as a dashboard card.
 
-> **Status: Phase 3 (temperature and humidity heatmaps) is complete.** Phase 1 gave the panel
-> one tab per Home Assistant floor, pan and zoom, an optional underlay and an editor for walls,
-> doors, windows, rooms and sensor/signal sources. Phase 2 added live device markers (tap to
-> toggle, hold for details). Phase 3 adds live temperature and humidity fields between your
-> sensors. The Wi-Fi and radio signal heatmap comes next (Phase 4); see
-> [docs/render-design.md](docs/render-design.md) for how the heatmaps are rendered.
+> **Status: Phase 4 (signal strength and mesh links) is complete.** Phase 1 gave the panel one
+> tab per Home Assistant floor, pan and zoom, an optional underlay and an editor for walls, doors,
+> windows, rooms and sensor/signal sources. Phase 2 added live device markers (tap to toggle, hold
+> for details). Phase 3 added live temperature and humidity fields between your sensors. Phase 4
+> adds an estimated signal-strength map from your access points and radios through your walls, and
+> the ZHA, Z-Wave JS and Zigbee2MQTT mesh drawn between your devices. See
+> [docs/render-design.md](docs/render-design.md) for how the heatmaps are rendered and how fast
+> they are.
 
 ![Chartroom panel with the temperature heatmap](docs/images/heatmap-temperature.png)
 
@@ -52,9 +54,9 @@ without one). Admins only; changes save automatically.
 
 ## Heatmaps
 
-The **Temperature** and **Humidity** buttons at the top left of the panel show a live field built
-from the temperature and humidity sensors placed on the plan (with **Source** in the editor). Press
-the active button again to hide it. Your choice is remembered on this device.
+The **Temperature**, **Humidity** and **Signal** buttons at the top left of the panel show a live
+field built from the sources placed on the plan (with **Source** in the editor). Press the active
+button again to hide it. Your choice is remembered on this device.
 
 - **Linear between sensors.** Two sensors at 25 °C and 30 °C give exactly 27.5 °C halfway between
   them. With three or more sensors the plan is split into triangles between them (Delaunay) and
@@ -72,8 +74,43 @@ the active button again to hide it. Your choice is remembered on this device.
   readings). Humidity runs sand, yellow, mint, blue (30–70 %).
 - Drawn with WebGL2. Without it (or without float render targets) a Web Worker computes the same
   field and a 2D canvas draws it.
+- Sensor value labels step aside for room names, and hide on small cards rather than overlap them.
+  An underlay drawing sits beneath the field.
 
 ![Humidity heatmap](docs/images/heatmap-humidity.png)
+
+### Signal
+
+**Signal** estimates the Wi-Fi or radio strength (dBm) you would get everywhere on the plan from
+the access points and radios placed with **Source**:
+
+- **Straight rays through your walls.** From each source, signal falls off with distance from its
+  level at 1 m (path-loss exponent 2.2), and every wall the straight line crosses takes off its
+  material's loss per centimetre times its thickness (**Materials** in the editor). Doors and
+  windows have their own material and lose nothing while their entity says they are open. Each
+  point shows the strongest source.
+- **Level at 1 m** is set per source in the inspector (default -40 dBm for an access point,
+  -45 dBm for a radio). A source whose entity is unavailable is left out.
+- The scale is fixed from -90 dBm (violet, unusable) through red and amber to green (-30 dBm).
+  The legend shows how many sources and wall segments are used.
+- It is an estimate, not a measurement: there is no calibration to real RSSI yet.
+- Drawn by a WebGL2 shader, or by the Web Worker on a 2D canvas, with the same results.
+
+![Signal heatmap](docs/images/heatmap-signal.png)
+
+### Mesh links
+
+**Mesh** draws the links between Zigbee and Z-Wave devices placed on the plan, as Home Assistant's
+ZHA and Z-Wave JS integrations and Zigbee2MQTT (over MQTT) report them. Each line runs between two
+placed devices (or sources) of the same network, coloured from red (weak) to green (strong) by
+link quality (LQI) or RSSI, dashed grey when the network gives neither. Hover a line for the two
+devices and the value. The note at the bottom left says how many links are on this plan and which
+networks were found; a network that is not set up is simply skipped. The topology is read again
+every minute while the layer is on (Zigbee2MQTT's network map at most every 10 minutes, since it
+makes the routers scan). The toggle works with any heatmap or none, and is remembered on this
+device.
+
+![Mesh links over the signal heatmap](docs/images/mesh-links.png)
 
 ## Devices
 
@@ -119,8 +156,9 @@ type: custom:chartroom-card
 title: Ground floor
 floor_id: ground_floor # or plan_id: example; without either, the first plan
 height: 320px # optional; in the sections view the grid sets the height
-layer: temperature # optional: temperature, humidity or none (the default)
-layer_toggles: true # optional: show the Temperature/Humidity buttons on the card
+layer: temperature # optional: temperature, humidity, signal or none (the default)
+layer_toggles: true # optional: show the layer buttons on the card
+mesh: true # optional: draw mesh links
 ```
 
 The card shows the plan with live device markers (tap to toggle, hold for details) and, with
@@ -142,7 +180,7 @@ JavaScript dependencies; everything it needs ships in this repository.
 | `.ci/configuration.yaml`               | The CI Home Assistant: template sensors, lights, switches, a lock and a cover for e2e.    |
 | `tests/`, `frontend/test/`, `e2e/`     | pytest, Vitest, and Playwright against a real Home Assistant.                             |
 
-Websocket commands: `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin), and `chartroom/plans/subscribe`, which sends `{plan_id, deleted}` whenever a plan is saved or deleted. Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB).
+Websocket commands: `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin), and `chartroom/plans/subscribe`, which sends `{plan_id, deleted}` whenever a plan is saved or deleted. `chartroom/mesh/get` returns the mesh topology `{nodes, links, sources}` (`chartroom/mesh/test_source`, admin only, swaps in a fake one for tests). Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB).
 
 ## Example data
 
@@ -185,6 +223,8 @@ End-to-end tests need a running Home Assistant with Chartroom copied into its
 pnpm exec playwright install chromium
 HA_URL=http://127.0.0.1:8123 pnpm e2e
 ```
+
+`PERF=1 pnpm e2e e2e/perf.spec.ts` runs the CPU-throttled wall-tablet check (not in CI).
 
 CI runs all of the above, plus hassfest and HACS validation, and starts Home Assistant in Docker
 for the end-to-end tests.

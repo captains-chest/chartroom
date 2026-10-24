@@ -1,5 +1,6 @@
 // Messages between the main thread and the field worker. The worker triangulates the sensor
-// layout once per change ('mesh') and then turns sensor values into a field grid ('values').
+// layout once per change ('mesh') and then turns sensor values into a field grid ('values'); for
+// the signal layer it traces the whole field in one go ('signal', the Canvas2D fallback).
 import {
   buildMesh,
   fillField,
@@ -10,11 +11,21 @@ import {
   type FieldPlan,
 } from './field';
 import type { Point } from './plan';
+import { MAX_SIGNAL_SEGMENTS, MAX_SIGNAL_SOURCES, SEG, SRC, signalField } from './signal';
 
 export type WorkerRequest =
   | { type: 'ping'; id: number }
   | { type: 'mesh'; id: number; key: string; sensors: Point[]; outline: Point[]; grid: FieldGrid }
-  | { type: 'values'; id: number; key: string; values: number[] };
+  | { type: 'values'; id: number; key: string; values: number[] }
+  | {
+      type: 'signal';
+      id: number;
+      key: string;
+      grid: FieldGrid;
+      outline: Point[];
+      walls: Float32Array;
+      aps: Float32Array;
+    };
 
 /** A request without its id (the client numbers them). */
 export type WorkerRequestBody = WorkerRequest extends infer R
@@ -73,6 +84,20 @@ export function createHandler(): (req: WorkerRequest) => WorkerResponse {
         if (req.values.length < n) return { type: 'error', id: req.id, message: 'too few values' };
         const field = fillField(current.plan, nodeValues(current.mesh, req.values));
         return { type: 'field', id: req.id, key: req.key, grid: current.plan.grid, field };
+      }
+      case 'signal': {
+        if (!validGrid(req.grid))
+          return {
+            type: 'error',
+            id: req.id,
+            message: `grid must be 1..${MAX_FIELD_SIZE} cells a side`,
+          };
+        const input = {
+          walls: Float32Array.from(req.walls ?? []).subarray(0, MAX_SIGNAL_SEGMENTS * SEG),
+          aps: Float32Array.from(req.aps ?? []).subarray(0, MAX_SIGNAL_SOURCES * SRC),
+        };
+        const field = signalField(input, req.grid, req.outline ?? []);
+        return { type: 'field', id: req.id, key: req.key, grid: req.grid, field };
       }
     }
   };

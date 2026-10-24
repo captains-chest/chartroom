@@ -45,6 +45,15 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      - name: Example plan fixture and preview are reproducible
+        run: |
+          pnpm example-plan
+          if [ -n "$(git status --porcelain frontend/test/fixtures docs/images)" ]; then
+            git status --porcelain frontend/test/fixtures docs/images
+            echo '::error::Example plan is out of date. Run `pnpm example-plan` and commit it.'
+            exit 1
+          fi
+
       - name: Build
         run: pnpm build
 

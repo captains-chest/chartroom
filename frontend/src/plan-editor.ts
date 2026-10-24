@@ -3,6 +3,7 @@
 import { autoPlace, deviceChoices, deviceLook } from './devices';
 import { add, dist, frame, mm, sub } from './geometry';
 import type { Hass } from './ha-types';
+import { type Autosaver, autosaver } from './editor/autosaver';
 import { findItem, type Kind, KINDS, kindOps, type Item, type Selection } from './editor/kinds';
 import { History } from './history';
 import { areaChoices, entityArea, sourceChoices } from './model';
@@ -121,7 +122,8 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
 
 /** Snap radius on screen. */
 const SNAP_PX = 10;
-const SAVE_DELAY = 600;
+/** Autosave this long after the last change. */
+const SAVE_DELAY_MS = 600;
 
 const DOUBLE_CLICK_PX = 6;
 /** An inspector section's content. */
@@ -143,9 +145,7 @@ export class PlanEditor {
   #draft: Point[] = [];
   #hover: { point: Point; target: boolean } | null = null;
   #measured: [Point, Point] | null = null;
-  #saveTimer: ReturnType<typeof setTimeout> | null = null;
-  #saving: Promise<void> | null = null;
-  #savedPlan: Plan;
+  readonly #saver: Autosaver<Plan>;
   #saveState: HTMLElement;
   #hint: HTMLElement;
   #undoButton: HTMLButtonElement;
@@ -175,7 +175,12 @@ export class PlanEditor {
     this.#host = host;
     this.#view = host.view;
     this.#history = new History(host.plan);
-    this.#savedPlan = host.plan;
+    this.#saver = autosaver(
+      (plan) => host.save(plan),
+      SAVE_DELAY_MS,
+      host.plan,
+      (text, error) => this.#setSaveState(text, error),
+    );
     // The panel may already have loaded the picture.
     this.#underlayUrl = host.view.underlayUrl;
     for (const t of TOOLS) {
@@ -233,7 +238,7 @@ export class PlanEditor {
 
   /** Flush pending saves and detach from the view. */
   async close(): Promise<void> {
-    await this.flush();
+    await this.#saver.flush();
     this.#view.setDelegate(null);
     this.#view.drawOverlay();
     this.#view.setEditing(null);
@@ -296,35 +301,7 @@ export class PlanEditor {
 
   #afterChange(): void {
     this.#render();
-    this.#scheduleSave();
-  }
-
-  #scheduleSave(): void {
-    this.#setSaveState(this.plan === this.#savedPlan ? 'Saved' : 'Unsaved changes');
-    if (this.#saveTimer) clearTimeout(this.#saveTimer);
-    this.#saveTimer = setTimeout(() => void this.flush(), SAVE_DELAY);
-  }
-
-  /** Save now if anything changed since the last save. */
-  async flush(): Promise<void> {
-    if (this.#saveTimer) clearTimeout(this.#saveTimer);
-    this.#saveTimer = null;
-    if (this.#saving) await this.#saving;
-    const plan = this.plan;
-    if (plan === this.#savedPlan) {
-      this.#setSaveState('Saved');
-      return;
-    }
-    this.#setSaveState('Saving…');
-    this.#saving = this.#host.save(plan).then(
-      () => {
-        this.#savedPlan = plan;
-        this.#setSaveState(this.plan === plan ? 'Saved' : 'Unsaved changes');
-      },
-      (err: unknown) => this.#setSaveState(`Save failed: ${(err as Error).message ?? err}`, true),
-    );
-    await this.#saving;
-    this.#saving = null;
+    this.#saver.schedule(this.plan);
   }
 
   #setSaveState(text: string, error = false): void {

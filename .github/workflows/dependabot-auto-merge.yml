@@ -1,7 +1,9 @@
 name: Dependabot auto-merge
 
 # Turns on GitHub auto-merge (squash) for Dependabot PRs. The PR merges only once the
-# required CI checks in the branch ruleset pass; a red build blocks it.
+# required CI checks in the branch ruleset pass; a red build blocks it. Without a ruleset that
+# requires checks (for example while the repository is private on the free plan), `--auto` would
+# merge immediately, so the job does nothing and the PR waits for a human.
 on: pull_request_target
 
 permissions:
@@ -21,7 +23,16 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enable auto-merge
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: |
+          required=$(gh api "repos/$REPO/rules/branches/$BASE" \
+            --jq '[.[] | select(.type == "required_status_checks")] | length' 2>/dev/null || echo 0)
+          if [ "${required:-0}" = 0 ]; then
+            echo "::notice::No required status checks on $BASE; not enabling auto-merge."
+            exit 0
+          fi
+          gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.ref }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

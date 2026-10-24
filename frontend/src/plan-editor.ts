@@ -50,7 +50,7 @@ import {
 import type { PlanView } from './plan-view';
 import { signalLimitWarnings } from './signal';
 import { button, field, h, numberInput, s, select, textInput } from './ui';
-import { importUnderlay, loadUnderlayUrl } from './underlay';
+import { importUnderlay, loadUnderlay } from './underlay';
 
 export type Tool =
   | 'select'
@@ -1379,12 +1379,14 @@ export class PlanEditor {
 
   async #loadUnderlay(): Promise<void> {
     const u = this.plan.underlay;
-    if (!u || this.#underlayUrl) return;
-    try {
-      this.#setUnderlayUrl(await loadUnderlayUrl(this.#host.hass(), u.url));
-    } catch {
-      // The plan still works without its picture.
-    }
+    // An image imported meanwhile wins.
+    if (u && !this.#underlayUrl)
+      await loadUnderlay(
+        this.#host.hass(),
+        u.url,
+        () => !this.#underlayUrl,
+        (url) => this.#setUnderlayUrl(url),
+      );
   }
 
   #setUnderlayUrl(url: string): void {

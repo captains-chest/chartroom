@@ -181,3 +181,63 @@ export async function ensureDashboard(token: string): Promise<void> {
     });
   });
 }
+
+export const FLOORS = [
+  { floor_id: 'ground_floor', name: 'Ground floor', level: 0 },
+  { floor_id: 'first_floor', name: 'First floor', level: 1 },
+];
+export const AREAS = [
+  { area_id: 'living_room', name: 'Living room', floor: 'ground_floor' },
+  { area_id: 'kitchen', name: 'Kitchen', floor: 'ground_floor' },
+  { area_id: 'hall', name: 'Hall', floor: 'ground_floor' },
+  { area_id: 'bedroom', name: 'Bedroom', floor: 'first_floor' },
+  { area_id: 'office', name: 'Office', floor: 'first_floor' },
+  { area_id: 'bath', name: 'Bath', floor: 'first_floor' },
+];
+
+/**
+ * Floors and areas the tests link rooms to. Existing ones (on a developer's instance) are left
+ * exactly as they are; only missing ids are created, which on a fresh instance gives these ids.
+ */
+export async function ensureFloorsAndAreas(token: string): Promise<void> {
+  await withSocket(token, async (send) => {
+    const floors = await send<{ floor_id: string }[]>({ type: 'config/floor_registry/list' });
+    for (const f of FLOORS) {
+      if (floors.some((x) => x.floor_id === f.floor_id)) continue;
+      await send({ type: 'config/floor_registry/create', name: f.name, level: f.level });
+    }
+    const areas = await send<{ area_id: string }[]>({ type: 'config/area_registry/list' });
+    for (const a of AREAS) {
+      if (areas.some((x) => x.area_id === a.area_id)) continue;
+      await send({ type: 'config/area_registry/create', name: a.name, floor_id: a.floor });
+    }
+  });
+}
+
+export const planCommand = <R>(
+  token: string,
+  msg: { type: string; plan_id?: string; plan?: unknown },
+): Promise<R> => withSocket(token, (send) => send<R>(msg));
+
+export const getPlan = <R = Record<string, unknown>>(token: string, plan_id: string): Promise<R> =>
+  planCommand<R>(token, { type: 'chartroom/plans/get', plan_id });
+
+export const savePlan = (token: string, plan_id: string, plan: unknown): Promise<unknown> =>
+  planCommand(token, { type: 'chartroom/plans/save', plan_id, plan });
+
+/** Delete a plan the tests made; a plan that is already gone is fine. */
+export async function deletePlan(token: string, plan_id: string): Promise<void> {
+  try {
+    await planCommand(token, { type: 'chartroom/plans/delete', plan_id });
+  } catch (err) {
+    if (!/not found/i.test((err as Error).message)) throw err;
+  }
+}
+
+/** The traced example plan as plan 'example', unless one is already stored. */
+export async function ensureExamplePlan(token: string, plan: unknown): Promise<void> {
+  const { plans } = await planCommand<{ plans: { id: string }[] }>(token, {
+    type: 'chartroom/plans/list',
+  });
+  if (!plans.some((p) => p.id === 'example')) await savePlan(token, 'example', plan);
+}

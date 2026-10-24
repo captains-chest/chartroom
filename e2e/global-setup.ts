@@ -1,6 +1,15 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { CLIENT_ID, HA_URL, ensureChartroom, ensureDashboard, onboard, waitForHa } from './ha';
+import {
+  CLIENT_ID,
+  HA_URL,
+  ensureChartroom,
+  ensureDashboard,
+  ensureExamplePlan,
+  ensureFloorsAndAreas,
+  onboard,
+  waitForHa,
+} from './ha';
 
 const STATE = 'test-results/.auth/state.json';
 
@@ -22,6 +31,11 @@ export default async function globalSetup(): Promise<void> {
   process.env['HA_TOKEN'] = token;
   await ensureChartroom(token);
   await ensureDashboard(token);
+  await ensureFloorsAndAreas(token);
+  await ensureExamplePlan(
+    token,
+    JSON.parse(readFileSync('frontend/test/fixtures/example-plan.json', 'utf8')),
+  );
 
   // The Home Assistant frontend reads its session from localStorage.hassTokens.
   const hassTokens = {

@@ -12,7 +12,7 @@ import {
   sub,
   wallRect,
 } from './geometry';
-import type { Door, Opening, Plan, Point, Room, Wall, Window } from './plan';
+import type { Door, Material, Opening, Plan, Point, Room, Wall, Window } from './plan';
 
 export type OpeningKind = 'door' | 'window';
 
@@ -360,4 +360,23 @@ export function snap(p: Point, o: SnapOptions): { point: Point; target: boolean 
     else if (dx < dy * 0.09) q = [o.anchor[0], q[1]];
   }
   return { point: q, target: false };
+}
+
+/** Move a whole room by `delta`. */
+export function moveRoom(plan: Plan, id: string, delta: Point): Plan {
+  return {
+    ...plan,
+    rooms: plan.rooms.map((r) =>
+      r.id === id ? { ...r, polygon: r.polygon.map((p) => mmPoint(add(p, delta))) } : r,
+    ),
+  };
+}
+
+/** Add or override a material in the plan's own table. */
+export function setMaterial(plan: Plan, material: Material): Plan {
+  const rest = (plan.materials ?? []).filter((m) => m.id !== material.id);
+  return {
+    ...plan,
+    materials: [...rest, { ...material, db_per_cm: Math.max(0, material.db_per_cm) }],
+  };
 }

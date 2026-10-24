@@ -1,23 +1,37 @@
-import type { Hass } from './ha-types';
-import { floorsKey, groupAreasByFloor } from './model';
-import { baseStyles, floorList, placeholderPlan } from './render';
+import type { Hass, PlanSummary } from './ha-types';
 import { pingWorker } from './field-worker';
+import { emptyPlan, normalizePlan, type Plan } from './plan';
+import { type FloorTab, floorTabs, planIdForFloor } from './model';
+import type { PlanEditor } from './plan-editor';
+import { PlanView, planViewStyles } from './plan-view';
+import { button, h } from './ui';
 
 interface PanelInfo {
   config?: { version?: string };
 }
 
-interface PlanSummary {
-  id: string;
-  name: string;
-}
+const TAB_KEY = 'chartroom:tab';
 
-/** The full-screen Chartroom panel. Phase 0: an empty plan, the house's floors and areas. */
+/** The full-screen Chartroom panel: the plan of each floor, with pan, zoom and the editor. */
 export class ChartroomPanel extends HTMLElement {
   #hass?: Hass;
-  #key = '';
-  #floors: HTMLElement;
+  #view = new PlanView();
+  #tabsEl: HTMLElement;
   #status: HTMLElement;
+  #stage: HTMLElement;
+  #empty: HTMLElement;
+  #editButton: HTMLButtonElement;
+  #menuButton: HTMLButtonElement;
+  #toolbarSlot: HTMLElement;
+  #inspectorSlot: HTMLElement;
+  #plans: PlanSummary[] | null = null;
+  #tabs: FloorTab[] = [];
+  #tabsKey = '';
+  #tab: string | null = null;
+  #planId: string | null = null;
+  #plan: Plan | null = null;
+  #editor: PlanEditor | null = null;
+  #loading = 0;
   #plansRequested = false;
   narrow = false;
   panel?: PanelInfo;
@@ -25,23 +39,44 @@ export class ChartroomPanel extends HTMLElement {
   constructor() {
     super();
     const root = this.attachShadow({ mode: 'open' });
-    const style = document.createElement('style');
-    style.textContent = `${baseStyles}
-      :host { min-height: 100vh; padding: 16px; box-sizing: border-box; background: var(--primary-background-color, #fafafa); }
-      header h1 { margin: 0 0 12px; font-size: 1.5rem; font-weight: 400; }
-      main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(200px, 1fr); gap: 16px; }
-      :host([narrow]) main { grid-template-columns: 1fr; }
-      .status { color: var(--secondary-text-color, #727272); font-size: 0.85rem; }`;
-    const header = document.createElement('header');
-    const h1 = document.createElement('h1');
-    h1.textContent = 'Chartroom';
-    this.#status = document.createElement('p');
-    this.#status.className = 'status';
-    header.append(h1, this.#status);
-    const main = document.createElement('main');
-    this.#floors = document.createElement('aside');
-    main.append(placeholderPlan('No floor plan yet'), this.#floors);
-    root.append(style, header, main);
+    const style = h('style');
+    style.textContent = panelStyles + planViewStyles;
+    this.#menuButton = button('☰', () => this.#toggleMenu(), {
+      class: 'menu',
+      'aria-label': 'Sidebar',
+    });
+    this.#tabsEl = h('nav', { class: 'tabs', role: 'tablist', 'aria-label': 'Floors' });
+    this.#editButton = button('Edit', () => void this.#toggleEditor(), {
+      class: 'edit',
+      hidden: true,
+    });
+    this.#status = h('p', { class: 'status' });
+    this.#toolbarSlot = h('div', { class: 'toolbar-slot' });
+    this.#inspectorSlot = h('aside', { class: 'inspector-slot', hidden: true });
+    this.#empty = h('div', { class: 'empty', hidden: true });
+    const zoom = h(
+      'div',
+      { class: 'zoom' },
+      button('+', () => this.#view.zoom(1.4), { 'aria-label': 'Zoom in', title: 'Zoom in' }),
+      button('−', () => this.#view.zoom(1 / 1.4), { 'aria-label': 'Zoom out', title: 'Zoom out' }),
+      button('⤢', () => this.#view.fit(), { 'aria-label': 'Fit plan', title: 'Fit plan' }),
+    );
+    this.#stage = h('div', { class: 'stage' }, this.#view.svg, this.#empty, zoom);
+    root.append(
+      style,
+      h(
+        'header',
+        {},
+        this.#menuButton,
+        h('h1', {}, 'Chartroom'),
+        this.#tabsEl,
+        h('span', { class: 'spacer' }),
+        this.#editButton,
+      ),
+      this.#toolbarSlot,
+      h('main', {}, this.#stage, this.#inspectorSlot),
+      h('footer', {}, this.#status),
+    );
   }
 
   connectedCallback(): void {
@@ -49,30 +84,211 @@ export class ChartroomPanel extends HTMLElement {
       (v) => this.#setStatus('worker', `worker ${v} ready`),
       () => this.#setStatus('worker', 'worker unavailable'),
     );
+    window.addEventListener('keydown', this.#onKey);
+  }
+
+  disconnectedCallback(): void {
+    window.removeEventListener('keydown', this.#onKey);
   }
 
   set hass(hass: Hass) {
     this.#hass = hass;
     this.toggleAttribute('narrow', this.narrow);
-    const groups = groupAreasByFloor(hass);
-    const key = floorsKey(groups);
-    if (key !== this.#key) {
-      this.#key = key;
-      this.#floors.replaceChildren(floorList(groups));
-    }
+    this.#menuButton.hidden = !this.narrow;
     if (!this.#plansRequested && hass.connection) {
       this.#plansRequested = true;
-      hass.connection
-        .sendMessagePromise<{ plans: PlanSummary[] }>({ type: 'chartroom/plans/list' })
-        .then(
-          (r) => this.#setStatus('plans', `${r.plans.length} saved plan(s)`),
-          () => this.#setStatus('plans', 'plans unavailable'),
-        );
+      void this.#refreshPlans();
     }
+    if (this.#plans) this.#renderTabs();
+    this.#editor?.hassChanged();
   }
 
   get hass(): Hass | undefined {
     return this.#hass;
+  }
+
+  /** The plan on screen (for tests and the editor). */
+  get plan(): Plan | null {
+    return this.#editor?.plan ?? this.#plan;
+  }
+
+  get isAdmin(): boolean {
+    return this.#hass?.user?.is_admin ?? true;
+  }
+
+  #ws<T>(message: { type: string; [key: string]: unknown }): Promise<T> {
+    const c = this.#hass?.connection;
+    if (!c) return Promise.reject(new Error('not connected'));
+    return c.sendMessagePromise<T>(message);
+  }
+
+  async #refreshPlans(): Promise<void> {
+    try {
+      const r = await this.#ws<{ plans: PlanSummary[] }>({ type: 'chartroom/plans/list' });
+      this.#plans = r.plans;
+      this.#setStatus('plans', `${r.plans.length} saved plan(s)`);
+    } catch {
+      this.#plans = [];
+      this.#setStatus('plans', 'plans unavailable');
+    }
+    this.#tabsKey = '';
+    this.#renderTabs();
+  }
+
+  #renderTabs(): void {
+    const tabs = floorTabs(this.#hass, this.#plans ?? []);
+    const key = JSON.stringify(tabs);
+    if (key === this.#tabsKey) return;
+    this.#tabsKey = key;
+    this.#tabs = tabs;
+    this.#tabsEl.replaceChildren(
+      ...tabs.map((t) => {
+        const b = button(t.label, () => void this.#selectTab(t.key), {
+          role: 'tab',
+          'data-tab': t.key,
+          'data-plan': t.plan_id ?? '',
+        });
+        if (!t.plan_id) b.classList.add('no-plan');
+        return b;
+      }),
+    );
+    // Keep the current tab (or the one holding the current plan), else the remembered one, else
+    // the first with a plan.
+    const holding = this.#planId ? tabs.find((t) => t.plan_id === this.#planId) : undefined;
+    const remembered = localStorage.getItem(TAB_KEY);
+    const pick =
+      holding ??
+      tabs.find((t) => t.key === this.#tab) ??
+      tabs.find((t) => t.key === remembered) ??
+      tabs.find((t) => t.plan_id) ??
+      tabs[0];
+    if (pick && (pick.key !== this.#tab || pick.plan_id !== this.#planId))
+      void this.#selectTab(pick.key);
+    else this.#markTab();
+    if (tabs.length === 0) this.#showEmpty('No floors in Home Assistant yet, and no saved plans.');
+  }
+
+  #markTab(): void {
+    for (const b of this.#tabsEl.querySelectorAll<HTMLElement>('[role=tab]')) {
+      b.setAttribute('aria-selected', String(b.dataset['tab'] === this.#tab));
+    }
+  }
+
+  async #selectTab(key: string): Promise<void> {
+    const tab = this.#tabs.find((t) => t.key === key);
+    if (!tab) return;
+    if (this.#editor) await this.#closeEditor();
+    this.#tab = key;
+    localStorage.setItem(TAB_KEY, key);
+    this.#markTab();
+    if (!tab.plan_id) {
+      this.#planId = null;
+      this.#plan = null;
+      this.#view.setPlan(null);
+      this.#editButton.hidden = true;
+      this.#showEmpty(`No plan for ${tab.label} yet.`, tab);
+      return;
+    }
+    if (tab.plan_id === this.#planId && this.#plan) return;
+    const load = ++this.#loading;
+    try {
+      const raw = await this.#ws<unknown>({ type: 'chartroom/plans/get', plan_id: tab.plan_id });
+      if (load !== this.#loading) return;
+      this.#planId = tab.plan_id;
+      this.#plan = normalizePlan(raw);
+      this.#showEmpty(null);
+      this.#view.setPlan(this.#plan);
+      this.#view.fit();
+      this.#editButton.hidden = !this.isAdmin;
+      this.dataset['plan'] = tab.plan_id;
+    } catch (err) {
+      this.#showEmpty(`Could not load this plan: ${(err as Error).message ?? err}`);
+    }
+  }
+
+  #showEmpty(text: string | null, tab?: FloorTab): void {
+    this.#empty.hidden = text === null;
+    this.#view.svg.classList.toggle('hidden', text !== null);
+    if (text === null) return;
+    const children: (HTMLElement | string)[] = [h('p', {}, text)];
+    if (tab?.floor_id && this.isAdmin) {
+      children.push(
+        button('Create plan', () => void this.#createPlan(tab), { class: 'create primary' }),
+        h('p', { class: 'hint' }, 'Draw the walls yourself, or import a drawing to trace over.'),
+      );
+    }
+    this.#empty.replaceChildren(...children);
+  }
+
+  async #createPlan(tab: FloorTab): Promise<void> {
+    if (!tab.floor_id) return;
+    const id = planIdForFloor(tab.floor_id);
+    await this.#ws({
+      type: 'chartroom/plans/save',
+      plan_id: id,
+      plan: emptyPlan(tab.label, tab.floor_id),
+    });
+    this.#planId = null;
+    await this.#refreshPlans();
+    await this.#selectTab(tab.key);
+    await this.#toggleEditor();
+  }
+
+  async #savePlan(plan: Plan): Promise<void> {
+    if (!this.#planId) throw new Error('no plan');
+    const { id: _id, ...body } = plan as Plan & { id?: string };
+    await this.#ws({ type: 'chartroom/plans/save', plan_id: this.#planId, plan: body });
+    const before = this.#plan;
+    this.#plan = plan;
+    if (
+      before &&
+      (before.name !== plan.name || (before.floor_id ?? null) !== (plan.floor_id ?? null))
+    ) {
+      await this.#refreshPlans();
+    }
+  }
+
+  async #toggleEditor(): Promise<void> {
+    if (this.#editor) {
+      await this.#closeEditor();
+      return;
+    }
+    if (!this.#plan || !this.#planId) return;
+    const { PlanEditor } = await import('./plan-editor');
+    this.#editor = new PlanEditor({
+      view: this.#view,
+      hass: () => this.#hass,
+      save: (plan) => this.#savePlan(plan),
+      planId: this.#planId,
+      plan: this.#plan,
+    });
+    this.#toolbarSlot.replaceChildren(this.#editor.toolbar);
+    this.#inspectorSlot.replaceChildren(this.#editor.inspector);
+    this.#inspectorSlot.hidden = false;
+    this.#editButton.textContent = 'Done';
+    this.toggleAttribute('editing', true);
+  }
+
+  async #closeEditor(): Promise<void> {
+    const editor = this.#editor;
+    if (!editor) return;
+    this.#editor = null;
+    await editor.close();
+    this.#plan = editor.plan;
+    this.#toolbarSlot.replaceChildren();
+    this.#inspectorSlot.replaceChildren();
+    this.#inspectorSlot.hidden = true;
+    this.#editButton.textContent = 'Edit';
+    this.toggleAttribute('editing', false);
+    this.#view.setPlan(this.#plan);
+  }
+
+  #onKey = (e: KeyboardEvent): void => {
+    this.#editor?.key(e);
+  };
+
+  #toggleMenu(): void {
+    this.dispatchEvent(new Event('hass-toggle-menu', { bubbles: true, composed: true }));
   }
 
   #parts = new Map<string, string>();
@@ -82,6 +298,42 @@ export class ChartroomPanel extends HTMLElement {
     this.#status.dataset[part] = text;
   }
 }
+
+const panelStyles = `
+  :host { display: flex; flex-direction: column; height: 100vh; box-sizing: border-box;
+    color: var(--primary-text-color, #212121); background: var(--primary-background-color, #fafafa);
+    font-family: var(--ha-font-family-body, system-ui, sans-serif); }
+  [hidden] { display: none !important; }
+  button { font: inherit; color: inherit; background: var(--card-background-color, #fff);
+    border: 1px solid var(--divider-color, #ccc); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:hover { border-color: var(--primary-color, #03a9f4); }
+  button.primary, button[aria-pressed=true], button[aria-selected=true] {
+    background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); border-color: transparent; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 16px; min-height: 48px; box-sizing: border-box;
+    background: var(--app-header-background-color, var(--primary-color, #03a9f4));
+    color: var(--app-header-text-color, var(--text-primary-color, #fff)); }
+  header h1 { margin: 0; font-size: 1.25rem; font-weight: 400; }
+  header button { background: transparent; color: inherit; border-color: rgba(255,255,255,0.4); }
+  header button[aria-selected=true] { background: rgba(255,255,255,0.25); color: inherit; }
+  .tabs { display: flex; gap: 4px; overflow-x: auto; }
+  .tabs .no-plan { opacity: 0.75; font-style: italic; }
+  .spacer { flex: 1; }
+  main { flex: 1; display: flex; min-height: 0; }
+  .stage { position: relative; flex: 1; min-width: 0; }
+  .stage svg.hidden { visibility: hidden; }
+  .zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+  .zoom button { width: 36px; height: 36px; padding: 0; font-size: 1.1rem; }
+  .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 8px; color: var(--secondary-text-color, #727272); text-align: center; padding: 16px; }
+  .empty .hint { font-size: 0.85rem; margin: 0; }
+  .inspector-slot { width: 300px; overflow-y: auto; border-left: 1px solid var(--divider-color, #ddd);
+    background: var(--card-background-color, #fff); }
+  :host([narrow]) main { flex-direction: column; }
+  :host([narrow]) .inspector-slot { width: auto; max-height: 40vh; border-left: 0; border-top: 1px solid var(--divider-color, #ddd); }
+  footer { padding: 2px 16px; }
+  .status { margin: 0; color: var(--secondary-text-color, #727272); font-size: 0.8rem; }
+`;
 
 if (!customElements.get('chartroom-panel'))
   customElements.define('chartroom-panel', ChartroomPanel);

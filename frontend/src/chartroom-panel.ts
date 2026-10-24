@@ -41,8 +41,8 @@ function readUnderlayPref(): UnderlayPref {
 
 /** The full-screen Chartroom panel: the plan of each floor, with pan, zoom and the editor. */
 export class ChartroomPanel extends HTMLElement {
-  #view = new PlanView();
-  #viewer = new ViewerController(this.#view, {
+  readonly #view = new PlanView();
+  readonly #viewer = new ViewerController(this.#view, {
     el: this,
     place: (bar) => this.#sheet.append(bar),
     changed: (layer, mesh) => {
@@ -52,15 +52,15 @@ export class ChartroomPanel extends HTMLElement {
       else localStorage.removeItem(MESH_KEY);
     },
   });
-  #controls = new DeviceControls(this.#view, this, () => this.#viewer.shown());
-  #tabsEl: HTMLElement;
-  #status: HTMLElement;
-  #stage: HTMLElement;
-  #empty: HTMLElement;
-  #editButton: HTMLButtonElement;
-  #menuButton: HTMLButtonElement;
-  #toolbarSlot: HTMLElement;
-  #inspectorSlot: HTMLElement;
+  readonly #controls = new DeviceControls(this.#view, this, () => this.#viewer.shown());
+  readonly #tabsEl: HTMLElement;
+  readonly #status: HTMLElement;
+  readonly #stage: HTMLElement;
+  readonly #empty: HTMLElement;
+  readonly #editButton: HTMLButtonElement;
+  readonly #menuButton: HTMLButtonElement;
+  readonly #toolbarSlot: HTMLElement;
+  readonly #inspectorSlot: HTMLElement;
   #plans: PlanSummary[] | null = null;
   #tabs: FloorTab[] = [];
   #tabsKey = '';
@@ -70,11 +70,11 @@ export class ChartroomPanel extends HTMLElement {
   #editor: PlanEditor | null = null;
   #underlayLoad = 0;
   #underlayPref = readUnderlayPref();
-  #underlayControls: HTMLElement;
-  #underlayToggle: HTMLButtonElement;
-  #underlayOpacity: HTMLInputElement;
+  readonly #underlayControls: HTMLElement;
+  readonly #underlayToggle: HTMLButtonElement;
+  readonly #underlayOpacity: HTMLInputElement;
   #plansRequested = false;
-  #sheet: HTMLElement;
+  readonly #sheet: HTMLElement;
   #narrow = false;
   panel?: PanelInfo;
 
@@ -221,7 +221,7 @@ export class ChartroomPanel extends HTMLElement {
     return this.#view;
   }
 
-  get isAdmin(): boolean {
+  get #isAdmin(): boolean {
     return this.#viewer.hass?.user?.is_admin ?? true;
   }
 
@@ -310,7 +310,7 @@ export class ChartroomPanel extends HTMLElement {
       this.#showEmpty(null);
       this.#view.fit();
       void this.#loadUnderlay();
-      this.#editButton.hidden = !this.isAdmin;
+      this.#editButton.hidden = !this.#isAdmin;
       this.dataset['plan'] = tab.plan_id;
     } catch (err) {
       this.#showEmpty(`Could not load this plan: ${(err as Error).message ?? err}`);
@@ -356,7 +356,7 @@ export class ChartroomPanel extends HTMLElement {
     this.#viewer.layers.el.hidden = text !== null;
     if (text === null) return;
     const children: (HTMLElement | string)[] = [h('p', {}, text)];
-    if (tab?.floor_id && this.isAdmin) {
+    if (tab?.floor_id && this.#isAdmin) {
       children.push(
         button('Create plan', () => void this.#createPlan(tab), { class: 'create primary' }),
         h('p', { class: 'hint' }, 'Draw the walls yourself, or import a drawing to trace over.'),
@@ -427,7 +427,7 @@ export class ChartroomPanel extends HTMLElement {
     this.#renderUnderlayControls();
   }
 
-  #onKey = (e: KeyboardEvent): void => {
+  readonly #onKey = (e: KeyboardEvent): void => {
     this.#editor?.key(e);
   };
 
@@ -435,7 +435,7 @@ export class ChartroomPanel extends HTMLElement {
     this.dispatchEvent(new Event('hass-toggle-menu', { bubbles: true, composed: true }));
   }
 
-  #parts = new Map<string, string>();
+  readonly #parts = new Map<string, string>();
   #setStatus(part: string, text: string): void {
     this.#parts.set(part, text);
     this.#status.textContent = [...this.#parts.values()].join(' · ');

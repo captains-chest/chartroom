@@ -5,7 +5,7 @@ import { button, h } from './ui';
 
 export class LayerToggles {
   readonly el: HTMLElement;
-  #buttons = new Map<HeatLayerId, HTMLButtonElement>();
+  readonly #buttons = new Map<HeatLayerId, HTMLButtonElement>();
   #active: HeatLayerId | null = null;
   readonly mesh: HTMLButtonElement;
 

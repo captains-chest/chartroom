@@ -129,9 +129,9 @@ export class MeshLayer {
     clearInterval(this.#timer);
     this.#timer = 0;
     if (!on) return Promise.resolve();
-    this.#timer = setInterval(() => void this.refresh(), MESH_REFRESH_MS) as unknown as number;
+    this.#timer = setInterval(() => void this.#refresh(), MESH_REFRESH_MS) as unknown as number;
     this.#render();
-    return this.refresh();
+    return this.#refresh();
   }
 
   setPlan(plan: Plan | null): void {
@@ -147,11 +147,11 @@ export class MeshLayer {
       this.#entities = hass?.entities;
       this.#render();
     }
-    if (first && this.#on) void this.refresh();
+    if (first && this.#on) void this.#refresh();
   }
 
   /** Read the topology again (one request at a time). */
-  refresh(): Promise<void> {
+  #refresh(): Promise<void> {
     const conn = this.#hass?.connection;
     if (!this.#on || !conn) return Promise.resolve();
     this.#load ??= wsApi(conn)

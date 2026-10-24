@@ -3,11 +3,11 @@ export class History<T> {
   #past: T[] = [];
   #future: T[] = [];
   #present: T;
-  readonly limit: number;
+  readonly #limit: number;
 
   constructor(present: T, limit = 200) {
     this.#present = present;
-    this.limit = limit;
+    this.#limit = limit;
   }
 
   get present(): T {
@@ -26,7 +26,7 @@ export class History<T> {
   commit(next: T): boolean {
     if (next === this.#present) return false;
     this.#past.push(this.#present);
-    if (this.#past.length > this.limit) this.#past.shift();
+    if (this.#past.length > this.#limit) this.#past.shift();
     this.#present = next;
     this.#future = [];
     return true;

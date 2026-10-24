@@ -108,16 +108,16 @@ export interface TimeHost {
 /** The slider bar. `view(hass)` is what the plan should show while it is open. */
 export class TimeBar {
   readonly el: HTMLElement;
-  #host: TimeHost;
+  readonly #host: TimeHost;
   #tl: Timeline = new Map();
   #range: (typeof RANGES)[number] = RANGES[1];
   #at = 0;
   #load = 0;
   #timer = 0;
-  #slider: HTMLInputElement;
-  #when: HTMLElement;
-  #play: HTMLButtonElement;
-  #ranges: HTMLButtonElement[];
+  readonly #slider: HTMLInputElement;
+  readonly #when: HTMLElement;
+  readonly #play: HTMLButtonElement;
+  readonly #ranges: HTMLButtonElement[];
 
   constructor(host: TimeHost) {
     this.#host = host;

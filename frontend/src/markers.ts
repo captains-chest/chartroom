@@ -69,10 +69,6 @@ export class MarkerLayer {
     for (const m of this.#els.values()) this.#place(m.el, m.device);
   }
 
-  element(id: string): SVGGElement | undefined {
-    return this.#els.get(id)?.el;
-  }
-
   /** Show that a tap is waiting for Home Assistant (cleared by the state change, or after 10 s). */
   markPending(id: string): void {
     const el = this.#els.get(id)?.el;

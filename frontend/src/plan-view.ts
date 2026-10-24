@@ -38,7 +38,7 @@ export class PlanView {
   readonly #svg: SVGSVGElement;
   /** The underlay drawing, a separate SVG under the heatmap canvas with the same viewBox. */
   readonly #underlaySvg: SVGSVGElement;
-  readonly heatLegend: HTMLDivElement;
+  readonly #heatLegend: HTMLDivElement;
   readonly #heatBox: HTMLDivElement;
   readonly #heatValues: SVGGElement;
   #heat: HeatLayer | null = null;
@@ -64,7 +64,7 @@ export class PlanView {
   #plan: Plan | null = null;
   #fitted = false;
   #underlayUrl: string | null = null;
-  #pointers = new Map<number, { x: number; y: number }>();
+  readonly #pointers = new Map<number, { x: number; y: number }>();
   #gesture: 'pan' | 'delegate' | 'pinch' | null = null;
   #last: { x: number; y: number; d?: number } | null = null;
   #delegate: PointerDelegate | null = null;
@@ -96,14 +96,14 @@ export class PlanView {
       this.#overlay,
     );
     this.#heatBox = h('div', { class: 'heat-box', hidden: true });
-    this.heatLegend = h('div', { class: 'heat-legend', role: 'img', hidden: true });
+    this.#heatLegend = h('div', { class: 'heat-legend', role: 'img', hidden: true });
     this.el = h(
       'div',
       { class: 'plan-box' },
       this.#underlaySvg,
       this.#heatBox,
       this.#svg,
-      this.heatLegend,
+      this.#heatLegend,
     );
     if (fixed) {
       this.#svg.classList.add('fixed');
@@ -225,7 +225,7 @@ export class PlanView {
     const generation = this.#generation;
     this.#heatLoad ??= import('./heat-layer').then((m) => {
       if (generation !== this.#generation) return null;
-      const heat = new m.HeatLayer(this.#heatBox, this.heatLegend);
+      const heat = new m.HeatLayer(this.#heatBox, this.#heatLegend);
       this.#labelHeat = m.renderValueLabels;
       this.#declutter = m.declutterLabels;
       heat.onReadings = (data) => this.#markHeat(data);

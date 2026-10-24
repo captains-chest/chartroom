@@ -192,12 +192,12 @@ that still overlaps (small cards) is hidden; the marker keeps its accessible nam
   `open`, `opening` or `closing` loses nothing. Zero-loss parts are dropped. The result is
   `(ax, ay, bx, by, loss)` per segment, so the shader needs one RGBA32F texel pair per segment
   (row 0 the endpoints, row 1 the loss) and no material table.
-- **Shader**: one full-grid fragment pass (`SIGNAL_FS` in `heat-gl.ts`) writes value, confidence
-  (always 1) and the outside fade into the same RGBA32F field target as the other layers, and the
-  same colour pass draws it. Access points are `uniform vec4 uAps[32]`. Per source it starts from
-  the free-space level, skips the source if that is already below the best so far, and stops
-  testing walls as soon as it drops below the best, which keeps the average far under
-  `cells x sources x walls`. The intersection test (`t in (0, 1]`, `u in [0, 1]`) is identical in
+- **Shader**: one full-grid fragment pass (`SIGNAL_FS` in `heat/gl-renderer.ts`) writes value,
+  confidence (always 1) and the outside fade into the same RGBA32F field target as the other
+  layers, and the same colour pass draws it. Access points are `uniform vec4 uAps[32]`. Per
+  source it starts from the free-space level, skips the source if that is already below the best
+  so far, and stops testing walls as soon as it drops below the best, which keeps the average far
+  under `cells x sources x walls`. The intersection test (`t in (0, 1]`, `u in [0, 1]`) is identical in
   GLSL and TypeScript.
 - **Resolution**: a fixed grid of at most 128 cells on the long side, bilinear upscaled. Walls are
   SVG on top, so the field does not need to be sharp.

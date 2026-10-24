@@ -10,7 +10,7 @@
 // - confidence drops with distance and with the detour a value took round a corner;
 // - cells nothing reaches, and everything outside the outline, are "no data" (drawn grey).
 // The result is fixed weights per cell over the sensor nodes, so values still animate on the GPU
-// (heat-gl.ts) or in fillField without redoing any of this.
+// (heat/gl-renderer.ts) or in fillField without redoing any of this.
 import {
   buildMesh,
   CONF_FAR,

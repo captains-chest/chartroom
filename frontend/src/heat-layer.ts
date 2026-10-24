@@ -1,13 +1,17 @@
 // The live heatmap under the SVG plan: picks the sensors for the active layer, has the worker
 // triangulate them (only when the layout changes), eases values and the range, cross-fades layout
-// changes, and draws with WebGL2 or, failing that, Canvas2D from the worker's field grid. The
-// signal layer is traced instead (signal.ts): in one WebGL2 pass, or by the worker for Canvas2D.
-// Loaded on demand, the first time a layer is switched on.
-import { FADE_DISTANCE, fieldGrid, nodeValues, type FieldGrid, type FieldMesh } from './field';
-import { workerUrl } from './field-worker';
+// changes, and hands the field to a renderer (heat/models.ts FieldRenderer): WebGL2 or, failing
+// that, Canvas2D from the worker's field grid. The signal layer is traced instead (signal.ts): in
+// one WebGL2 pass, or by the worker for Canvas2D. Loaded on demand, the first time a layer is
+// switched on.
+import { FADE_DISTANCE, fieldGrid } from './field';
 import { planBounds } from './geometry';
-import type { FieldPlan } from './field-plan';
-import { GlRenderer, NO_DATA_ALPHA, NO_DATA_GREY } from './heat-gl';
+import { CanvasRenderer } from './heat/canvas-renderer';
+import { FieldClient } from './heat/field-client';
+import { GlRenderer } from './heat/gl-renderer';
+import { legendContent, renderLegend } from './heat/legend';
+import type { FieldRenderer, Layout } from './heat/models';
+import type { FieldRequest, RendererKind } from './heat/types';
 import { AREA_SIZE, declutter, NAME_SIZE } from './labels';
 import {
   LAYERS,
@@ -16,196 +20,24 @@ import {
   layerData,
   layerDomain,
   layoutKey,
-  rampCss,
   rampLut,
   type HeatLayerId,
   type LayerData,
 } from './heat';
 import type { Hass } from './ha-types';
 import type { Plan, Point } from './plan';
-import {
-  barrierSegments,
-  SIGNAL_CELLS,
-  signalInput,
-  signalKey,
-  signalNote,
-  type SignalInput,
-} from './signal';
+import { barrierSegments, SIGNAL_CELLS, signalInput, signalKey, signalNote } from './signal';
 import { h, s } from './ui';
 import type { View } from './viewport';
-import type { WorkerRequest, WorkerRequestBody, WorkerResponse } from './worker-protocol';
 
 /** Field opacity at full confidence inside the house. */
 export const HEAT_OPACITY = 0.72;
 export const RENDERER_KEY = 'chartroom:renderer';
 
-type Pending = { resolve: (r: WorkerResponse) => void };
-interface CanvasField {
-  field: Float32Array;
-  grid: FieldGrid;
-  img: HTMLCanvasElement;
-}
-export interface Layout {
-  key: string;
-  /** The sensor nodes and per-cell weights, or null for the traced signal layer. */
-  mesh: FieldMesh | null;
-  field?: FieldPlan;
-  grid: FieldGrid;
-  ids: string[];
-  signal?: SignalInput;
-}
-
-/** Talks to the field worker; runs the same handler in this thread when workers are unavailable. */
-class FieldClient {
-  #worker: Worker | null = null;
-  #local: Promise<(req: WorkerRequest) => WorkerResponse> | null = null;
-  #id = 0;
-  #pending = new Map<number, Pending>();
-
-  constructor() {
-    try {
-      this.#worker = new Worker(workerUrl(), { type: 'module' });
-      this.#worker.addEventListener('message', (e: MessageEvent<WorkerResponse>) => {
-        const p = this.#pending.get(e.data.id);
-        this.#pending.delete(e.data.id);
-        p?.resolve(e.data);
-      });
-      this.#worker.addEventListener('error', () => this.#toLocal());
-    } catch {
-      this.#toLocal();
-    }
-  }
-
-  #toLocal(): void {
-    this.#worker?.terminate();
-    this.#worker = null;
-    this.#local ??= import('./worker-protocol').then((m) => m.createHandler());
-    // Requests in flight are lost with the worker: replay is not worth it, fail them.
-    for (const [id, p] of this.#pending) p.resolve({ type: 'error', id, message: 'worker failed' });
-    this.#pending.clear();
-  }
-
-  request(req: WorkerRequestBody): Promise<WorkerResponse> {
-    const full = { ...req, id: ++this.#id } as WorkerRequest;
-    if (!this.#worker) {
-      this.#local ??= import('./worker-protocol').then((m) => m.createHandler());
-      return this.#local.then((handle) => handle(full));
-    }
-    return new Promise((resolve) => {
-      this.#pending.set(full.id, { resolve });
-      this.#worker?.postMessage(full);
-    });
-  }
-
-  dispose(): void {
-    this.#worker?.terminate();
-    this.#pending.clear();
-  }
-}
-
-/** Colours a field grid through the ramp into an image of one pixel per cell. */
-function colourise(
-  field: Float32Array,
-  grid: FieldGrid,
-  domain: readonly [number, number],
-  opacity: number,
-  lut: Uint8Array,
-  canvas: HTMLCanvasElement,
-): void {
-  if (canvas.width !== grid.nx || canvas.height !== grid.ny) {
-    canvas.width = grid.nx;
-    canvas.height = grid.ny;
-  }
-  const ctx = canvas.getContext('2d')!;
-  const img = ctx.createImageData(grid.nx, grid.ny);
-  const span = Math.max(1e-6, domain[1] - domain[0]);
-  const grey = Math.round(255 * NO_DATA_GREY);
-  for (let c = 0; c < grid.nx * grid.ny; c++) {
-    const t = Math.min(1, Math.max(0, (field[c * 3]! - domain[0]) / span));
-    const k = Math.round(t * 255) * 4;
-    const d = c * 4;
-    // Negative confidence: no data, drawn grey (as the GL colour pass does).
-    const none = field[c * 3 + 1]! < 0;
-    img.data[d] = none ? grey : lut[k]!;
-    img.data[d + 1] = none ? grey : lut[k + 1]!;
-    img.data[d + 2] = none ? grey : lut[k + 2]!;
-    img.data[d + 3] = Math.round(
-      255 * opacity * (none ? NO_DATA_ALPHA : field[c * 3 + 1]!) * field[c * 3 + 2]!,
-    );
-  }
-  ctx.putImageData(img, 0, 0);
-}
-
-/** The Canvas2D fallback: the worker's field, coloured per cell and scaled up with smoothing. */
-export class CanvasRenderer {
-  readonly ctx: CanvasRenderingContext2D;
-  #cur: CanvasField | null = null;
-  #prev: CanvasField | null = null;
-  #keepNext = false;
-
-  constructor(readonly canvas: HTMLCanvasElement) {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('no Canvas2D');
-    this.ctx = ctx;
-  }
-
-  setLayout(keepPrevious: boolean): void {
-    this.#keepNext = keepPrevious;
-    if (!keepPrevious) this.#prev = null;
-  }
-
-  setField(field: Float32Array, grid: FieldGrid): void {
-    if (this.#keepNext && this.#cur) {
-      this.#prev = this.#cur;
-      this.#cur = null;
-    }
-    this.#keepNext = false;
-    this.#cur = { field, grid, img: this.#cur?.img ?? document.createElement('canvas') };
-  }
-
-  get hasField(): boolean {
-    return this.#cur !== null;
-  }
-
-  dropPrevious(): void {
-    this.#prev = null;
-  }
-
-  draw(
-    view: View,
-    domain: readonly [number, number],
-    opacity: number,
-    mix: number,
-    lut: Uint8Array,
-  ): void {
-    const { ctx, canvas } = this;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const layer = (l: CanvasField, alpha: number): void => {
-      colourise(l.field, l.grid, domain, opacity, lut, l.img);
-      const kx = canvas.width / view.w;
-      const ky = canvas.height / view.h;
-      ctx.globalAlpha = alpha;
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'low';
-      ctx.drawImage(
-        l.img,
-        (l.grid.x0 - view.x) * kx,
-        (l.grid.y0 - view.y) * ky,
-        l.grid.nx * l.grid.cell * kx,
-        l.grid.ny * l.grid.cell * ky,
-      );
-    };
-    if (this.#prev && mix < 1) layer(this.#prev, 1 - mix);
-    if (this.#cur) layer(this.#cur, this.#prev && mix < 1 ? mix : 1);
-    ctx.globalAlpha = 1;
-  }
-
-  /** The settled field (for the debug hooks). */
-  get field(): Float32Array | null {
-    return this.#cur?.field ?? null;
-  }
-}
+const RENDERERS: Record<RendererKind, (c: HTMLCanvasElement, r: FieldRequest) => FieldRenderer> = {
+  webgl2: (c) => new GlRenderer(c),
+  canvas: (c, r) => new CanvasRenderer(c, r),
+};
 
 interface Anim {
   from: number;
@@ -218,34 +50,13 @@ const current = (a: Anim, now: number, ms: number): number =>
 const done = (a: Anim, now: number, ms: number): boolean =>
   ms <= 0 || now - a.t0 >= ms || a.from === a.to;
 
-export type RendererKind = 'webgl2' | 'canvas';
-
-/** A settled heat layer's internals, for the renderer-agreement tests. */
-export interface DebugContext {
-  renderer: RendererKind;
-  gl: GlRenderer | null;
-  c2d: CanvasRenderer | null;
-  layout: Layout | null;
-  view: View;
-  values: number[];
-  /** Put `values` into the GL renderer's mesh. */
-  upload(): void;
-  domain: [number, number];
-  opacity: number;
-  lut: Uint8Array;
-  canvas: HTMLCanvasElement;
-  outline: Point[];
-  request(r: WorkerRequestBody): Promise<WorkerResponse>;
-  canvasRenderer(c: HTMLCanvasElement): CanvasRenderer;
-}
-
 export class HeatLayer {
   readonly box: HTMLElement;
   readonly legend: HTMLElement;
-  #canvas: HTMLCanvasElement;
-  #gl: GlRenderer | null = null;
-  #c2d: CanvasRenderer | null = null;
-  #client = new FieldClient();
+  // Set with each renderer (#newCanvas).
+  #canvas!: HTMLCanvasElement;
+  #renderer: FieldRenderer;
+  readonly #client = new FieldClient();
   #layer: HeatLayerId | null = null;
   #plan: Plan | null = null;
   #hass: Hass | undefined;
@@ -260,18 +71,16 @@ export class HeatLayer {
   #key = '';
   #wantKey = '';
   #layout: Layout | null = null;
-  #anims = new Map<string, Anim>();
+  readonly #anims = new Map<string, Anim>();
   #domain: [Anim, Anim] | null = null;
   #fade: Anim | null = null;
   #raf = 0;
-  #inflight = false;
-  #fieldFor = '';
   #sig = '';
   #lut: Uint8Array = rampLut(LAYERS.temperature.ramp);
   #signalNote: string[] = [];
-  #idle: (() => void)[] = [];
+  readonly #idle: (() => void)[] = [];
   #disposed = false;
-  #reduced =
+  readonly #reduced =
     typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   /** Called when the set of readings changes (the view marks sensors and draws value labels). */
   onReadings: ((data: LayerData | null, domain: [number, number] | null) => void) | null = null;
@@ -279,14 +88,13 @@ export class HeatLayer {
   constructor(box: HTMLElement, legend: HTMLElement, renderer?: RendererKind) {
     this.box = box;
     this.legend = legend;
-    this.#canvas = this.#newCanvas();
-    this.#pickRenderer(
+    this.#renderer = this.#pickRenderer(
       renderer ?? (localStorage.getItem(RENDERER_KEY) === 'canvas' ? 'canvas' : 'webgl2'),
     );
   }
 
   get renderer(): RendererKind {
-    return this.#gl ? 'webgl2' : 'canvas';
+    return this.#renderer.kind;
   }
 
   get layer(): HeatLayerId | null {
@@ -302,49 +110,42 @@ export class HeatLayer {
     return this.#reduced ? 0 : TRANSITION_MS;
   }
 
+  /** A new canvas in the box, sized for the view (a canvas keeps its first context type). */
   #newCanvas(): HTMLCanvasElement {
     const c = h('canvas', { class: 'heat', 'aria-hidden': 'true' });
     this.box.replaceChildren(c);
+    this.#canvas = c;
+    this.#resizeCanvas();
     return c;
   }
 
-  #pickRenderer(kind: RendererKind): void {
-    this.#gl?.dispose();
-    this.#gl = null;
-    this.#c2d = null;
-    this.#canvas = this.#newCanvas();
-    this.#resizeCanvas();
-    if (kind === 'webgl2') {
-      try {
-        const canvas = this.#canvas;
-        this.#gl = new GlRenderer(canvas);
-        canvas.addEventListener('webglcontextlost', (e) => {
-          e.preventDefault();
-          // A context we dropped ourselves (switch, dispose) is lost too, later: ignore it.
-          if (canvas === this.#canvas && !this.#disposed) this.setRenderer('canvas');
-        });
-      } catch {
-        this.#gl = null;
-        this.#canvas = this.#newCanvas();
-        this.#resizeCanvas();
-      }
+  /** The renderer of `kind` on a fresh canvas, or the Canvas2D fallback when it cannot start. */
+  #pickRenderer(kind: RendererKind): FieldRenderer {
+    const create = (k: RendererKind): FieldRenderer => {
+      const canvas = this.#newCanvas();
+      canvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        // A context we dropped ourselves (switch, dispose) is lost too, later: ignore it.
+        if (canvas === this.#canvas && !this.#disposed) this.setRenderer('canvas');
+      });
+      return RENDERERS[k](canvas, (r) => this.#client.request(r));
+    };
+    let r: FieldRenderer;
+    try {
+      r = create(kind);
+    } catch {
+      r = create('canvas');
     }
-    if (!this.#gl) this.#c2d = new CanvasRenderer(this.#canvas);
-    this.#gl?.setRamp(this.#lut);
-    this.box.dataset['renderer'] = this.renderer;
+    r.setRamp(this.#lut);
+    this.box.dataset['renderer'] = r.kind;
+    return r;
   }
 
   /** Switch renderers (tests, or after a lost context); the field is rebuilt from the layout. */
   setRenderer(kind: RendererKind): void {
-    this.#pickRenderer(kind);
-    const L = this.#layout;
-    if (L?.mesh) this.#applyLayout(L, false);
-    else if (L) {
-      // A traced field is not kept: trace it again for the new renderer.
-      this.#layout = null;
-      this.#wantKey = '';
-      this.#refresh();
-    }
+    this.#renderer.dispose();
+    this.#renderer = this.#pickRenderer(kind);
+    if (this.#layout) this.#applyLayout(this.#layout, false);
   }
 
   setLayer(layer: HeatLayerId | null): void {
@@ -352,7 +153,7 @@ export class HeatLayer {
     this.#layer = layer;
     if (layer) {
       this.#lut = rampLut(LAYERS[layer].ramp);
-      this.#gl?.setRamp(this.#lut);
+      this.#renderer.setRamp(this.#lut);
     }
     this.#domain = null;
     this.#refresh();
@@ -430,15 +231,14 @@ export class HeatLayer {
     const sig = JSON.stringify([key, values, target, data.excluded, this.#signalNote]);
     if (sig !== this.#sig) {
       this.#sig = sig;
-      this.#renderLegend(data, target);
+      renderLegend(this.legend, legendContent(data, target, this.#signalNote));
       this.onReadings?.(data, target);
     }
     if (data.readings.length === 0) {
       this.#wantKey = this.#key = key;
       this.#layout = null;
       this.box.hidden = true;
-      this.#gl?.dropPrevious();
-      this.#c2d?.dropPrevious();
+      this.#renderer.dropPrevious();
       this.#settle();
       return;
     }
@@ -450,18 +250,8 @@ export class HeatLayer {
       const crossFade = this.#layout !== null;
       if (input) {
         const grid = fieldGrid(box, FADE_DISTANCE, SIGNAL_CELLS);
-        const L: Layout = { key, mesh: null, grid, ids, signal: input };
-        if (this.#gl) return this.#applyLayout(L, crossFade);
-        this.#inflight = true;
-        void this.#client
-          .request({ type: 'signal', key, grid, outline, walls: input.walls, aps: input.aps })
-          .then((res) => {
-            this.#inflight = false;
-            if (res.type !== 'field' || res.key !== this.#wantKey) return this.#settle();
-            this.#applyLayout(L, crossFade);
-            this.#c2d?.setField(res.field, res.grid);
-          });
-        return;
+        const L: Layout = { key, mesh: null, grid, ids, outline, signal: input };
+        return this.#applyLayout(L, crossFade);
       }
       const grid = fieldGrid(box);
       void this.#client
@@ -476,7 +266,8 @@ export class HeatLayer {
         })
         .then((res) => {
           if (res.type !== 'mesh' || res.key !== this.#wantKey) return;
-          this.#applyLayout({ key, mesh: res.mesh, field: res.plan, grid, ids }, crossFade);
+          const L: Layout = { key, mesh: res.mesh, field: res.plan, grid, ids, outline };
+          this.#applyLayout(L, crossFade);
         });
     } else this.#start();
   }
@@ -484,12 +275,8 @@ export class HeatLayer {
   #applyLayout(L: Layout, crossFade: boolean): void {
     this.#layout = L;
     this.#key = L.key;
-    this.#fieldFor = '';
-    const outline = this.#plan?.outline ?? [];
     const fade = crossFade && this.ms > 0;
-    if (this.#gl && L.field) this.#gl.setLayout(L.field, outline, fade);
-    else if (this.#gl && L.signal) this.#gl.setSignal(L.signal, L.grid, outline, fade);
-    else this.#c2d?.setLayout(fade);
+    this.#renderer.setLayout(L, fade);
     this.#fade = fade ? { from: 0, to: 1, t0: performance.now() } : null;
     // Readings that left the layout stop animating.
     for (const id of this.#anims.keys()) if (!L.ids.includes(id)) this.#anims.delete(id);
@@ -530,37 +317,18 @@ export class HeatLayer {
     const now = performance.now();
     const L = this.#layout;
     if (!L || L.key !== this.#key) return this.#settle();
-    const values = this.#values(now);
+    const r = this.#renderer;
     const mix = this.#fade ? current(this.#fade, now, this.ms) : 1;
-    const domain = this.#domainAt(now);
-    if (this.#gl) {
-      if (L.mesh) this.#gl.setValues(nodeValues(L.mesh, values));
-      this.#gl.draw(this.#view, domain, HEAT_OPACITY, mix);
-    } else {
-      const want = `${L.key}|${values.join(',')}`;
-      if (L.mesh && want !== this.#fieldFor && !this.#inflight)
-        this.#requestField(L.key, values, want);
-      this.#c2d!.draw(this.#view, domain, HEAT_OPACITY, mix, this.#lut);
-    }
+    r.setValues(this.#values(now));
+    r.draw(this.#view, this.#domainAt(now), HEAT_OPACITY, mix);
     const moving = this.#moving(now);
     if (!moving && this.#fade) {
       this.#fade = null;
-      this.#gl?.dropPrevious();
-      this.#c2d?.dropPrevious();
+      r.dropPrevious();
     }
-    if (moving || this.#inflight) this.#start();
+    // The Canvas2D field comes from the worker: keep drawing until it lands.
+    if (moving || r.busy) this.#start();
     else this.#settle();
-  }
-
-  #requestField(key: string, values: number[], want: string): void {
-    this.#inflight = true;
-    void this.#client.request({ type: 'values', key, values }).then((res) => {
-      this.#inflight = false;
-      if (res.type !== 'field' || res.key !== this.#key) return;
-      this.#c2d?.setField(res.field, res.grid);
-      this.#fieldFor = want;
-      this.#start();
-    });
   }
 
   #drawOnce(): void {
@@ -568,98 +336,30 @@ export class HeatLayer {
     this.#start();
   }
 
+  #settled(): boolean {
+    return !this.#raf && !this.#renderer.busy && this.#key === this.#wantKey;
+  }
+
   #settle(): void {
-    if (this.#raf || this.#inflight || this.#key !== this.#wantKey) return;
-    for (const f of this.#idle.splice(0)) f();
+    if (this.#settled()) for (const f of this.#idle.splice(0)) f();
   }
 
   /** Resolves when the field is drawn and nothing is moving (for tests and screenshots). */
   idle(): Promise<void> {
-    if (!this.#raf && !this.#inflight && this.#key === this.#wantKey) return Promise.resolve();
+    if (this.#settled()) return Promise.resolve();
     return new Promise((r) => this.#idle.push(r));
   }
 
-  #renderLegend(data: LayerData, domain: [number, number]): void {
-    const spec = LAYERS[data.layer];
-    const vals = data.readings.map((r) => r.value);
-    const fmt = (v: number): string => v.toFixed(spec.digits);
-    const pos = (v: number): string =>
-      `${(((v - domain[0]) / (domain[1] - domain[0])) * 100).toFixed(1)}%`;
-    const children: (Node | string)[] = [
-      h('div', { class: 'heat-title' }, `${spec.label} `, h('span', {}, data.unit)),
-    ];
-    const bar = h('div', { class: 'heat-bar' });
-    bar.style.background = rampCss(spec.ramp);
-    const signal = data.layer === 'signal';
-    if (vals.length && !signal) {
-      const lo = Math.min(...vals);
-      const hi = Math.max(...vals);
-      for (const [v, cls] of [
-        [lo, 'min'],
-        [hi, 'max'],
-      ] as const) {
-        const tick = h('i', {
-          class: `heat-tick ${cls}`,
-          title: `${cls === 'min' ? 'Lowest' : 'Highest'} reading ${fmt(v)} ${data.unit}`,
-        });
-        tick.style.left = pos(v);
-        bar.append(tick);
-      }
-    }
-    children.push(
-      bar,
-      h(
-        'div',
-        { class: 'heat-scale' },
-        h('span', {}, fmt(domain[0])),
-        h('span', {}, fmt((domain[0] + domain[1]) / 2)),
-        h('span', {}, fmt(domain[1])),
-      ),
-    );
-    const note: string[] = [];
-    if (signal) note.push(...this.#signalNote);
-    else if (vals.length) {
-      note.push(`${fmt(Math.min(...vals))}–${fmt(Math.max(...vals))} ${data.unit}`);
-      note.push(`${vals.length} sensor${vals.length === 1 ? '' : 's'}`);
-    } else note.push('No readings');
-    if (data.excluded.length) note.push(`${data.excluded.length} left out`);
-    children.push(h('div', { class: 'heat-note' }, note.join(' · ')));
-    this.legend.replaceChildren(...children);
-    this.legend.setAttribute(
-      'aria-label',
-      `${spec.label} ${fmt(domain[0])} to ${fmt(domain[1])} ${data.unit}. ${note.join(', ')}`,
-    );
-    this.legend.hidden = false;
-  }
-
-  /** What the e2e debug hooks (e2e/heat-debug.ts) read; call after `idle()`. */
-  debug(): DebugContext {
-    const now = performance.now();
-    const values = this.#values(now);
-    const mesh = this.#layout?.mesh;
-    return {
-      renderer: this.renderer,
-      gl: this.#gl,
-      c2d: this.#c2d,
-      layout: this.#layout,
-      view: this.#view,
-      values,
-      upload: () => mesh && this.#gl?.setValues(nodeValues(mesh, values)),
-      domain: this.#domainAt(now),
-      opacity: HEAT_OPACITY,
-      lut: this.#lut,
-      canvas: this.#canvas,
-      outline: this.#plan?.outline ?? [],
-      request: (r) => this.#client.request(r),
-      canvasRenderer: (c) => new CanvasRenderer(c),
-    };
+  /** The test probe (e2e/heat-debug.ts): the drawn field, per cell; call after `idle()`. */
+  readField(): Float32Array | null {
+    return this.#renderer.readField();
   }
 
   dispose(): void {
     this.#disposed = true;
     cancelAnimationFrame(this.#raf);
     this.#raf = 0;
-    this.#gl?.dispose();
+    this.#renderer.dispose();
     this.#client.dispose();
   }
 }

@@ -1,21 +1,18 @@
 import { describe, expect, it } from 'vite-plus/test';
+import { DOUBLE_CLICK_MS, DOUBLE_CLICK_PX } from '../src/editor/constants';
+import type { Pointer, ToolContext, ToolState } from '../src/editor/models';
 import {
   closeRoom,
-  DOUBLE_CLICK_MS,
-  DOUBLE_CLICK_PX,
   down,
   escape,
   initialState,
   isDoubleClick,
   move,
   placeDevice,
-  type Pointer,
-  type Tool,
-  type ToolContext,
-  type ToolState,
   up,
   withTool,
 } from '../src/editor/tools';
+import type { Tool } from '../src/editor/types';
 import { emptyPlan } from '../src/plan/functions';
 import type { Plan } from '../src/plan/models';
 import type { Point } from '../src/plan/types';

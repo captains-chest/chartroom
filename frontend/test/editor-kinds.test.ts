@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { findItem, type Kind, KINDS, kindOps, titleOf } from '../src/editor/kinds';
+import { findItem, KINDS, kindOps, titleOf } from '../src/editor/kinds';
+import type { Kind } from '../src/editor/types';
 import { emptyPlan } from '../src/plan/functions';
 import type { Plan } from '../src/plan/models';
 import { addDevice, addOpening, addRoom, addSource, addWall } from '../src/plan/ops';

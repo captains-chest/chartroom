@@ -3,16 +3,16 @@
 import { autoPlace, deviceChoices, deviceLook } from './devices';
 import { add, dist, frame, roundToMm, polygonArea } from './geometry';
 import type { Hass } from './ha-types';
-import { type Autosaver, autosaver } from './editor/autosaver';
-import {
-  findItem,
-  type Item,
-  type Items,
-  type Kind,
-  kindOps,
-  type Selection,
-  titleOf,
-} from './editor/kinds';
+import { autosaver } from './editor/autosaver';
+import { findItem, kindOps, titleOf } from './editor/kinds';
+import type {
+  Autosaver,
+  Items,
+  Selection,
+  ToolContext,
+  ToolResult,
+  ToolState,
+} from './editor/models';
 import {
   closeRoom,
   down,
@@ -21,13 +21,10 @@ import {
   isDoubleClick,
   move,
   placeDevice,
-  type Tool,
-  type ToolContext,
-  type ToolResult,
-  type ToolState,
   up,
   withTool,
 } from './editor/tools';
+import type { Item, Kind, Tool } from './editor/types';
 import { History } from './history';
 import { areaChoices, entityArea, sourceChoices } from './model';
 import { limitWarnings, materialsOf } from './plan/functions';
@@ -53,7 +50,7 @@ import { count } from './text';
 import { button, field, h, numberInput, s, select, textInput } from './ui';
 import { importUnderlay, loadUnderlay } from './underlay';
 
-export type { Tool } from './editor/tools';
+export type { Tool } from './editor/types';
 
 const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
   { value: 'sensor', label: 'Temperature / humidity sensor' },

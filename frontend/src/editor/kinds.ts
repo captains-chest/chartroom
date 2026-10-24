@@ -1,7 +1,7 @@
 // The kinds of plan item the editor selects, with how to find, delete and drag each. Adding a kind
-// is an entry here plus its inspector panel in plan-editor.ts.
+// is an entry in Items (models.ts), one here and its inspector panel in plan-editor.ts.
 import { add, along } from '../geometry';
-import type { Device, Door, Plan, Room, Source, Wall } from '../plan/models';
+import type { Door, Plan } from '../plan/models';
 import type { Point, Window } from '../plan/types';
 import {
   deleteDevice,
@@ -14,27 +14,11 @@ import {
   moveRoom,
   moveSource,
   moveWall,
-  snap,
 } from '../plan/ops';
-
-/** The snapping grid for drawing and for dragged walls and rooms, in metres. */
-export const GRID = 0.05;
-
-export interface Items {
-  wall: Wall;
-  room: Room;
-  door: Door;
-  window: Window;
-  source: Source;
-  device: Device;
-}
-export type Kind = keyof Items;
-export type Item = Items[Kind];
-
-export interface Selection {
-  readonly kind: Kind;
-  readonly id: string;
-}
+import { GRID } from './constants';
+import type { Items, Selection } from './models';
+import { snap } from './snap';
+import type { Item, Kind } from './types';
 
 interface KindOps<T extends { id: string }> {
   list(plan: Plan): readonly T[];

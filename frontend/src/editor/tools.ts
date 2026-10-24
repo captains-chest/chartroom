@@ -10,96 +10,26 @@ import {
   addWall,
   moveEndpoint,
   moveRoomVertex,
-  snap,
-  snapTargets,
   wallAt,
 } from '../plan/ops';
-import { findItem, GRID, type Item, type Kind, kindOps, type Selection } from './kinds';
-
-export type Tool =
-  | 'select'
-  | 'wall'
-  | 'room'
-  | 'door'
-  | 'window'
-  | 'source'
-  | 'device'
-  | 'measure'
-  | 'underlay';
-
-/** Two clicks within this many milliseconds and screen pixels are a double click. */
-export const DOUBLE_CLICK_MS = 350;
-export const DOUBLE_CLICK_PX = 6;
-
-export interface Click {
-  readonly t: number;
-  readonly x: number;
-  readonly y: number;
-}
+import { DOUBLE_CLICK_MS, DOUBLE_CLICK_PX, GRID } from './constants';
+import { findItem, kindOps } from './kinds';
+import type {
+  Click,
+  Pointer,
+  Selection,
+  Snapped,
+  ToolContext,
+  ToolResult,
+  ToolState,
+} from './models';
+import { snap, snapTargets } from './snap';
+import type { Drag, Tool } from './types';
 
 /** Two quick clicks in the same spot (quick clicks elsewhere are new points). */
 export const isDoubleClick = (prev: Click, next: Click): boolean =>
   next.t - prev.t < DOUBLE_CLICK_MS &&
   Math.hypot(next.x - prev.x, next.y - prev.y) < DOUBLE_CLICK_PX;
-
-export type Drag =
-  | {
-      readonly type: 'item';
-      readonly base: Plan;
-      readonly kind: Kind;
-      readonly item: Item;
-      readonly start: Point;
-    }
-  | { readonly type: 'endpoint'; readonly base: Plan; readonly from: Point }
-  | { readonly type: 'vertex'; readonly base: Plan; readonly id: string; readonly index: number }
-  | { readonly type: 'underlay'; readonly base: Plan; readonly start: Point };
-
-export interface Snapped {
-  readonly point: Point;
-  /** Snapped to a wall end or face rather than the grid. */
-  readonly target: boolean;
-}
-
-export interface ToolState {
-  readonly tool: Tool;
-  readonly selection: Selection | null;
-  /** Points placed so far by the wall, room or measure tool. */
-  readonly draft: readonly Point[];
-  readonly measured: readonly [Point, Point] | null;
-  /** The snapped point under the pointer while drawing. */
-  readonly hover: Snapped | null;
-  readonly drag: Drag | null;
-  /** The plan being dragged, not yet committed. */
-  readonly preview: Plan | null;
-  /** The entity the Device tool places on the next click. */
-  readonly armed: string | null;
-}
-
-export interface ToolContext {
-  readonly plan: Plan;
-  /** Snap radius in metres. */
-  readonly radius: number;
-  /** `plan` with a new source at `p`. */
-  addSource(plan: Plan, p: Point): { plan: Plan; id: string };
-}
-
-/** A press on the plan. */
-export interface Pointer {
-  readonly p: Point;
-  readonly double?: boolean;
-  /** The `data-handle` pressed: `endpoint|<wall>|a|b` or `vertex|<room>|<index>`. */
-  readonly handle?: string;
-  /** The item pressed. */
-  readonly hit?: Selection | null;
-}
-
-export interface ToolResult {
-  readonly state: ToolState;
-  /** The plan change to commit. */
-  readonly commit?: Plan;
-  /** The press was not for the tool (the view pans instead). */
-  readonly pass?: boolean;
-}
 
 export const initialState: ToolState = {
   tool: 'select',

@@ -1,6 +1,8 @@
 // The heatmap legend: the layer's ramp and range, ticks at the lowest and highest reading, and a
 // note on what feeds the field. Worked out by a pure function, then put into the legend element.
-import { LAYERS, rampCss, type LayerData } from '../heat';
+import { LAYERS } from './constants';
+import { rampCss } from './functions';
+import type { LayerData } from './models';
 import {
   MAX_SIGNAL_SEGMENTS,
   MAX_SIGNAL_SOURCES,

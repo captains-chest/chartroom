@@ -1,7 +1,8 @@
 import type { Unsubscribe } from './api';
 import { DeviceControls, deviceControlStyles } from './device-controls';
 import type { Hass } from './ha-types';
-import { isHeatLayer, type HeatLayerId } from './heat';
+import { isHeatLayer } from './heat/functions';
+import type { HeatLayerId } from './heat/types';
 import { PlanView, planViewStyles } from './plan-view';
 import { updateNoticeStyles } from './version';
 import { ViewerController } from './viewer';

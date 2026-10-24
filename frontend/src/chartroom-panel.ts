@@ -8,7 +8,7 @@ import type { PlanEditor } from './plan-editor';
 import { updateNoticeStyles } from './version';
 import { DeviceControls, deviceControlStyles } from './device-controls';
 import { PlanView, planViewStyles } from './plan-view';
-import { isHeatLayer } from './heat';
+import { isHeatLayer } from './heat/functions';
 import { button, h } from './ui';
 import { loadUnderlay } from './underlay';
 import { ViewerController } from './viewer';

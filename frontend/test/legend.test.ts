@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import type { LayerData, LayerReading } from '../src/heat';
+import type { LayerData, LayerReading } from '../src/heat/models';
 import { legendContent, signalNote } from '../src/heat/legend';
 import { SEGMENT_STRIDE, SOURCE_STRIDE } from '../src/signal';
 

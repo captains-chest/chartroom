@@ -1,6 +1,7 @@
 // The layer buttons shared by the panel and the card: the heatmaps (Temperature, Humidity,
 // Signal), one at a time, pressing the active one turns it off; and Mesh, on or off by itself.
-import { HEAT_LAYERS, LAYERS, type HeatLayerId } from './heat';
+import { HEAT_LAYERS, LAYERS } from './heat/constants';
+import type { HeatLayerId } from './heat/types';
 import { count } from './text';
 import { button, h } from './ui';
 

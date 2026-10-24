@@ -2,7 +2,8 @@
 // an overlay group the editor draws handles into. Handles pan (drag), zoom (wheel, pinch, buttons) and keeps the viewBox in metres.
 import { planBounds } from './geometry';
 import type { Hass } from './ha-types';
-import type { HeatLayerId, LayerData } from './heat';
+import type { LayerData } from './heat/models';
+import type { HeatLayerId } from './heat/types';
 import type { HeatLayer } from './heat-layer';
 import type { MeshLayer } from './mesh-layer';
 import { MarkerLayer, markerStyles } from './markers';

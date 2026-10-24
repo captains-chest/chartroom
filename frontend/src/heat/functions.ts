@@ -1,74 +1,13 @@
 // Heatmap layers: which sensors feed each layer, their values, the colour ramps and the value
 // range. Pure functions (no DOM), shared by the panel, the card and the tests.
-import type { EntityState, Hass } from './ha-types';
-import { DEFAULT_TX_DBM } from './plan/constants';
-import { isSignalSource } from './plan/functions';
-import type { Plan } from './plan/models';
-import type { Point } from './plan/types';
-
-export type HeatLayerId = 'temperature' | 'humidity' | 'signal';
-export const HEAT_LAYERS: readonly HeatLayerId[] = ['temperature', 'humidity', 'signal'];
-
-/** Colour stops: position 0..1 and sRGB. */
-export type RampStop = readonly [number, number, number, number];
-
-export interface LayerSpec {
-  id: HeatLayerId;
-  label: string;
-  ramp: readonly RampStop[];
-  /** The range the ramp spans at least, per unit; it grows to include the readings. */
-  domain: Record<string, readonly [number, number]>;
-  /** Decimals for labels. */
-  digits: number;
-  /** The range is fixed (it does not grow to include the readings). */
-  fixed?: boolean;
-}
-
-export const LAYERS: Record<HeatLayerId, LayerSpec> = {
-  temperature: {
-    id: 'temperature',
-    label: 'Temperature',
-    // Blue, cyan, green, yellow, red (the plan Page's ramp).
-    ramp: [
-      [0, 40, 70, 210],
-      [0.25, 0, 185, 225],
-      [0.5, 70, 200, 80],
-      [0.75, 250, 215, 40],
-      [1, 225, 40, 30],
-    ],
-    domain: { '°C': [16, 28], '°F': [61, 82], K: [289, 301] },
-    digits: 1,
-  },
-  humidity: {
-    id: 'humidity',
-    label: 'Humidity',
-    // Dry sand, pale yellow, mint, cyan-blue, deep blue.
-    ramp: [
-      [0, 205, 150, 75],
-      [0.25, 240, 220, 130],
-      [0.5, 120, 210, 160],
-      [0.75, 40, 160, 215],
-      [1, 25, 60, 170],
-    ],
-    domain: { '%': [30, 70] },
-    digits: 0,
-  },
-  signal: {
-    id: 'signal',
-    label: 'Signal',
-    // Dead grey-violet, red, amber, yellow-green, green: weak to strong.
-    ramp: [
-      [0, 70, 60, 90],
-      [0.25, 200, 50, 50],
-      [0.5, 245, 160, 40],
-      [0.75, 175, 210, 60],
-      [1, 40, 170, 80],
-    ],
-    domain: { dBm: [-90, -30] },
-    digits: 0,
-    fixed: true,
-  },
-};
+import type { EntityState, Hass } from '../ha-types';
+import { DEFAULT_TX_DBM } from '../plan/constants';
+import { isSignalSource } from '../plan/functions';
+import type { Plan } from '../plan/models';
+import type { Point } from '../plan/types';
+import { HEAT_LAYERS, LAYERS, STALE_MS } from './constants';
+import type { LayerData, LayerReading } from './models';
+import type { HeatLayerId, RampStop } from './types';
 
 /** The layer a sensor belongs to, from its device class (or, failing that, its unit). */
 export function layerOfState(st: EntityState): HeatLayerId | null {
@@ -80,30 +19,11 @@ export function layerOfState(st: EntityState): HeatLayerId | null {
   return null;
 }
 
-/** A sensor reading used by a layer, or why a placed sensor was left out. */
-export interface LayerReading {
-  id: string;
-  entity_id: string;
-  position: Point;
-  value: number;
-}
-
-export interface LayerData {
-  layer: HeatLayerId;
-  unit: string;
-  readings: LayerReading[];
-  /** Placed sensors of this layer that were left out (unavailable, unknown, not a number…). */
-  excluded: { id: string; entity_id: string; position: Point; reason: string }[];
-}
-
 const toUnit = (v: number, from: string, to: string): number => {
   if (from === to) return v;
   const c = from === '°F' ? ((v - 32) * 5) / 9 : from === 'K' ? v - 273.15 : v;
   return to === '°F' ? (c * 9) / 5 + 32 : to === 'K' ? c + 273.15 : c;
 };
-
-/** Readings older than this (by `last_reported`, when Home Assistant sends it) are stale. */
-export const STALE_MS = 6 * 3600_000;
 
 /** The sensors on `plan` that feed `layer`, with numeric values in one unit. */
 export function layerData(
@@ -198,9 +118,6 @@ export const rampCss = (stops: readonly RampStop[]): string =>
 
 /** Ease-out (cubic) used for value transitions. */
 export const easeOut = (t: number): number => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
-
-/** Transition length for value and layout changes, in ms (docs/render-design.md). */
-export const TRANSITION_MS = 600;
 
 /** A stable key for the sensor layout: re-triangulate only when it changes. */
 export const layoutKey = (readings: readonly LayerReading[], outline: readonly Point[]): string =>

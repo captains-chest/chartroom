@@ -12,17 +12,10 @@ import { GlRenderer } from './heat/gl-renderer';
 import { legendContent, renderLegend, signalNote } from './heat/legend';
 import type { FieldRenderer, Layout } from './heat/models';
 import type { FieldRequest, RendererKind } from './heat/types';
-import {
-  LAYERS,
-  TRANSITION_MS,
-  easeOut,
-  layerData,
-  layerDomain,
-  layoutKey,
-  rampLut,
-  type HeatLayerId,
-  type LayerData,
-} from './heat';
+import { LAYERS, TRANSITION_MS } from './heat/constants';
+import { easeOut, layerData, layerDomain, layoutKey, rampLut } from './heat/functions';
+import type { LayerData } from './heat/models';
+import type { HeatLayerId } from './heat/types';
 import type { Hass } from './ha-types';
 import type { Plan } from './plan/models';
 import { barrierSegments, SIGNAL_CELLS, signalInput, signalKey } from './signal';

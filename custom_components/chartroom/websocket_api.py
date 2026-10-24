@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 import voluptuous as vol
 
-from .const import DOMAIN, SIGNAL_PLAN_CHANGED
+from .const import DOMAIN, SIGNAL_PLAN_CHANGED, VERSION
 from .mesh import DATA_MESH_TEST, async_get_topology
 from .store import ChartroomStore
 from .underlay import async_remove_underlay
@@ -20,6 +20,7 @@ PLAN_ID = vol.All(str, vol.Length(min=1, max=64), vol.Match(r"^[a-z0-9_-]+$"))
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the websocket commands (once per Home Assistant run)."""
+    websocket_api.async_register_command(hass, ws_info)
     websocket_api.async_register_command(hass, ws_list_plans)
     websocket_api.async_register_command(hass, ws_get_plan)
     websocket_api.async_register_command(hass, ws_save_plan)
@@ -34,6 +35,15 @@ def _store(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg_
     if store is None:
         connection.send_error(msg_id, "not_loaded", "Chartroom is not set up")
     return store
+
+
+@websocket_api.websocket_command({vol.Required("type"): "chartroom/info"})
+@callback
+def ws_info(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Send the integration's version, so an open frontend can tell it is out of date."""
+    connection.send_result(msg["id"], {"version": VERSION})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "chartroom/plans/list"})

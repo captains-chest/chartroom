@@ -194,6 +194,10 @@ Markers follow Home Assistant live, in the panel and in the card:
 2. Install **Chartroom** and restart Home Assistant.
 3. Go to **Settings → Devices & services → Add integration → Chartroom**.
 
+After an update (and the restart), a panel or card left open in a browser shows **Chartroom was
+updated** with a **Reload** button: the page still runs the old frontend until it reloads. The
+frontend is served from a path with the version in it, so no cache can hand out an old file.
+
 Chartroom adds a **Chartroom** entry to the sidebar and registers the
 `custom:chartroom-card` card — no separate dashboard resource is needed:
 
@@ -205,13 +209,18 @@ height: 320px # optional; in the sections view the grid sets the height
 layer: temperature # optional: temperature, humidity, signal or none (the default)
 layer_toggles: true # optional: show the layer buttons on the card
 mesh: true # optional: draw mesh links
+history: true # optional: a History button that opens the time slider
 ```
 
 The card shows the plan with live device markers (tap to toggle, hold for details) and, with
 `layer`, a heatmap. It does not pan or zoom, so the dashboard still scrolls over it; open the panel
-to explore a plan. When a plan is edited, open cards update straight away.
+to explore a plan. When a plan is edited, open cards update straight away. With `history: true`
+the card gets the same History slider as the panel (loaded on first use); while you scrub, marker
+colours fade from one state to the next.
 
 ![Card with a humidity heatmap](docs/images/card-heatmap.png)
+
+![Card with the History slider open](docs/images/card-history.png)
 
 Requires Home Assistant 2026.10 or newer. Chartroom has no Python requirements and no runtime
 JavaScript dependencies; everything it needs ships in this repository.

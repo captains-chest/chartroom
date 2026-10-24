@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { DASHBOARD, FLOORS, deletePlan, getPlan, planCommand } from './ha';
 
@@ -20,6 +21,45 @@ test('the Chartroom panel renders in the sidebar and talks to the integration', 
   await expect(panel.locator('.status')).toContainText(/worker \d+ ready/);
   // The sidebar entry registered by the integration.
   await expect(page.locator('ha-sidebar').getByText('Chartroom', { exact: true })).toBeVisible();
+});
+
+test('the frontend is served by version and prompts a reload after an update', async ({ page }) => {
+  const loaded: string[] = [];
+  page.on('response', (r) => {
+    if (r.url().includes('/chartroom_static/')) loaded.push(new URL(r.url()).pathname);
+  });
+  await page.goto('/chartroom');
+  const panel = page.locator('chartroom-panel');
+  await expect(panel.locator('svg.plan')).toBeVisible();
+  const version = JSON.parse(readFileSync('package.json', 'utf8')).version as string;
+  // Entry, chunks and worker all come from /chartroom_static/<version>/.
+  await expect.poll(() => loaded.length).toBeGreaterThan(1);
+  for (const p of loaded) expect(p.startsWith(`/chartroom_static/${version}/`), p).toBe(true);
+  await expect(panel.locator('.update')).toBeHidden();
+
+  // Pretend the integration was updated: chartroom/info answers with another version.
+  await page.routeWebSocket(/\/api\/websocket/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((m) => {
+      const msg = typeof m === 'string' ? JSON.parse(m) : null;
+      if (msg?.type === 'chartroom/info')
+        ws.send(
+          JSON.stringify({
+            id: msg.id,
+            type: 'result',
+            success: true,
+            result: { version: '99.0.0' },
+          }),
+        );
+      else server.send(m);
+    });
+  });
+  await page.reload();
+  const notice = panel.locator('.update');
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText('Chartroom was updated');
+  await expect(notice).toHaveAttribute('data-version', '99.0.0');
+  await expect(notice.getByRole('button', { name: 'Reload' })).toBeVisible();
 });
 
 test('the panel switches floors and shows a plan with pan and zoom', async ({ page }) => {

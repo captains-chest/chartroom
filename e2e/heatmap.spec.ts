@@ -216,4 +216,17 @@ test('the card shows a configured layer and its toggles', async ({ page }) => {
     await page.locator('#ha-launch-screen').waitFor({ state: 'detached', timeout: 15_000 });
     await card.screenshot({ path: `${SHOTS}/card-heatmap.png` });
   }
+  // `history: true` adds the History button; the plain card has none.
+  await expect(plain.getByRole('button', { name: 'History' })).toBeHidden();
+  const open = card.getByRole('button', { name: 'History' });
+  await open.click();
+  await expect(card).toHaveAttribute('history', '');
+  const bar = card.locator('.timebar');
+  await expect(bar).toHaveAttribute('data-entities', /^[1-9]/);
+  await expect(bar.getByRole('slider', { name: 'Time' })).toBeEnabled();
+  if (SHOTS) await card.screenshot({ path: `${SHOTS}/card-history.png` });
+  await bar.getByRole('button', { name: 'Live' }).click();
+  await expect(bar).toHaveCount(0);
+  await expect(card).not.toHaveAttribute('history', '');
+  await expect(open).toHaveAttribute('aria-pressed', 'false');
 });

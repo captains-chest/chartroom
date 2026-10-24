@@ -185,6 +185,7 @@ export async function ensureDashboard(token: string): Promise<void> {
                 plan_id: 'example',
                 layer: 'temperature',
                 layer_toggles: true,
+                history: true,
               },
             ],
           },

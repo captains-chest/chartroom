@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry, flush_store
 
-from custom_components.chartroom.const import DOMAIN, STORAGE_KEY
+from custom_components.chartroom.const import DOMAIN, STORAGE_KEY, VERSION
 
 EXAMPLE_PLAN = Path(__file__).parents[1] / "frontend/test/fixtures/example-plan.json"
 
@@ -139,3 +139,12 @@ async def test_subscribe_reports_saves_and_deletes(hass: HomeAssistant, hass_ws_
     msg = await ws.receive_json()
     assert msg["type"] == "result"
     assert msg["success"]
+
+
+async def test_info_reports_the_version(hass: HomeAssistant, hass_ws_client) -> None:
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json_auto_id({"type": "chartroom/info"})
+    msg = await ws.receive_json()
+    assert msg["success"]
+    assert msg["result"] == {"version": VERSION}

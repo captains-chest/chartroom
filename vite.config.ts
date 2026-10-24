@@ -1,10 +1,15 @@
 import { defineConfig } from 'vite-plus';
+import { readFileSync } from 'node:fs';
 import { minifyLiterals } from './scripts/minify-literals';
 
-// Two entry modules served by the integration from /chartroom_static/. File names carry no hash:
-// the integration adds ?v=<version> to the URLs, which is what busts caches in the companion apps.
+const { version } = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
+
+// Entry modules served by the integration from /chartroom_static/<version>/. File names carry no
+// hash: the version in the path busts caches (companion apps included) for every file, chunks and
+// the worker too, and the build embeds it so an open tab can tell it is out of date.
 export default defineConfig({
   base: './',
+  define: { __CHARTROOM_VERSION__: JSON.stringify(version) },
   publicDir: false,
   plugins: [minifyLiterals()],
   build: {

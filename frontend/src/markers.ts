@@ -156,4 +156,7 @@ export const markerStyles = `
   .device.s-unavailable .slash { display: inline; }
   .device.pending .ring { stroke: var(--primary-color, #03a9f4); stroke-dasharray: 4 4; }
   .device:focus-visible .ring, .device.selected .ring { stroke: var(--primary-color, #03a9f4); }
+  /* While scrubbing history, states change in quick steps: let the colours fade between them. */
+  :host([history]) .device :is(.disc, .glyph) { transition: fill 0.25s, stroke 0.25s; }
+  @media (prefers-reduced-motion: reduce) { :host([history]) .device :is(.disc, .glyph) { transition: none; } }
 `;

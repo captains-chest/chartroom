@@ -31,9 +31,18 @@ FRONTEND_DIR = Path(__file__).parent / "frontend"
 DATA_STATIC = f"{DOMAIN}_static_registered"
 
 
+def static_url() -> str:
+    """Return where the frontend is served, with the version in the path.
+
+    Every file the entry modules load (chunks, the worker) changes URL with an update, so no
+    cache serves an old one.
+    """
+    return f"{STATIC_URL}/{VERSION}"
+
+
 def card_url() -> str:
-    """URL of the card module, versioned so the companion apps drop old caches."""
-    return f"{STATIC_URL}/{CARD_JS}?v={VERSION}"
+    """URL of the card module."""
+    return f"{static_url()}/{CARD_JS}"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -51,7 +60,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Static routes cannot be removed from aiohttp, so register them once per run.
     if not hass.data.get(DATA_STATIC):
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
+            [StaticPathConfig(static_url(), str(FRONTEND_DIR), cache_headers=False)]
         )
         hass.http.register_view(UnderlayView())
         hass.data[DATA_STATIC] = True
@@ -65,7 +74,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         webcomponent_name=PANEL_ELEMENT,
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
-        module_url=f"{STATIC_URL}/{PANEL_JS}?v={VERSION}",
+        module_url=f"{static_url()}/{PANEL_JS}",
         embed_iframe=False,
         require_admin=False,
         config={"version": VERSION},

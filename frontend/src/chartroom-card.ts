@@ -4,6 +4,8 @@ import { isHeatLayer, layerCounts, type HeatLayerId } from './heat';
 import { LayerToggles } from './layer-toggles';
 import { normalizePlan } from './plan';
 import { PlanView, planViewStyles } from './plan-view';
+import type { TimeBar } from './time-bar';
+import { UpdateNotice, updateNoticeStyles } from './version';
 
 export interface ChartroomCardConfig {
   type: string;
@@ -20,6 +22,8 @@ export interface ChartroomCardConfig {
   mesh?: boolean;
   /** Show the layer buttons (Temperature, Humidity, Signal, Mesh) on the card. */
   layer_toggles?: boolean;
+  /** Show a History button that opens the time slider (loaded on first use). */
+  history?: boolean;
 }
 
 /** The Chartroom dashboard card: one floor's plan with live device markers. */
@@ -41,13 +45,16 @@ export class ChartroomCard extends HTMLElement {
     (on) => this.#setMesh(on),
   );
   #layer: HeatLayerId | null = null;
+  #time: TimeBar | null = null;
+  #timeButton: HTMLButtonElement;
+  #update = new UpdateNotice();
   #unsubscribe: Promise<(() => Promise<void> | void) | null> | null = null;
 
   constructor() {
     super();
     const root = this.attachShadow({ mode: 'open' });
     const style = document.createElement('style');
-    style.textContent = `${planViewStyles}${deviceControlStyles}
+    style.textContent = `${planViewStyles}${deviceControlStyles}${updateNoticeStyles}
       :host { display: block; color: var(--primary-text-color, #212121); height: 100%; }
       ha-card, .card { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; overflow: hidden; }
       .title { margin: 0; padding: 12px 16px 0; font-size: 1.25rem; font-weight: 400; }
@@ -55,11 +62,16 @@ export class ChartroomCard extends HTMLElement {
       .stage { position: relative; flex: 1 1 auto; min-height: 120px; height: var(--chartroom-height, 320px); padding: 8px; box-sizing: border-box; }
       .message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
         padding: 16px; text-align: center; color: var(--secondary-text-color, #727272); }
-      .layers { position: absolute; left: 12px; top: 12px; z-index: 1; }
+      .layers { position: absolute; left: 12px; right: 12px; top: 12px; z-index: 1; flex-wrap: wrap; pointer-events: none; }
+      .layers > * { pointer-events: auto; }
       .layers button { font: inherit; font-size: 12px; color: inherit; padding: 2px 8px; border-radius: 6px; cursor: pointer;
         border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); }
       .layers button[aria-pressed=true] { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); border-color: transparent; }
       .layers button:disabled { opacity: 0.4; cursor: default; }
+      .layers.no-toggles > [data-layer] { display: none; }
+      :host([history]) .stage { box-shadow: inset 0 0 0 3px var(--warning-color, #ff9800); }
+      .card > .timebar { position: static; transform: none; width: auto; margin: 0 8px 8px; flex-wrap: wrap; box-shadow: none; }
+      .card > .timebar input { flex-basis: 100%; order: 1; }
       [hidden] { display: none !important; }`;
     // ha-card is Home Assistant's own element; outside HA it is just an unknown element.
     const card = document.createElement('ha-card');
@@ -74,7 +86,20 @@ export class ChartroomCard extends HTMLElement {
     this.#layers.el.classList.add('layers');
     this.#layers.el.hidden = true;
     this.#view.onPlan = () => this.#renderLayers();
-    this.#stage.append(this.#view.el, this.#layers.el, this.#message, this.#controls.dialog);
+    this.#timeButton = document.createElement('button');
+    this.#timeButton.className = 'history';
+    this.#timeButton.textContent = 'History';
+    this.#timeButton.title = 'Show the plan at an earlier time';
+    this.#timeButton.setAttribute('aria-pressed', 'false');
+    this.#timeButton.addEventListener('click', () => void this.#toggleTime());
+    this.#layers.el.append(this.#timeButton);
+    this.#stage.append(
+      this.#view.el,
+      this.#layers.el,
+      this.#update.el,
+      this.#message,
+      this.#controls.dialog,
+    );
     card.append(this.#title, this.#stage);
     root.append(style, card);
     this.#controls.attach();
@@ -90,7 +115,10 @@ export class ChartroomCard extends HTMLElement {
       throw new Error('layer must be temperature, humidity, signal or none');
     this.#layer = isHeatLayer(config.layer) ? config.layer : null;
     this.#setMesh(config.mesh === true);
-    this.#layers.el.hidden = config.layer_toggles !== true;
+    this.#layers.el.hidden = config.layer_toggles !== true && config.history !== true;
+    this.#layers.el.classList.toggle('no-toggles', config.layer_toggles !== true);
+    this.#timeButton.hidden = config.history !== true;
+    if (config.history !== true) this.#closeTime();
     this.#renderLayers();
     this.#loaded = '';
     if (this.#hass) void this.#loadPlan();
@@ -98,9 +126,10 @@ export class ChartroomCard extends HTMLElement {
 
   set hass(hass: Hass) {
     this.#hass = hass;
-    this.#view.setHass(hass);
+    this.#view.setHass(this.#time ? this.#time.view(hass) : hass);
     this.#renderLayers();
     if (!this.#loaded && hass.connection) void this.#loadPlan();
+    this.#update.watch(hass.connection);
     if (this.isConnected) this.#subscribe();
   }
 
@@ -171,6 +200,42 @@ export class ChartroomCard extends HTMLElement {
       if (load === this.#load)
         this.#show(`Could not load the plan: ${(err as Error).message ?? err}`);
     }
+  }
+
+  async #toggleTime(): Promise<void> {
+    if (this.#time) return this.#closeTime();
+    const { TimeBar, timeBarStyles } = await import('./time-bar');
+    if (this.#time) return;
+    const root = this.shadowRoot!;
+    if (!root.querySelector('style.time')) {
+      const style = document.createElement('style');
+      style.className = 'time';
+      style.textContent = timeBarStyles;
+      root.append(style);
+    }
+    const time = new TimeBar({
+      hass: () => this.#hass,
+      plan: () => this.#view.plan,
+      changed: () => this.#view.setHass(time.view(this.#hass)),
+      live: () => this.#closeTime(),
+    });
+    this.#time = time;
+    this.#stage.after(time.el);
+    this.#markTime();
+    await time.load();
+  }
+
+  #closeTime(): void {
+    if (!this.#time) return;
+    this.#time.close();
+    this.#time = null;
+    if (this.#hass) this.#view.setHass(this.#hass);
+    this.#markTime();
+  }
+
+  #markTime(): void {
+    this.#timeButton.setAttribute('aria-pressed', String(!!this.#time));
+    this.toggleAttribute('history', !!this.#time);
   }
 
   #show(message: string | null): void {

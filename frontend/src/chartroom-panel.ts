@@ -4,6 +4,7 @@ import { emptyPlan, normalizePlan, type Plan } from './plan';
 import { type FloorTab, floorTabs, planIdForFloor } from './model';
 import type { PlanEditor } from './plan-editor';
 import type { TimeBar } from './time-bar';
+import { UpdateNotice, updateNoticeStyles } from './version';
 import { DeviceControls, deviceControlStyles } from './device-controls';
 import { PlanView, planViewStyles } from './plan-view';
 import { isHeatLayer, layerCounts, type HeatLayerId } from './heat';
@@ -71,6 +72,7 @@ export class ChartroomPanel extends HTMLElement {
   );
   #layer: HeatLayerId | null = null;
   #time: TimeBar | null = null;
+  #update = new UpdateNotice();
   #timeButton: HTMLButtonElement;
   #sheet: HTMLElement;
   #narrow = false;
@@ -91,7 +93,7 @@ export class ChartroomPanel extends HTMLElement {
     super();
     const root = this.attachShadow({ mode: 'open' });
     const style = h('style');
-    style.textContent = panelStyles + planViewStyles + deviceControlStyles;
+    style.textContent = panelStyles + planViewStyles + deviceControlStyles + updateNoticeStyles;
     this.#controls.attach();
     this.#menuButton = button('☰', () => this.#toggleMenu(), {
       class: 'menu',
@@ -168,6 +170,7 @@ export class ChartroomPanel extends HTMLElement {
       this.#empty,
       zoom,
       this.#sheet,
+      this.#update.el,
       this.#controls.dialog,
     );
     root.append(
@@ -201,6 +204,7 @@ export class ChartroomPanel extends HTMLElement {
 
   set hass(hass: Hass) {
     this.#hass = hass;
+    this.#update.watch(hass.connection);
     this.#view.setHass(this.#shown());
     this.#renderLayers();
     if (!this.#plansRequested && hass.connection) {

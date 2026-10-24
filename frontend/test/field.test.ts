@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
+import { openField } from './open-field';
 import {
   OUTSIDE_ALPHA,
   buildMesh,
@@ -325,9 +326,12 @@ describe('confidence, fade and the grid', () => {
         const y = grid.y0 + (j + 0.5) * grid.cell;
         const c = (j * grid.nx + i) * 3;
         expect(field[c + 2]).toBeCloseTo(fadeAt(outline, x, y), 5);
-        // Without walls every cell inside sees every sensor: the plain linear field.
+        // Without walls every cell inside sees every sensor: plain inverse distance.
         if (field[c + 2] === 1) {
-          expect(field[c]).toBeCloseTo(evalField(mesh, vals, x, y), 4);
+          expect(field[c]).toBeCloseTo(
+            openField(mesh.nodes, nodeValues(mesh, vals), x, y, grid.cell),
+            4,
+          );
           expect(field[c + 1]).toBeCloseTo(confidenceAt(mesh, x, y), 5);
         } else expect(field[c + 1]).toBe(NO_DATA);
       }

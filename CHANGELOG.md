@@ -22,10 +22,11 @@ The first release.
 
 ### Heatmaps
 
-- Temperature and humidity fields between your sensors. Walls are boundaries: a point only takes
-  a value from sensors it can see past walls and closed doors, so the colour changes sharply at a
-  wall. Open doors, gaps and open windows let values through. A room without a sensor gets a
-  fainter value through its doorways; a room nothing reaches is shown greyed as no data.
+- Temperature and humidity fields between your sensors. Heat travels through open doorways but
+  never through walls or closed doors: distances are measured along paths through openings, so
+  the colour blends smoothly across an open door, spreading from the doorway and fading into the
+  far room, and changes sharply at a wall or closed door. A room without a sensor gets a fainter
+  value through its doorways; a room nothing reaches is shown greyed as no data.
 - An estimated Wi-Fi/radio signal map from your access points and radios, attenuated by walls.
 - Zigbee (ZHA and Zigbee2MQTT) and Z-Wave JS mesh links drawn between devices, coloured by link
   quality.

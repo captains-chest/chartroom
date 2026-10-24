@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { evalField, fieldGrid } from '../src/field';
+import { openField } from './open-field';
+import { fieldGrid, nodeValues } from '../src/field';
 import { MAX_FIELD_SIZE, WORKER_VERSION, createHandler } from '../src/worker-protocol';
 import type { Point } from '../src/plan';
 
@@ -33,7 +34,7 @@ describe('worker protocol', () => {
     const x = grid.x0 + (i + 0.5) * grid.cell;
     const y = grid.y0 + (j + 0.5) * grid.cell;
     expect(res.field[(j * grid.nx + i) * 3]).toBeCloseTo(
-      evalField(mesh.mesh, [25, 30, 20], x, y),
+      openField(mesh.mesh.nodes, nodeValues(mesh.mesh, [25, 30, 20]), x, y, grid.cell),
       4,
     );
   });

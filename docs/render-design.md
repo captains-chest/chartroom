@@ -258,7 +258,7 @@ Reading it:
   Revisit only if a real tablet without WebGL2 shows multi-second retraces on a plan under the
   caps.
 
-## As built: walls are boundaries for temperature and humidity
+## As built: walls are boundaries, doorways are not (temperature and humidity)
 
 Owner decision: the temperature and humidity field must not blend through walls. The colour
 changes sharply at a wall instead of smearing across it.
@@ -269,22 +269,40 @@ changes sharply at a wall instead of smearing across it.
   the field through. Walls are drawn on their centre lines, so two walls meeting at a corner can
   leave a sliver between the line ends; each wall end is joined to any wall within half their
   thicknesses plus 5 cm by a short extra barrier segment to the nearest point on it.
-- **Visibility** (`visibility` in `field-plan.ts`): a cell can take a value from a sensor only if
-  the straight ray between them crosses no barrier. For each sensor and barrier the shadow behind
-  the segment is a convex quad, filled row by row over the outline's bounding box (widened by
-  1e-4 cells so neighbouring shadows leave no gap).
-- **Interpolation among visible sensors**: the same linear rule as before, applied to the set of
-  sensors a cell sees: flat for one, segment lerp for two (or collinear), Delaunay barycentric
-  for three or more, nearest hull edge outside their hull. Two sensors at 25 °C and 30 °C in one
-  open room still give 27.5 °C halfway. A sub-mesh is built once per distinct visible set.
-- **Room preference**: if the cell's room has sensors of its own, only those (visible) are used,
-  so a room with one sensor is flat. Consequence, by design: where two rooms that each have a
-  sensor meet without a wall (an open hall into a kitchen-living room), the colour steps at the
-  room line.
-- **Rooms with no sensor of their own** take values from sensors they see through an opening,
-  at confidence x0.6. A cell that sees no sensor at all is filled by a breadth-first carry from
-  its neighbours through openings (never across a barrier cell), with confidence
-  `min(source, 0.6) x (1 - 0.5 smoothstep(0, 6 m, distance carried))`.
+- **Visibility** (`visibility` in `field-plan.ts`): whether the straight ray between a cell and a
+  sensor crosses no barrier. For each sensor and barrier the shadow behind the segment is a convex
+  quad, filled row by row over the outline's bounding box (widened by 1e-4 cells so neighbouring
+  shadows leave no gap).
+- **Owner decision (revised): heat travels through doorways.** An earlier rule ("a room with its
+  own sensors uses only those") stepped at the room line even at an open doorway. Now a cell may
+  use any sensor reachable along a path that passes only through openings (open doors, gaps,
+  doors without an entity or with an unknown state, open windows), never through a wall or a
+  closed door.
+- **Path distances** (`planField`): a multi-label Dijkstra over the grid keeps, per cell, the four
+  nearest (sensor, path distance) labels. Steps go to 16 neighbours (orthogonal, diagonal and
+  knight moves; the longer moves only where the cells they cut through are open and inside). A
+  cell that sees the sensor directly gets the exact straight-line distance, so open space is not
+  bent by the grid; others get the parent's distance plus the step. Barrier cells take a label
+  but pass none on. This is the "portal" idea worked out on the grid: the shortest path round a
+  door jamb is the geodesic pixel -> doorway -> sensor.
+- **Weights**: `w = exp(-e / 1 m - h / 1.5 m) / max(cell / 2, d)`, where `d` is the path
+  distance, `e = d - straight distance` is the detour round corners, and `h` is how far the path
+  has come since it left the sensor's room (tracked through the search, using the room
+  polygons). The three heaviest labels are mixed, each less the fourth's weight, so a sensor
+  drops out smoothly. In one open room `e = h = 0` and this is plain inverse distance: exactly
+  linear between two sensors (27.5 °C halfway between 25 and 30). With three or more sensors it
+  is inverse distance over the nearest three, not the Delaunay plane used before.
+- **Why one rule for every sensor**: blending directly visible sensors linearly and adding
+  sensors from other rooms on top cannot be continuous where a door jamb's shadow line falls or
+  at the room line. Weighting every sensor by its path distance is continuous everywhere a path
+  is; a wall or closed door has no path through it, so it stays a sharp edge. The detour term
+  keeps the wall beside an open door sharp (the value on the far side had to go round), and the
+  `h` term makes the next room fade back to its own sensors with distance from the doorway.
+- **Doorway check** (unit tests, 10 x 4 m box split by a wall with a 1 m door, 20 °C and 30 °C):
+  mid-doorway 25.0, no step larger than 0.3 °C per cell across it; closed door and wall step
+  20 -> 30; the cool room's influence in the warm room shrinks with distance from the door.
+- **Confidence**: `near(nearest path distance) x (1 - 0.4 x share of the value that came round a
+  corner)`, so values through a doorway are paler. A cell no path reaches has no data.
 - **No data**: a cell nothing reaches is drawn grey (no colour) at low opacity, never a colour that
   leaked through a wall; a closed-off room with no sensor looks like this.
 - **Outside the house: faded no-data.** Outside the outline there is no colour, only a faint grey
@@ -300,10 +318,12 @@ changes sharply at a wall instead of smearing across it.
 - **Bundling**: the worker is a build entry (`workers/worker.js`) sharing chunks with the lazy
   in-page fallback, so the field code ships once. `pnpm size` checks that nothing the worker loads
   touches the DOM.
-- **Cost** (planning, on this box, worst case 256 x 208 cells, 512 walls in 192 rooms): 8 sensors
-  56 ms, 32 sensors 85 ms, 128 sensors 356 ms, 256 sensors 411 ms. The throttled e2e check at the
-  soft caps (32 temperature sensors, 512 walls, below) retraces in 77 / 159 / 201 ms with WebGL2
-  and 54 / 134 / 181 ms with the worker at 1x / 4x / 6x.
+- **Cost** (planning on this box, 256 x 208 cells, a 16 x 12 grid of rooms with doors, 192
+  rooms): 8 sensors 288 ms, 32 sensors 350 ms, 128 sensors 524 ms, 256 sensors 702 ms (the
+  visible-set planner it replaced: 61 / 282 / 2219 / 3328 ms on the same plan). Planning runs only
+  when sensors, walls or door states change. The throttled e2e check at the soft caps (32
+  temperature sensors, 512 walls) retraces in 78 / 156 / 206 ms with WebGL2 and 81 / 135 / 182 ms
+  with the worker at 1x / 4x / 6x.
 
 ## What Phase 1 must provide
 

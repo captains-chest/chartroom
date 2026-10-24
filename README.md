@@ -60,15 +60,15 @@ field built from the sources placed on the plan (with **Source** in the editor).
 button again to hide it. Your choice is remembered on this device.
 
 - **Linear between sensors.** Two sensors at 25 °C and 30 °C give exactly 27.5 °C halfway between
-  them. With three or more sensors the plan is split into triangles between them (Delaunay) and
-  each point mixes the three corners. Outside the sensors' hull a point takes the value of the
-  nearest hull edge. Two sensors, or sensors in a line, give a gradient along the line. One sensor
-  colours the plan in one colour.
-- **Walls are boundaries.** A point only takes its value from sensors it can see in a straight
-  line without crossing a wall, so the colour changes sharply at a wall. Open doors and gaps let
-  values through; closed doors (per their entity) and closed windows do not. A room with one
-  sensor is one colour. A room with no sensor of its own is filled through its doorways, paler.
-  Where two rooms with their own sensors meet without a wall, the colour steps at the room line.
+  them, and a straight gradient along the line. With more sensors each point mixes its three
+  nearest by inverse distance, so the colour changes smoothly as you move between them. One
+  sensor colours the plan in one colour.
+- **Heat goes through doors, not walls.** Distances are measured along paths that only pass
+  through openings: open doors, gaps, doors without an entity and open windows. Closed doors (per
+  their entity), closed windows and walls block. Through an open doorway the colour blends
+  smoothly from one room into the next, spreading out from the doorway and fading with distance
+  into the far room, which returns to its own sensors. A wall or a closed door stays a sharp edge.
+  A room with no sensor of its own is filled through its doorways, paler.
 - **Honest about guessing.** The colour fades where the nearest sensor is far away. Anything no
   sensor reaches (a closed-off room without a sensor) is grey, not a colour leaked through a wall.
   Outside the house there is only a faint grey halo.

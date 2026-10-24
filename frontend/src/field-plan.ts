@@ -1,13 +1,14 @@
 // Per-cell weights for the temperature and humidity field, worked out once per layout (sensors,
-// walls, door states) by the worker. Walls are boundaries (docs/render-design.md, "Walls are
-// boundaries"):
-// - a cell takes its value only from the sensors it can see: a straight line from the cell centre
-//   to the sensor that crosses no barrier (walls, closed doors, windows; signal.ts barrierSegments);
-// - in a room with a sensor of its own the cell uses just that room's sensors (one sensor: flat);
-// - among the visible sensors the field is linear as before (field.ts: mesh, segment, flat);
-// - cells that see no sensor take the value of the nearest valued cell reachable without crossing
-//   a barrier (through doorways), with lower confidence the further it travelled;
-// - whatever is still empty, and everything outside the outline, is "no data" (drawn grey).
+// walls, door states) by the worker. Walls are boundaries, doorways are not (docs/render-design.md,
+// "Walls are boundaries"):
+// - a cell is weighted by its path distance to each sensor: the straight line where nothing is in
+//   the way, otherwise the shortest way round that crosses no barrier (walls, closed doors,
+//   windows; signal.ts barrierSegments), so values flow through open doorways and gaps;
+// - inverse path distance over the three nearest sensors: linear between two sensors in an open
+//   room (25 halfway between 20 and 30), continuous across an open doorway and fading into the
+//   room beyond it, a sharp step at a wall or a closed door;
+// - confidence drops with distance and with the detour a value took round a corner;
+// - cells nothing reaches, and everything outside the outline, are "no data" (drawn grey).
 // The result is fixed weights per cell over the sensor nodes, so values still animate on the GPU
 // (heat-gl.ts) or in fillField without redoing any of this.
 import {
@@ -16,8 +17,8 @@ import {
   CONF_MIN,
   CONF_NEAR,
   fadeAt,
+  outlineDistance,
   smoothstep,
-  weightsAt,
   type FieldGrid,
   type FieldMesh,
 } from './field';
@@ -25,10 +26,8 @@ import type { Point } from './plan';
 
 /** Confidence marking a cell with no data (drawn grey, not coloured). */
 export const NO_DATA = -1;
-/** Confidence of values that only reach a cell through an opening, before distance fades it. */
+/** Confidence of values that only reach a cell round a corner or through an opening. */
 export const THROUGH_OPENING = 0.6;
-/** Distance (m) over which a value carried through an opening fades to half that. */
-export const CARRY_FADE = 6;
 
 /** Per-cell weights over the nodes, confidence (or NO_DATA) and fade: one per layout. */
 export interface FieldPlan {
@@ -172,9 +171,43 @@ const inPolygon = (poly: readonly Point[], x: number, y: number): boolean => {
   return inside;
 };
 
+/** Sensors kept per cell: the three nearest, and a fourth whose weight the others give up. */
+const KEEP = 4;
+/** Detour (m) round a corner or through a doorway over which confidence drops to THROUGH_OPENING. */
+export const DETOUR_FADE = 1;
+/** Detour (m) that cuts a sensor's weight to 1/e: how far a value carries round a corner. */
+export const DETOUR_FALLOFF = 1;
+/** Distance (m) into another room than its own that cuts a sensor's weight to 1/e. */
+export const ROOM_FALLOFF = 1.5;
+/** Grid steps the path search takes (dx, dy), each only between cells no barrier passes through. */
+const STEPS: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1],
+  [2, 1],
+  [2, -1],
+  [-2, 1],
+  [-2, -1],
+  [1, 2],
+  [1, -2],
+  [-1, 2],
+  [-1, -2],
+];
+
 /**
- * The wall-aware field plan. `walls` are barrier segments (four floats each), `rooms` the plan's
- * room polygons. Returns the sensor nodes (sensors at one spot merged) and the per-cell plan.
+ * The wall-aware field plan. `walls` are barrier segments (four floats each). Returns the sensor
+ * nodes (sensors at one spot merged) and the per-cell plan. `rooms` (the plan's room polygons)
+ * only say how far a value has come into a room other than its sensor's, to fade it there.
+ *
+ * Each cell is weighted by its path distance to the sensors: the straight line when nothing is in
+ * the way, otherwise the shortest way round through openings (a search over the grid, seeded with
+ * the exact straight-line distance wherever a sensor is in sight). Weights are inverse distance
+ * over the three nearest sensors, less the fourth's, so they change smoothly as one drops out.
  */
 export function planField(
   sensors: readonly Point[],
@@ -186,29 +219,33 @@ export function planField(
   const mesh = buildMesh(sensors);
   const nodes = mesh.nodes;
   const N = nodes.length;
-  const cells = grid.nx * grid.ny;
+  const { nx, ny, cell } = grid;
+  const cells = nx * ny;
   const idx = new Int32Array(cells * 3);
   const w = new Float32Array(cells * 3);
   const conf = new Float32Array(cells).fill(NO_DATA);
   const fade = new Float32Array(cells);
   const plan = { grid, nodes: N, idx, w, conf, fade };
+  const inside = new Uint8Array(cells);
+  const cx = (c: number): number => grid.x0 + ((c % nx) + 0.5) * cell;
+  const cy = (c: number): number => grid.y0 + (Math.floor(c / nx) + 0.5) * cell;
+  for (let c = 0; c < cells; c++) {
+    fade[c] = fadeAt(outline, cx(c), cy(c));
+    inside[c] = fade[c]! >= 1 ? 1 : 0;
+  }
+  if (!N) return { mesh, plan };
   // Only cells inside the outline can take a value: work visibility out over its bounding box.
   let [l, t, r, b] = [Infinity, Infinity, -Infinity, -Infinity];
   for (const [x, y] of outline)
     [l, t, r, b] = [Math.min(l, x), Math.min(t, y), Math.max(r, x), Math.max(b, y)];
   const at = (v: number, o: number, n: number) =>
-    Math.min(n - 1, Math.max(0, Math.floor((v - o) / grid.cell)));
+    Math.min(n - 1, Math.max(0, Math.floor((v - o) / cell)));
   const vis = visibility(
     nodes,
     grid,
     walls,
     outline.length
-      ? [
-          at(l, grid.x0, grid.nx),
-          at(t, grid.y0, grid.ny),
-          at(r, grid.x0, grid.nx),
-          at(b, grid.y0, grid.ny),
-        ]
+      ? [at(l, grid.x0, nx), at(t, grid.y0, ny), at(r, grid.x0, nx), at(b, grid.y0, ny)]
       : undefined,
   );
   const wall = barrierCells(grid, walls);
@@ -216,105 +253,186 @@ export function planField(
   const cellRoom = new Int16Array(cells).fill(-1);
   rooms.forEach((poly, r) =>
     scanPolygon(grid, poly, (j, i0, i1) => {
-      for (let i = i0; i <= i1; i++)
-        if (cellRoom[j * grid.nx + i] === -1) cellRoom[j * grid.nx + i] = r;
+      for (let i = i0; i <= i1; i++) if (cellRoom[j * nx + i] === -1) cellRoom[j * nx + i] = r;
     }),
   );
   const nodeRoom = nodes.map(([x, y]) => rooms.findIndex((p) => inPolygon(p, x, y)));
-  const roomHasNode = new Set(nodeRoom);
-  // One sub-mesh per distinct set of visible nodes, its nodes mapped back to ours.
-  const subs = new Map<string, { sub: FieldMesh; map: number[][] }>();
-  const subFor = (ids: number[]): { sub: FieldMesh; map: number[][] } => {
-    const key = ids.join(',');
-    let s = subs.get(key);
-    if (!s) {
-      const sub = buildMesh(ids.map((i) => nodes[i]!));
-      s = { sub, map: sub.members.map((m) => m.map((k) => ids[k]!)) };
-      subs.set(key, s);
+  // Up to KEEP (sensor, distance) labels per cell, settled nearest first (Dijkstra).
+  const labN = new Int32Array(cells * KEEP).fill(-1);
+  const labD = new Float32Array(cells * KEEP);
+  // Path length at which each label's path left its sensor's room (Infinity: it has not).
+  const labX = new Float32Array(cells * KEEP);
+  const done = new Uint8Array(cells * KEEP);
+  let hk = new Float64Array(1024);
+  let hv = new Int32Array(2048);
+  let size = 0;
+  const push = (d: number, c: number, n: number): void => {
+    if (size === hk.length) {
+      const k2 = new Float64Array(size * 2);
+      k2.set(hk);
+      hk = k2;
+      const v2 = new Int32Array(size * 4);
+      v2.set(hv);
+      hv = v2;
     }
-    return s;
+    let i = size++;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (hk[p]! <= d) break;
+      hk[i] = hk[p]!;
+      hv[2 * i] = hv[2 * p]!;
+      hv[2 * i + 1] = hv[2 * p + 1]!;
+      i = p;
+    }
+    hk[i] = d;
+    hv[2 * i] = c;
+    hv[2 * i + 1] = n;
   };
-  const acc = new Map<number, number>();
-  const inside = new Uint8Array(cells);
-  const ids: number[] = [];
-  for (let j = 0; j < grid.ny; j++) {
-    const y = grid.y0 + (j + 0.5) * grid.cell;
-    for (let i = 0; i < grid.nx; i++) {
-      const x = grid.x0 + (i + 0.5) * grid.cell;
-      const c = j * grid.nx + i;
-      const f = fadeAt(outline, x, y);
-      fade[c] = f;
-      if (f < 1 || N === 0) continue;
-      inside[c] = 1;
-      ids.length = 0;
-      const room = cellRoom[c]!;
-      // Prefer the cell's own room's sensors when it sees any of them.
-      for (const pass of room >= 0 && roomHasNode.has(room) ? [true, false] : [false]) {
-        for (let n = 0; n < N; n++)
-          if (vis[n * cells + c] && (!pass || nodeRoom[n] === room)) ids.push(n);
-        if (ids.length) break;
+  const pop = (): void => {
+    const d = hk[--size]!;
+    const c = hv[2 * size]!;
+    const n = hv[2 * size + 1]!;
+    let i = 0;
+    for (;;) {
+      let m = 2 * i + 1;
+      if (m >= size) break;
+      if (m + 1 < size && hk[m + 1]! < hk[m]!) m++;
+      if (hk[m]! >= d) break;
+      hk[i] = hk[m]!;
+      hv[2 * i] = hv[2 * m]!;
+      hv[2 * i + 1] = hv[2 * m + 1]!;
+      i = m;
+    }
+    hk[i] = d;
+    hv[2 * i] = c;
+    hv[2 * i + 1] = n;
+  };
+  const offer = (c: number, n: number, dist: number, exit: number): void => {
+    const d = Math.fround(dist);
+    const base = c * KEEP;
+    let free = -1;
+    let worst = -1;
+    for (let k = 0; k < KEEP; k++) {
+      const s = base + k;
+      const m = labN[s]!;
+      if (m === n) {
+        if (done[s] || labD[s]! <= d) return;
+        labD[s] = d;
+        labX[s] = exit;
+        push(d, c, n);
+        return;
       }
-      if (!ids.length) continue;
-      const { sub, map } = subFor(ids);
-      const wt = weightsAt(sub, x, y)!;
-      acc.clear();
-      for (let k = 0; k < 3; k++) {
-        const m = map[wt.idx[k]!]!;
-        for (const g of m) acc.set(g, (acc.get(g) ?? 0) + wt.w[k]! / m.length);
+      if (m < 0) {
+        if (free < 0) free = s;
+      } else if (!done[s] && (worst < 0 || labD[s]! > labD[worst]!)) worst = s;
+    }
+    const s = free >= 0 ? free : worst >= 0 && labD[worst]! > d ? worst : -1;
+    if (s < 0) return;
+    labN[s] = n;
+    labD[s] = d;
+    labX[s] = exit;
+    push(d, c, n);
+  };
+  const straight = (c: number, n: number): number =>
+    Math.hypot(cx(c) - nodes[n]![0], cy(c) - nodes[n]![1]);
+  nodes.forEach(([x, y], n) => {
+    const i = Math.floor((x - grid.x0) / cell);
+    const j = Math.floor((y - grid.y0) / cell);
+    const c0 = j * nx + i;
+    if (i >= 0 && j >= 0 && i < nx && j < ny && inside[c0]) {
+      for (let dj = -1; dj <= 1; dj++)
+        for (let di = -1; di <= 1; di++) {
+          const c = (j + dj) * nx + i + di;
+          if (i + di < 0 || i + di >= nx || j + dj < 0 || j + dj >= ny) continue;
+          if (inside[c] && vis[n * cells + c]) offer(c, n, straight(c, n), Infinity);
+        }
+    } else
+      for (let c = 0; c < cells; c++)
+        if (inside[c] && vis[n * cells + c]) offer(c, n, straight(c, n), Infinity);
+  });
+  const open = (i: number, j: number): boolean =>
+    i >= 0 && j >= 0 && i < nx && j < ny && !wall[j * nx + i] && inside[j * nx + i] === 1;
+  while (size) {
+    const d = hk[0]!;
+    const c = hv[0]!;
+    const n = hv[1]!;
+    pop();
+    let s = c * KEEP;
+    while (s < c * KEEP + KEEP && !(labN[s] === n && !done[s] && labD[s] === d)) s++;
+    if (s === c * KEEP + KEEP) continue;
+    done[s] = 1;
+    // A barrier cell takes a value but passes none on, so nothing leaks across a wall.
+    if (wall[c]) continue;
+    const i = c % nx;
+    const j = (c - i) / nx;
+    for (const [di, dj] of STEPS) {
+      const i2 = i + di;
+      const j2 = j + dj;
+      if (i2 < 0 || j2 < 0 || i2 >= nx || j2 >= ny || !inside[j2 * nx + i2]) continue;
+      // Diagonal and knight steps also need the cells they cut through to be clear.
+      if (di && dj) {
+        const si = Math.sign(di);
+        const sj = Math.sign(dj);
+        if (Math.abs(di) === 2 ? !open(i + si, j) || !open(i + si, j + sj) : false) continue;
+        if (Math.abs(dj) === 2 ? !open(i, j + sj) || !open(i + si, j + sj) : false) continue;
+        if (Math.abs(di) === 1 && Math.abs(dj) === 1 && (!open(i + si, j) || !open(i, j + sj)))
+          continue;
       }
-      // Up to three nodes, heaviest first (more only when merged nodes overlap: rare).
-      const top = [...acc].sort((a, b) => b[1] - a[1]).slice(0, 3);
-      const sum = top.reduce((s, e) => s + e[1], 0) || 1;
-      top.forEach(([g, v], k) => {
-        idx[c * 3 + k] = g;
-        w[c * 3 + k] = v / sum;
+      const c2 = j2 * nx + i2;
+      const step = Math.hypot(di, dj) * cell;
+      const d2 = vis[n * cells + c2] ? straight(c2, n) : d + step;
+      // Leaving the sensor's room: note where, less the bit of this step past the room's edge.
+      const r = nodeRoom[n]!;
+      let exit = labX[s]!;
+      if (exit === Infinity && r >= 0 && cellRoom[c2] !== r) {
+        const o = outlineDistance(rooms[r]!, cx(c2), cy(c2));
+        if (!o.inside) exit = d2 - o.d;
+      }
+      offer(c2, n, d2, exit);
+    }
+  }
+  const floor = cell / 2;
+  const lab: { n: number; d: number; e: number; wt: number }[] = [];
+  for (let c = 0; c < cells; c++) {
+    lab.length = 0;
+    let nearest = Infinity;
+    for (let s = c * KEEP; s < c * KEEP + KEEP; s++) {
+      const n = labN[s]!;
+      if (n < 0) continue;
+      const d = labD[s]!;
+      const e = Math.max(0, d - straight(c, n));
+      // How far the path has come since it left the sensor's room (through a doorway).
+      const h = Math.max(0, d - labX[s]!);
+      nearest = Math.min(nearest, d);
+      // A value counts for less the further it went out of its way round a corner or through a
+      // doorway, and the further it has come into another room: a wall stays a sharp edge and
+      // the room beyond a doorway fades back to its own sensors.
+      lab.push({
+        n,
+        d,
+        e,
+        wt: Math.exp(-e / DETOUR_FALLOFF - h / ROOM_FALLOFF) / Math.max(floor, d),
       });
-      let d2 = Infinity;
-      for (const n of ids) d2 = Math.min(d2, (x - nodes[n]![0]) ** 2 + (y - nodes[n]![1]) ** 2);
-      const near = 1 - (1 - CONF_MIN) * smoothstep(CONF_NEAR, CONF_FAR, Math.sqrt(d2));
-      // A room without a sensor of its own only sees others through an opening.
-      conf[c] = room >= 0 && !roomHasNode.has(room) ? near * THROUGH_OPENING : near;
     }
+    if (!lab.length) continue;
+    lab.sort((p, q) => q.wt - p.wt);
+    const use = Math.min(3, lab.length);
+    const last = lab.length > 3 ? lab[3]!.wt : 0;
+    let sum = 0;
+    for (let m = 0; m < use; m++) sum += lab[m]!.wt - last;
+    let through = 0;
+    for (let m = 0; m < use; m++) {
+      const { n, e, wt } = lab[m]!;
+      const v = sum > 0 ? (wt - last) / sum : 1 / use;
+      idx[c * 3 + m] = n;
+      w[c * 3 + m] = v;
+      // How much of the value came round a corner or through a doorway.
+      through += v * smoothstep(0, DETOUR_FADE, e);
+    }
+    const near = 1 - (1 - CONF_MIN) * smoothstep(CONF_NEAR, CONF_FAR, nearest);
+    conf[c] = near * (1 - (1 - THROUGH_OPENING) * through);
   }
-  carry(plan, inside, wall);
   return { mesh, plan };
-}
-
-/**
- * Cells that see no sensor take the weights of the nearest valued cell reachable in 4-neighbour
- * steps that stay inside and do not pass through a barrier cell (a barrier cell takes a value but
- * passes none on, so nothing leaks across a wall). Confidence fades with the distance travelled.
- */
-function carry(plan: FieldPlan, inside: Uint8Array, wall: Uint8Array): void {
-  const { grid, idx, w, conf } = plan;
-  const cells = grid.nx * grid.ny;
-  const queue = new Int32Array(cells);
-  const src = new Float32Array(cells);
-  const dist = new Float32Array(cells);
-  const done = new Uint8Array(cells);
-  let head = 0;
-  let tail = 0;
-  for (let c = 0; c < cells; c++)
-    if (conf[c]! !== NO_DATA) {
-      done[c] = 1;
-      src[c] = conf[c]!;
-      if (!wall[c]) queue[tail++] = c;
-    }
-  while (head < tail) {
-    const c = queue[head++]!;
-    const i = c % grid.nx;
-    for (const n of [i > 0 ? c - 1 : -1, i < grid.nx - 1 ? c + 1 : -1, c - grid.nx, c + grid.nx]) {
-      if (n < 0 || n >= cells || done[n] || !inside[n]) continue;
-      done[n] = 1;
-      idx.copyWithin(n * 3, c * 3, c * 3 + 3);
-      w.copyWithin(n * 3, c * 3, c * 3 + 3);
-      // Carried values count as seen through an opening, whatever the source cell had.
-      src[n] = Math.min(src[c]!, THROUGH_OPENING);
-      dist[n] = dist[c]! + grid.cell;
-      conf[n] = src[n]! * (1 - 0.5 * smoothstep(0, CARRY_FADE, dist[n]!));
-      if (!wall[n]) queue[tail++] = n;
-    }
-  }
 }
 
 /** Field samples for node values: value, confidence, fade per cell (row j = y0 + (j+½)·cell). */

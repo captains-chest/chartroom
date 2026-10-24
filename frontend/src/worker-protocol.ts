@@ -43,7 +43,7 @@ export type WorkerResponse =
   | { type: 'field'; id: number; key: string; grid: FieldGrid; field: Float32Array }
   | { type: 'error'; id: number; message: string };
 
-export const WORKER_VERSION = '2';
+export const WORKER_VERSION = '3';
 /** Largest grid side, sensor count, barrier segments and rooms the worker accepts. */
 export const MAX_FIELD_SIZE = 1024;
 export const MAX_SENSORS = 256;

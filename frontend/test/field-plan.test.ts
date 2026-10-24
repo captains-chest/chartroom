@@ -27,6 +27,21 @@ const sensors: Point[] = [
 const vals = [20, 30];
 const wall = [5, 0, 5, 4];
 const wallWithGap = [5, 0, 5, 1.5, 5, 2.5, 5, 4];
+/** The two halves of the box as rooms. */
+const rooms: Point[][] = [
+  [
+    [0, 0],
+    [5, 0],
+    [5, 4],
+    [0, 4],
+  ],
+  [
+    [5, 0],
+    [10, 0],
+    [10, 4],
+    [5, 4],
+  ],
+];
 
 const cellAt = (g: FieldGrid, x: number, y: number): number =>
   Math.floor((y - g.y0) / g.cell) * g.nx + Math.floor((x - g.x0) / g.cell);
@@ -45,7 +60,7 @@ describe('walls are boundaries for temperature and humidity', () => {
   it('blends linearly with no wall: 25 halfway between 20 and 30', () => {
     const f = sample([]);
     expect(f.value(5, 2)).toBeCloseTo(25, 1);
-    expect(f.value(3.75, 2)).toBeCloseTo(22.5, 1);
+    expect(Math.abs(f.value(3.75, 2) - 22.5)).toBeLessThan(0.1);
   });
 
   it('stops at a wall: ~20 on one side, ~30 on the other, with a sharp edge', () => {
@@ -105,42 +120,64 @@ describe('walls are boundaries for temperature and humidity', () => {
     expect(through.value(7.5, 2)).toBeCloseTo(20, 5);
     expect(through.value(7.5, 0.3)).toBeCloseTo(20, 5);
     expect(through.conf(7.5, 0.3)).toBeGreaterThan(0);
-    expect(through.conf(7.5, 0.3)).toBeLessThanOrEqual(THROUGH_OPENING);
-    // Two sensors, door open: each room keeps its own sensor (flat) when rooms are known.
-    const rooms: Point[][] = [
-      [
-        [0, 0],
-        [5, 0],
-        [5, 4],
-        [0, 4],
-      ],
-      [
-        [5, 0],
-        [10, 0],
-        [10, 4],
-        [5, 4],
-      ],
-    ];
-    const both = sample(open, rooms);
-    expect(both.value(4.8, 2)).toBeCloseTo(20, 5);
-    expect(both.value(5.2, 2)).toBeCloseTo(30, 5);
+  });
+
+  /** The values along y from x0 to x1, one per cell. */
+  const along = (f: ReturnType<typeof sample>, y: number, x0: number, x1: number) => {
+    const out: number[] = [];
+    for (let x = x0; x <= x1; x += grid.cell) out.push(f.value(x, y));
+    return out;
+  };
+  const maxStep = (v: number[]) =>
+    v.slice(1).reduce((m, x, i) => Math.max(m, Math.abs(x - v[i]!)), 0);
+
+  it('carries heat through an open doorway: continuous across it, ~25 mid-doorway', () => {
+    const f = sample(wallWithGap, rooms);
+    expect(f.value(5, 2)).toBeCloseTo(25, 0);
+    expect(Math.abs(f.value(5, 2) - 25)).toBeLessThan(0.3);
+    const across = along(f, 2, 3.5, 6.5);
+    expect(maxStep(across)).toBeLessThan(0.3);
+    // Monotonic from the cool room to the warm one, no step at the room line.
+    for (let k = 1; k < across.length; k++)
+      expect(across[k]!).toBeGreaterThanOrEqual(across[k - 1]! - 1e-4);
+    expect(Math.abs(f.value(4.95, 2) - f.value(5.05, 2))).toBeLessThan(0.4);
+  });
+
+  it('keeps a sharp step at a closed door and at a wall', () => {
+    const closed = [...wall];
+    for (const f of [
+      sample(closed, rooms),
+      sample([5, 0, 5, 1.5, 5, 1.5, 5, 2.5, 5, 2.5, 5, 4], rooms),
+    ]) {
+      expect(f.value(5 - grid.cell * 1.01, 2)).toBeCloseTo(20, 5);
+      expect(f.value(5 + grid.cell * 1.01, 2)).toBeCloseTo(30, 5);
+      expect(maxStep(along(f, 2, 3.5, 6.5))).toBeGreaterThan(4.9);
+    }
+    // With the door open, the wall beside it still steps: values that had to go round fade fast.
+    const open = sample(wallWithGap, rooms);
+    const left = open.value(5 - grid.cell * 1.01, 0.3);
+    const right = open.value(5 + grid.cell * 1.01, 0.3);
+    expect(right - left).toBeGreaterThan(4);
+  });
+
+  it('fades heat from the doorway into the far room', () => {
+    const f = sample(wallWithGap, rooms);
+    // The cool room's influence in the warm room shrinks with distance from the doorway...
+    const into = [5.3, 5.8, 6.5, 7.2].map((x) => 30 - f.value(x, 2));
+    for (let k = 1; k < into.length; k++) expect(into[k]!).toBeLessThan(into[k - 1]!);
+    expect(into[0]!).toBeGreaterThan(2);
+    // ...and is all but gone in the far corners, both rooms alike.
+    expect(f.value(9.7, 0.3)).toBeGreaterThan(29.5);
+    expect(f.value(0.3, 3.7)).toBeLessThan(20.5);
+  });
+
+  it('blends two sensors in one open space: 27.5 halfway between 25 and 30', () => {
+    const f = sample([], [box], sensors, [25, 30]);
+    expect(f.value(5, 2)).toBeCloseTo(27.5, 1);
+    expect(f.value(5, 0.3)).toBeCloseTo(27.5, 1);
   });
 
   it('fills a sensorless room through its doorway, fainter further in', () => {
-    const rooms: Point[][] = [
-      [
-        [0, 0],
-        [5, 0],
-        [5, 4],
-        [0, 4],
-      ],
-      [
-        [5, 0],
-        [10, 0],
-        [10, 4],
-        [5, 4],
-      ],
-    ];
     const f = sample(wallWithGap, rooms, [[2.5, 2]], [21]);
     for (const [x, y] of [
       [6, 0.3],
@@ -149,9 +186,10 @@ describe('walls are boundaries for temperature and humidity', () => {
     ] as Point[]) {
       expect(f.value(x, y)).toBeCloseTo(21, 5);
       expect(f.conf(x, y)).toBeGreaterThan(0);
-      expect(f.conf(x, y)).toBeLessThanOrEqual(THROUGH_OPENING);
     }
     expect(f.conf(9.7, 0.3)).toBeLessThan(f.conf(5.5, 2));
+    // Round the jamb, out of sight of the sensor: down to THROUGH_OPENING (times the distance fade).
+    expect(f.conf(5.3, 0.3)).toBeLessThan(f.conf(5.3, 2));
   });
 
   it('keeps open-room behaviour: linear among the sensors a cell sees, flat with one', () => {
@@ -278,20 +316,15 @@ describe('example plan', () => {
         const c = j * g.nx + i;
         if (fp.conf[c]! === NO_DATA || wallCells[c]) continue;
         const p: Point = [g.x0 + (i + 0.5) * g.cell, g.y0 + (j + 0.5) * g.cell];
-        const room = roomOf(p);
-        const own = mesh.nodes.map((_, k) => k).filter((k) => roomOf(mesh.nodes[k]!) === room);
         const used = [0, 1, 2]
           .filter((k) => fp.w[c * 3 + k]! > 1e-6)
           .map((k) => fp.idx[c * 3 + k]!);
         for (const k of used) {
           const node = mesh.nodes[k]!;
-          // Every value comes from a sensor in the same wall-bounded region...
+          // Every value comes from a sensor in the same wall-bounded region (through openings)...
           expect(region[at(node)], `cell ${i},${j}`).toBe(region[c]);
-          // ...seen in a straight line, or carried round a corner at reduced confidence.
+          // ...and a sensor in sight is in sight past no wall.
           if (vis[k * cells + c]) expect(crosses(walls, p, node), `cell ${i},${j}`).toBe(false);
-          else expect(fp.conf[c]!, `cell ${i},${j}`).toBeLessThanOrEqual(THROUGH_OPENING);
-          // A room with a sensor of its own uses only its own sensors.
-          if (room >= 0 && own.length > 0) expect(own, `cell ${i},${j}`).toContain(k);
         }
         checked++;
       }
@@ -311,7 +344,6 @@ describe('example plan', () => {
       Math.floor((p[1] - g.y0) / g.cell) * g.nx + Math.floor((p[0] - g.x0) / g.cell);
     const open = scenario('open', ['office_temperature']).plan;
     expect(open.conf[at(inBedroom2)]!).toBeGreaterThan(0);
-    expect(open.conf[at(inBedroom2)]!).toBeLessThanOrEqual(THROUGH_OPENING);
     const shut = scenario('closed', ['office_temperature']).plan;
     expect(shut.conf[at(inBedroom2)]).toBe(NO_DATA);
     // The other rooms keep their own sensors.

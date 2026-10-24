@@ -18,14 +18,13 @@ import {
   moveWall,
   nextId,
   scalePlan,
-  snap,
-  snapTargets,
   twoPointFactor,
   updateOpening,
   updateRoom,
   updateWall,
   wallAt,
 } from '../src/plan/ops';
+import { snap, snapTargets } from '../src/editor/snap';
 
 const fixture = JSON.parse(
   readFileSync(new URL('./fixtures/example-plan.json', import.meta.url), 'utf8'),

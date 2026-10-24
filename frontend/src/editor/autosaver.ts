@@ -1,11 +1,4 @@
-export interface Autosaver<T> {
-  /** `value` changed: save it once no other change follows within the delay. */
-  schedule(value: T): void;
-  /** Save now if anything changed since the last save. */
-  flush(): Promise<void>;
-  /** Drop a pending save (`flush` first to keep it). */
-  dispose(): void;
-}
+import type { Autosaver } from './models';
 
 /**
  * Saves the latest value a moment after the last change, one save at a time. `saved` is the value

@@ -1,9 +1,10 @@
 """Mesh topology: the ZHA, Z-Wave JS and Zigbee2MQTT parsers, and chartroom/mesh/*."""
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -212,3 +213,38 @@ async def test_mesh_test_source(
     assert (await ws.receive_json())["success"]
     await ws.send_json_auto_id({"type": "chartroom/mesh/get"})
     assert (await ws.receive_json())["result"]["sources"]["zha"] == "absent"
+
+
+async def test_z2m_subscribes_once_under_concurrent_requests(hass: HomeAssistant) -> None:
+    """Two cards asking at once share one subscription, and unloading removes it."""
+    other = MockConfigEntry(domain="mqtt")
+    other.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=other.entry_id, identifiers={("mqtt", "zigbee2mqtt_0x00158d0000000003")}
+    )
+    hass.config.components.add("mqtt")
+    callbacks: list[Any] = []
+    unsub = MagicMock()
+
+    async def subscribe(hass: HomeAssistant, topic: str, received: Any) -> MagicMock:
+        callbacks.append(received)
+        await asyncio.sleep(0)
+        return unsub
+
+    async def publish(hass: HomeAssistant, topic: str, payload: str) -> None:
+        networkmap = (FIXTURES / "z2m_networkmap.json").read_text()
+        for received in callbacks:
+            received(MagicMock(payload=networkmap))
+
+    with (
+        patch("homeassistant.components.mqtt.is_connected", return_value=True),
+        patch("homeassistant.components.mqtt.async_subscribe", subscribe),
+        patch("homeassistant.components.mqtt.async_publish", publish),
+    ):
+        first, second = await asyncio.gather(mesh._z2m(hass), mesh._z2m(hass))
+
+    assert len(callbacks) == 1
+    assert first == second
+    assert len(first[0]) == 3
+    mesh.async_unload(hass)
+    unsub.assert_called_once()

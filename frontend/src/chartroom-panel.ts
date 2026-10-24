@@ -1,16 +1,15 @@
 import type { Hass, PlanSummary } from './ha-types';
 import { pingWorker } from './field-worker';
-import { emptyPlan, normalizePlan, type Plan } from './plan';
+import { emptyPlan, type Plan } from './plan';
 import { type FloorTab, floorTabs, planIdForFloor } from './model';
 import type { PlanEditor } from './plan-editor';
-import type { TimeBar } from './time-bar';
-import { UpdateNotice, updateNoticeStyles } from './version';
+import { updateNoticeStyles } from './version';
 import { DeviceControls, deviceControlStyles } from './device-controls';
 import { PlanView, planViewStyles } from './plan-view';
-import { isHeatLayer, layerCounts, type HeatLayerId } from './heat';
-import { LayerToggles } from './layer-toggles';
+import { isHeatLayer } from './heat';
 import { button, h } from './ui';
 import { loadUnderlayUrl } from './underlay';
+import { ViewerController } from './viewer';
 
 interface PanelInfo {
   config?: { version?: string };
@@ -41,9 +40,18 @@ function readUnderlayPref(): UnderlayPref {
 
 /** The full-screen Chartroom panel: the plan of each floor, with pan, zoom and the editor. */
 export class ChartroomPanel extends HTMLElement {
-  #hass?: Hass;
   #view = new PlanView();
-  #controls = new DeviceControls(this.#view, this, () => this.#shown());
+  #viewer = new ViewerController(this.#view, {
+    el: this,
+    place: (bar) => this.#sheet.append(bar),
+    changed: (layer, mesh) => {
+      if (layer) localStorage.setItem(LAYER_KEY, layer);
+      else localStorage.removeItem(LAYER_KEY);
+      if (mesh) localStorage.setItem(MESH_KEY, '1');
+      else localStorage.removeItem(MESH_KEY);
+    },
+  });
+  #controls = new DeviceControls(this.#view, this, () => this.#viewer.shown());
   #tabsEl: HTMLElement;
   #status: HTMLElement;
   #stage: HTMLElement;
@@ -59,21 +67,12 @@ export class ChartroomPanel extends HTMLElement {
   #planId: string | null = null;
   #plan: Plan | null = null;
   #editor: PlanEditor | null = null;
-  #loading = 0;
   #underlayLoad = 0;
   #underlayPref = readUnderlayPref();
   #underlayControls: HTMLElement;
   #underlayToggle: HTMLButtonElement;
   #underlayOpacity: HTMLInputElement;
   #plansRequested = false;
-  #layers = new LayerToggles(
-    (layer) => this.#setLayer(layer),
-    (on) => this.#setMesh(on),
-  );
-  #layer: HeatLayerId | null = null;
-  #time: TimeBar | null = null;
-  #update = new UpdateNotice();
-  #timeButton: HTMLButtonElement;
   #sheet: HTMLElement;
   #narrow = false;
   panel?: PanelInfo;
@@ -142,16 +141,8 @@ export class ChartroomPanel extends HTMLElement {
       this.#underlayOpacity,
     );
     const stored = localStorage.getItem(LAYER_KEY);
-    this.#layer = isHeatLayer(stored) ? stored : null;
-    if (localStorage.getItem(MESH_KEY) === '1') this.#setMesh(true);
-    this.#view.onPlan = () => this.#renderLayers();
-    this.#layers.el.classList.add('layers');
-    this.#timeButton = button('History', () => void this.#toggleTime(), {
-      'data-action': 'history',
-      'aria-pressed': 'false',
-      title: 'Show the plan at an earlier time',
-    });
-    this.#layers.el.append(this.#timeButton);
+    this.#viewer.setLayer(isHeatLayer(stored) ? stored : null);
+    if (localStorage.getItem(MESH_KEY) === '1') this.#viewer.setMesh(true);
     // On a desktop the sheet's parts float over the plan; on a phone they dock below it.
     this.#sheet = h(
       'div',
@@ -160,7 +151,7 @@ export class ChartroomPanel extends HTMLElement {
         class: 'grip',
         'aria-label': 'More controls',
       }),
-      this.#layers.el,
+      this.#viewer.layers.el,
       this.#underlayControls,
     );
     this.#stage = h(
@@ -170,7 +161,7 @@ export class ChartroomPanel extends HTMLElement {
       this.#empty,
       zoom,
       this.#sheet,
-      this.#update.el,
+      this.#viewer.notice.el,
       this.#controls.dialog,
     );
     root.append(
@@ -196,23 +187,17 @@ export class ChartroomPanel extends HTMLElement {
       () => this.#setStatus('worker', 'worker unavailable'),
     );
     window.addEventListener('keydown', this.#onKey);
-    this.#update.watch(this.#hass?.connection);
-    void this.#view.resume();
+    this.#viewer.connect();
   }
 
   // Home Assistant may detach the panel and attach it again: release the layers meanwhile.
   disconnectedCallback(): void {
     window.removeEventListener('keydown', this.#onKey);
-    this.#view.dispose();
-    this.#time?.pause();
-    this.#update.dispose();
+    this.#viewer.disconnect();
   }
 
   set hass(hass: Hass) {
-    this.#hass = hass;
-    if (this.isConnected) this.#update.watch(hass.connection);
-    this.#view.setHass(this.#shown());
-    this.#renderLayers();
+    this.#viewer.hass = hass;
     if (!this.#plansRequested && hass.connection) {
       this.#plansRequested = true;
       void this.#refreshPlans();
@@ -222,7 +207,7 @@ export class ChartroomPanel extends HTMLElement {
   }
 
   get hass(): Hass | undefined {
-    return this.#hass;
+    return this.#viewer.hass;
   }
 
   /** The plan on screen (for tests and the editor). */
@@ -235,47 +220,12 @@ export class ChartroomPanel extends HTMLElement {
     return this.#view;
   }
 
-  /** What the plan shows: live, or the recorded states at the slider's time. */
-  #shown(): Hass | undefined {
-    return this.#time ? this.#time.view(this.#hass) : this.#hass;
-  }
-
-  async #toggleTime(): Promise<void> {
-    if (this.#time) return this.#closeTime();
-    const { TimeBar, timeBarStyles } = await import('./time-bar');
-    if (this.#time) return;
-    const root = this.shadowRoot!;
-    if (!root.querySelector('style.time'))
-      root.append(h('style', { class: 'time' }, timeBarStyles));
-    this.#time = new TimeBar({
-      hass: () => this.#hass,
-      plan: () => this.#view.plan,
-      changed: () => this.#view.setHass(this.#shown()),
-      live: () => this.#closeTime(),
-    });
-    this.#sheet.append(this.#time.el);
-    this.#markTime();
-    await this.#time.load();
-  }
-
-  #closeTime(): void {
-    this.#time?.close();
-    this.#time = null;
-    this.#view.setHass(this.#hass);
-    this.#markTime();
-  }
-
-  #markTime(): void {
-    this.#timeButton.setAttribute('aria-pressed', String(!!this.#time));
-    this.toggleAttribute('history', !!this.#time);
-  }
-
   get isAdmin(): boolean {
-    return this.#hass?.user?.is_admin ?? true;
+    return this.#viewer.hass?.user?.is_admin ?? true;
   }
 
   #ws<T>(message: { type: string; [key: string]: unknown }): Promise<T> {
-    const c = this.#hass?.connection;
+    const c = this.#viewer.hass?.connection;
     if (!c) return Promise.reject(new Error('not connected'));
     return c.sendMessagePromise<T>(message);
   }
@@ -294,7 +244,7 @@ export class ChartroomPanel extends HTMLElement {
   }
 
   #renderTabs(): void {
-    const tabs = floorTabs(this.#hass, this.#plans ?? []);
+    const tabs = floorTabs(this.#viewer.hass, this.#plans ?? []);
     const key = JSON.stringify(tabs);
     if (key === this.#tabsKey) return;
     this.#tabsKey = key;
@@ -340,7 +290,7 @@ export class ChartroomPanel extends HTMLElement {
     localStorage.setItem(TAB_KEY, key);
     this.#markTab();
     if (!tab.plan_id) {
-      this.#closeTime();
+      this.#viewer.closeTime();
       this.#planId = null;
       this.#plan = null;
       this.#view.setPlan(null);
@@ -350,16 +300,13 @@ export class ChartroomPanel extends HTMLElement {
       return;
     }
     if (tab.plan_id === this.#planId && this.#plan) return;
-    const load = ++this.#loading;
     try {
-      const raw = await this.#ws<unknown>({ type: 'chartroom/plans/get', plan_id: tab.plan_id });
-      if (load !== this.#loading) return;
+      const plan = await this.#viewer.load(tab.plan_id);
+      if (!plan) return;
       this.#planId = tab.plan_id;
-      this.#plan = normalizePlan(raw);
+      this.#plan = plan;
       this.#showEmpty(null);
-      this.#view.setPlan(this.#plan);
       this.#view.fit();
-      void this.#time?.load();
       void this.#loadUnderlay();
       this.#editButton.hidden = !this.isAdmin;
       this.dataset['plan'] = tab.plan_id;
@@ -376,7 +323,7 @@ export class ChartroomPanel extends HTMLElement {
     this.#renderUnderlayControls();
     if (!u) return;
     try {
-      const url = await loadUnderlayUrl(this.#hass, u.url);
+      const url = await loadUnderlayUrl(this.#viewer.hass, u.url);
       if (load !== this.#underlayLoad) {
         URL.revokeObjectURL(url);
         return;
@@ -408,7 +355,7 @@ export class ChartroomPanel extends HTMLElement {
   #showEmpty(text: string | null, tab?: FloorTab): void {
     this.#empty.hidden = text === null;
     this.#view.el.classList.toggle('hidden', text !== null);
-    this.#layers.el.hidden = text !== null;
+    this.#viewer.layers.el.hidden = text !== null;
     if (text === null) return;
     const children: (HTMLElement | string)[] = [h('p', {}, text)];
     if (tab?.floor_id && this.isAdmin) {
@@ -454,11 +401,11 @@ export class ChartroomPanel extends HTMLElement {
       return;
     }
     if (!this.#plan || !this.#planId) return;
-    this.#closeTime();
+    this.#viewer.closeTime();
     const { PlanEditor } = await import('./plan-editor');
     this.#editor = new PlanEditor({
       view: this.#view,
-      hass: () => this.#hass,
+      hass: () => this.#viewer.hass,
       save: (plan) => this.#savePlan(plan),
       planId: this.#planId,
       plan: this.#plan,
@@ -485,28 +432,6 @@ export class ChartroomPanel extends HTMLElement {
     this.#view.setPlan(this.#plan);
     this.#controls.attach();
     this.#renderUnderlayControls();
-  }
-
-  #setMesh(on: boolean): void {
-    if (on) localStorage.setItem(MESH_KEY, '1');
-    else localStorage.removeItem(MESH_KEY);
-    this.#layers.setMesh(on);
-    void this.#view.setMesh(on);
-  }
-
-  #setLayer(layer: HeatLayerId | null): void {
-    this.#layer = layer;
-    if (layer) localStorage.setItem(LAYER_KEY, layer);
-    else localStorage.removeItem(LAYER_KEY);
-    this.#renderLayers();
-  }
-
-  /** The layer buttons follow the plan's sensors; a layer without sensors shows nothing. */
-  #renderLayers(): void {
-    const counts = layerCounts(this.#view.plan, this.#shown());
-    this.#layers.update(this.#layer, counts);
-    const show = this.#layer && counts[this.#layer] > 0 ? this.#layer : null;
-    if (show !== this.#view.layer) void this.#view.setLayer(show);
   }
 
   #onKey = (e: KeyboardEvent): void => {

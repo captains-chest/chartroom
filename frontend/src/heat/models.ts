@@ -3,7 +3,35 @@ import type { FieldPlan } from '../field-plan';
 import type { Point } from '../plan/types';
 import type { SignalInput } from '../signal';
 import type { View } from '../viewport';
-import type { RendererKind } from './types';
+import type { HeatLayerId, RampStop, RendererKind } from './types';
+
+export interface LayerSpec {
+  id: HeatLayerId;
+  label: string;
+  ramp: readonly RampStop[];
+  /** The range the ramp spans at least, per unit; it grows to include the readings. */
+  domain: Record<string, readonly [number, number]>;
+  /** Decimals for labels. */
+  digits: number;
+  /** The range is fixed (it does not grow to include the readings). */
+  fixed?: boolean;
+}
+
+/** A sensor reading used by a layer, or why a placed sensor was left out. */
+export interface LayerReading {
+  id: string;
+  entity_id: string;
+  position: Point;
+  value: number;
+}
+
+export interface LayerData {
+  layer: HeatLayerId;
+  unit: string;
+  readings: LayerReading[];
+  /** Placed sensors of this layer that were left out (unavailable, unknown, not a number…). */
+  excluded: { id: string; entity_id: string; position: Point; reason: string }[];
+}
 
 /** A sensor layout: what a renderer needs to compute the field for its readings. */
 export interface Layout {
@@ -27,7 +55,7 @@ export interface FieldRenderer {
   readonly kind: RendererKind;
   /** A field is being computed off the main thread; `draw` shows the last one meanwhile. */
   readonly busy: boolean;
-  /** The colour ramp, 256 RGBA entries (heat.ts rampLut). */
+  /** The colour ramp, 256 RGBA entries (rampLut in heat/functions.ts). */
   setRamp(lut: Uint8Array): void;
   /** A new layout; with `fade` the current field stays as the cross-fade source. */
   setLayout(layout: Layout, fade: boolean): void;

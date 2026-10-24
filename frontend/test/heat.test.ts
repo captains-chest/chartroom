@@ -1,17 +1,16 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { EntityState, Hass } from '../src/ha-types';
+import { LAYERS, STALE_MS } from '../src/heat/constants';
 import {
   easeOut,
   isHeatLayer,
-  LAYERS,
   layerCounts,
   layerData,
   layerDomain,
   layerOfState,
   layoutKey,
   rampLut,
-  STALE_MS,
-} from '../src/heat';
+} from '../src/heat/functions';
 import { emptyPlan } from '../src/plan/functions';
 import type { Plan, Source } from '../src/plan/models';
 

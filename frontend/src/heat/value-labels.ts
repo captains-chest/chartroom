@@ -1,6 +1,7 @@
 // The value labels next to the heatmap's sensors, and keeping them clear of the room names.
 // Loaded with the heat layer (heat-layer.ts re-exports them for plan-view.ts).
-import { LAYERS, type LayerData } from '../heat';
+import { LAYERS } from './constants';
+import type { LayerData } from './models';
 import { AREA_SIZE, declutter, NAME_SIZE } from '../labels';
 import type { Point } from '../plan/types';
 import { s } from '../ui';

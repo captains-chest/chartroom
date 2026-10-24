@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { Hass, HassConnection } from '../src/ha-types';
-import { layerData } from '../src/heat';
+import { layerData } from '../src/heat/functions';
 import { emptyPlan, planEntities } from '../src/plan/functions';
 import type { Plan } from '../src/plan/models';
 import { fetchTimeline, hassAt, statesAt, type Timeline } from '../src/time-bar';

@@ -3,7 +3,8 @@
 // while the element is off the page.
 import { wsApi, type ChartroomApi } from './api';
 import type { Hass, HassConnection } from './ha-types';
-import { layerCounts, type HeatLayerId } from './heat';
+import { layerCounts } from './heat/functions';
+import type { HeatLayerId } from './heat/types';
 import { LayerToggles } from './layer-toggles';
 import type { Plan } from './plan/models';
 import type { PlanView } from './plan-view';

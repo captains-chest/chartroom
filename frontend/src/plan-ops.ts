@@ -224,7 +224,7 @@ export function deleteOpening(plan: Plan, id: string): Plan {
 
 export function addRoom(
   plan: Plan,
-  polygon: Point[],
+  polygon: readonly Point[],
   name?: string,
 ): { plan: Plan; id: string | null } {
   if (polygon.length < 3) return { plan, id: null };

@@ -1,69 +1,75 @@
 // The wall and room editor: tools, selection, dragging with snapping, an inspector for the
 // selection, undo/redo and autosave. Loaded on demand by the panel (its own chunk).
 import { autoPlace, deviceChoices, deviceLook } from './devices';
-import { add, dist, frame, mm, sub } from './geometry';
+import { add, dist, frame, mm } from './geometry';
 import type { Hass } from './ha-types';
 import { type Autosaver, autosaver } from './editor/autosaver';
-import { findItem, type Item, type Kind, kindOps, type Selection, titleOf } from './editor/kinds';
+import {
+  findItem,
+  type Item,
+  type Items,
+  type Kind,
+  kindOps,
+  type Selection,
+  titleOf,
+} from './editor/kinds';
+import {
+  closeRoom,
+  down,
+  escape,
+  initialState,
+  isDoubleClick,
+  move,
+  placeDevice,
+  type Tool,
+  type ToolContext,
+  type ToolResult,
+  type ToolState,
+  up,
+  withTool,
+} from './editor/tools';
 import { History } from './history';
 import { areaChoices, entityArea, sourceChoices } from './model';
 import {
+  type Device,
   type Door,
   limitWarnings,
   materialsOf,
   type Plan,
   type Point,
   polygonArea,
+  type Room,
+  type Source,
   type SourceKind,
+  type Wall,
+  type Window,
 } from './plan';
 import {
   addDevice,
-  addOpening,
-  addRoom,
   addSource,
-  addWall,
   areaFactor,
-  DEFAULT_WALL,
   moveEndpoint,
-  moveRoomVertex,
   scalePlan,
   setMaterial,
-  snap,
-  snapTargets,
   twoPointFactor,
   updateDevice,
   updateOpening,
   updateRoom,
   updateSource,
   updateWall,
-  wallAt,
 } from './plan-ops';
 import type { PlanView } from './plan-view';
 import { signalLimitWarnings } from './signal';
 import { button, field, h, numberInput, s, select, textInput } from './ui';
 import { importUnderlay, loadUnderlay } from './underlay';
 
-export type Tool =
-  | 'select'
-  | 'wall'
-  | 'room'
-  | 'door'
-  | 'window'
-  | 'source'
-  | 'device'
-  | 'measure'
-  | 'underlay';
+export type { Tool } from './editor/tools';
 
 const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
   { value: 'sensor', label: 'Temperature / humidity sensor' },
   { value: 'access_point', label: 'Wi-Fi access point' },
   { value: 'radio', label: 'Radio (Zigbee, Z-Wave, Thread…)' },
 ];
-type Drag =
-  | { type: 'item'; base: Plan; kind: Kind; item: Item; start: Point }
-  | { type: 'endpoint'; base: Plan; from: Point }
-  | { type: 'vertex'; base: Plan; id: string; index: number }
-  | { type: 'underlay'; base: Plan; start: Point };
 
 export interface EditorHost {
   view: PlanView;
@@ -117,8 +123,6 @@ const TOOLS: { tool: Tool; key: string; hint: string }[] = [
 const SNAP_PX = 10;
 /** Autosave this long after the last change. */
 const SAVE_DELAY_MS = 600;
-
-const DOUBLE_CLICK_PX = 6;
 /** An inspector section's content. */
 type Fields = (HTMLElement | null)[];
 /** Drag-and-drop type for an entity dragged from the Device list onto the plan. */
@@ -130,14 +134,7 @@ export class PlanEditor {
   readonly #host: EditorHost;
   readonly #view: PlanView;
   readonly #history: History<Plan>;
-  #tool: Tool = 'select';
-  #selection: Selection | null = null;
-  #drag: Drag | null = null;
-  #moved = false;
-  /** Points placed so far by the wall, room or measure tool. */
-  #draft: Point[] = [];
-  #hover: { point: Point; target: boolean } | null = null;
-  #measured: [Point, Point] | null = null;
+  #s: ToolState = initialState;
   readonly #saver: Autosaver<Plan>;
   #saveState: HTMLElement;
   #hint: HTMLElement;
@@ -148,8 +145,6 @@ export class PlanEditor {
   #lastClick = { t: 0, x: 0, y: 0 };
   /** What the Source tool places next. */
   #sourceKind: SourceKind = 'sensor';
-  /** The entity the Device tool places on the next click. */
-  #armed: string | null = null;
   #deviceKey = '';
   #note = '';
   readonly #onDragOver = (e: DragEvent): void => {
@@ -161,7 +156,7 @@ export class PlanEditor {
     const entity = e.dataTransfer?.getData(ENTITY_MIME);
     if (!entity) return;
     e.preventDefault();
-    this.#placeDevice(entity, this.#view.toPlan(e));
+    this.#apply(placeDevice(this.#s, this.plan, entity, this.#view.toPlan(e)));
   };
 
   constructor(host: EditorHost) {
@@ -206,28 +201,19 @@ export class PlanEditor {
     this.inspector = h('div', { class: 'inspector' });
     this.#view.setDelegate({
       down: (p, e) => this.#down(p, e),
-      move: (p, e) => this.#move(p, e),
-      up: (p, e) => this.#up(p, e),
-      hover: (p, e) => this.#hoverAt(p, e),
+      move: (p) => this.#move(p),
+      up: () => this.#apply(up(this.#s)),
+      hover: (p) => this.#move(p),
       viewChanged: () => this.#renderOverlay(),
     });
     this.#view.el.addEventListener('dragover', this.#onDragOver);
     this.#view.el.addEventListener('drop', this.#onDrop);
     this.setTool('select');
-    this.#render();
     void this.#loadUnderlay();
   }
 
   get plan(): Plan {
     return this.#history.present;
-  }
-
-  get tool(): Tool {
-    return this.#tool;
-  }
-
-  get selection(): Selection | null {
-    return this.#selection;
   }
 
   /** Flush pending saves and detach from the view. */
@@ -241,8 +227,8 @@ export class PlanEditor {
   }
 
   hassChanged(): void {
-    const k = this.#selection?.kind;
-    if (this.#tool === 'device' || k === 'device') {
+    const k = this.#s.selection?.kind;
+    if (this.#s.tool === 'device' || k === 'device') {
       // States change all the time; only redraw the list when the entities on offer change (a
       // redraw mid-drag would drop the item being dragged).
       if (this.#deviceListKey() !== this.#deviceKey) this.#renderInspector();
@@ -252,28 +238,32 @@ export class PlanEditor {
   }
 
   setTool(tool: Tool): void {
-    this.#tool = tool;
-    this.#draft = [];
-    this.#measured = null;
-    for (const [t, b] of this.#toolButtons) b.setAttribute('aria-pressed', String(t === tool));
-    this.#hint.textContent = TOOLS.find((t) => t.tool === tool)?.hint ?? '';
-    this.#view.setEditing(tool);
-    if (tool === 'underlay' || tool === 'source' || tool === 'device') this.#selection = null;
-    if (tool !== 'device') this.#armed = null;
-    this.#note = '';
-    this.#render();
+    this.#apply({ state: withTool(this.#s, tool) });
   }
 
-  select(sel: Selection | null): void {
-    this.#selection = sel;
-    this.#render();
+  /** Take a tool step: commit its plan change and render. Whether the tool took the press. */
+  #apply(r: ToolResult): boolean {
+    const prev = this.#s;
+    const next = (this.#s = r.state);
+    // The auto-place note is stale after any change.
+    if (r.commit || next.tool !== prev.tool) this.#note = '';
+    if (r.commit && this.#history.commit(r.commit)) this.#afterChange();
+    else if (next !== prev) this.#render();
+    return !r.pass;
+  }
+
+  #ctx(): ToolContext {
+    return {
+      plan: this.plan,
+      radius: SNAP_PX * this.#view.mpp,
+      addSource: (plan, p) => this.#addSource(plan, p),
+    };
   }
 
   // ---- history and saving ----
 
   #commit(next: Plan): void {
-    if (!this.#history.commit(next)) return;
-    this.#afterChange();
+    if (this.#history.commit(next)) this.#afterChange();
   }
 
   undo(): void {
@@ -289,8 +279,8 @@ export class PlanEditor {
   }
 
   #dropStaleSelection(): void {
-    const sel = this.#selection;
-    if (sel && !findItem(this.plan, sel)) this.#selection = null;
+    const sel = this.#s.selection;
+    if (sel && !findItem(this.plan, sel)) this.#s = { ...this.#s, selection: null };
   }
 
   #afterChange(): void {
@@ -320,15 +310,10 @@ export class PlanEditor {
     } else if (mod) {
       return;
     } else if (e.key === 'Escape') {
-      if (this.#draft.length > 0 || this.#measured) {
-        this.#draft = [];
-        this.#measured = null;
-        this.#render();
-      } else if (this.#tool !== 'select') this.setTool('select');
-      else this.select(null);
-    } else if (e.key === 'Enter' && this.#tool === 'room') {
-      this.#closeRoom();
-    } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.#selection) {
+      this.#apply({ state: escape(this.#s) });
+    } else if (e.key === 'Enter' && this.#s.tool === 'room') {
+      this.#apply(closeRoom(this.#s, this.plan));
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.#s.selection) {
       e.preventDefault();
       this.deleteSelection();
     } else {
@@ -338,305 +323,78 @@ export class PlanEditor {
   }
 
   deleteSelection(): void {
-    const sel = this.#selection;
+    const sel = this.#s.selection;
     if (!sel) return;
-    this.#selection = null;
+    this.#s = { ...this.#s, selection: null };
     this.#commit(kindOps(sel.kind).remove(this.plan, sel.id));
   }
 
   // ---- pointer ----
 
-  #snapRadius(): number {
-    return SNAP_PX * this.#view.mpp;
-  }
-
-  #snapped(
-    p: Point,
-    faces: boolean,
-    exclude: Point | null = null,
-  ): { point: Point; target: boolean } {
-    return snap(p, {
-      radius: this.#snapRadius(),
-      grid: 0.05,
-      anchor: this.#draft.at(-1) ?? null,
-      targets: snapTargets(this.plan, faces),
-      exclude,
-    });
-  }
-
   #down(p: Point, e: PointerEvent): boolean {
     if (e.button !== 0) return false;
-    const now = performance.now();
-    // A double click is two quick clicks in the same spot (quick clicks elsewhere are new points).
-    const prev = this.#lastClick;
-    const double =
-      now - prev.t < 350 && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_CLICK_PX;
-    this.#lastClick = { t: now, x: e.clientX, y: e.clientY };
-    switch (this.#tool) {
-      case 'select':
-        return this.#selectDown(p, e);
-      case 'wall': {
-        if (double && this.#draft.length > 0) {
-          this.#draft = [];
-          this.#render();
-          return true;
-        }
-        const q = this.#snapped(p, false).point;
-        const last = this.#draft.at(-1);
-        if (last) {
-          const wall = this.#newWallProps();
-          const r = addWall(this.plan, last, q, wall);
-          if (r.id) {
-            this.#selection = { kind: 'wall', id: r.id };
-            this.#commit(r.plan);
-          }
-          // Closing a loop on its first point ends the chain.
-          if (this.#draft[0] && dist(this.#draft[0], q) < 1e-6) {
-            this.#draft = [];
-            this.#render();
-            return true;
-          }
-        }
-        this.#draft.push(q);
-        this.#render();
-        return true;
-      }
-      case 'room': {
-        const q = this.#snapped(p, true).point;
-        const first = this.#draft[0];
-        if (first && this.#draft.length >= 3 && dist(first, q) <= this.#snapRadius()) {
-          this.#closeRoom();
-        } else if (double && this.#draft.length >= 3) {
-          this.#closeRoom();
-        } else {
-          this.#draft.push(q);
-          this.#render();
-        }
-        return true;
-      }
-      case 'door':
-      case 'window': {
-        const hit = wallAt(this.plan, p, this.#snapRadius());
-        if (!hit) return true;
-        const r = addOpening(this.plan, this.#tool, hit.wall.id, hit.along, p);
-        if (r.id) {
-          this.#selection = { kind: this.#tool, id: r.id };
-          this.#commit(r.plan);
-        }
-        return true;
-      }
-      case 'source': {
-        const r = this.#placeSource(p);
-        this.#selection = { kind: 'source', id: r.id };
-        this.setTool('select');
-        this.#commit(r.plan);
-        return true;
-      }
-      case 'device': {
-        const onMarker = (e.target as Element | null)?.closest('[data-kind=device]');
-        if (onMarker) return this.#selectDown(p, e);
-        if (!this.#armed) return false;
-        this.#placeDevice(this.#armed, p);
-        return true;
-      }
-      case 'measure': {
-        const q = this.#snapped(p, true).point;
-        if (this.#draft.length === 0 || this.#measured) {
-          this.#measured = null;
-          this.#draft = [q];
-        } else {
-          this.#measured = [this.#draft[0]!, q];
-          this.#draft = [];
-        }
-        this.#render();
-        return true;
-      }
-      case 'underlay':
-        if (!this.plan.underlay) return false;
-        this.#drag = { type: 'underlay', base: this.plan, start: p };
-        this.#moved = false;
-        return true;
-    }
-  }
-
-  #selectDown(p: Point, e: PointerEvent): boolean {
+    const click = { t: performance.now(), x: e.clientX, y: e.clientY };
+    const double = isDoubleClick(this.#lastClick, click);
+    this.#lastClick = click;
     const target = e.target as Element | null;
-    const handle = target?.closest<SVGElement>('[data-handle]');
-    const base = this.plan;
-    this.#moved = false;
-    if (handle) {
-      const [kind, id, index] = (handle.dataset['handle'] ?? '').split('|');
-      if (kind === 'endpoint') {
-        const wall = base.walls.find((w) => w.id === id);
-        if (wall) this.#drag = { type: 'endpoint', base, from: index === 'a' ? wall.a : wall.b };
-      } else if (kind === 'vertex' && id) {
-        this.#drag = { type: 'vertex', base, id, index: Number(index) };
-      }
-      return true;
-    }
+    const handle = target?.closest<SVGElement>('[data-handle]')?.dataset['handle'];
     const el = target?.closest<SVGElement>('[data-kind]');
     const kind = el?.dataset['kind'] as Kind | undefined;
     const id = el?.dataset['id'];
-    let sel: Selection;
-    if (kind && id) sel = { kind, id };
-    else {
-      // A click beside a wall still picks it, so thin walls are easy to hit.
-      const near = wallAt(base, p, this.#snapRadius() / 2);
-      if (!near) {
-        if (this.#selection) this.select(null);
-        return false;
-      }
-      sel = { kind: 'wall', id: near.wall.id };
-    }
-    const item = findItem(base, sel);
-    if (!item) return false;
-    this.#selection = sel;
-    this.#drag = { type: 'item', base, kind: sel.kind, item, start: p };
-    this.#render();
-    return true;
+    const hit = kind && id ? { kind, id } : null;
+    return this.#apply(down(this.#s, this.#ctx(), { p, double, handle, hit }));
   }
 
-  #move(p: Point, e: PointerEvent): void {
-    const d = this.#drag;
-    if (!d) {
-      this.#hoverAt(p, e);
-      return;
-    }
-    let next: Plan | undefined;
-    switch (d.type) {
-      case 'item':
-        next = kindOps(d.kind).drag(d.base, d.item, sub(p, d.start), p);
-        break;
-      case 'endpoint': {
-        const q = snap(p, {
-          radius: this.#snapRadius(),
-          grid: 0.05,
-          targets: snapTargets(d.base, false),
-          exclude: d.from,
-        }).point;
-        next = moveEndpoint(d.base, d.from, q);
-        break;
-      }
-      case 'vertex': {
-        const q = snap(p, {
-          radius: this.#snapRadius(),
-          grid: 0.05,
-          targets: snapTargets(d.base, true),
-          exclude: d.base.rooms.find((r) => r.id === d.id)?.polygon[d.index] ?? null,
-        }).point;
-        next = moveRoomVertex(d.base, d.id, d.index, q);
-        break;
-      }
-      case 'underlay': {
-        const u = d.base.underlay;
-        if (!u) return;
-        const delta = sub(p, d.start);
-        next = {
-          ...d.base,
-          underlay: { ...u, origin: [mm(u.origin[0] + delta[0]), mm(u.origin[1] + delta[1])] },
-        };
-        break;
-      }
-    }
-    if (!next) return;
-    this.#moved = true;
-    this.#preview = next;
-    this.#render();
-  }
-
-  /** The plan being dragged, not yet committed. */
-  #preview: Plan | null = null;
-
-  #up(_p: Point, _e: PointerEvent): void {
-    const preview = this.#preview;
-    this.#drag = null;
-    this.#preview = null;
-    if (this.#moved && preview) this.#commit(preview);
-    else this.#render();
-    this.#moved = false;
-  }
-
-  #hoverAt(p: Point, _e: PointerEvent): void {
-    if (this.#tool === 'wall' || this.#tool === 'room' || this.#tool === 'measure') {
-      this.#hover = this.#snapped(p, this.#tool !== 'wall');
-      this.#renderOverlay();
-    } else if (this.#hover) {
-      this.#hover = null;
-      this.#renderOverlay();
-    }
-  }
-
-  #closeRoom(): void {
-    if (this.#draft.length < 3) return;
-    const r = addRoom(this.plan, this.#draft);
-    this.#draft = [];
-    if (r.id) {
-      this.#selection = { kind: 'room', id: r.id };
-      this.setTool('select');
-      this.#commit(r.plan);
-    }
-  }
-
-  #newWallProps(): { thickness: number; material: string } {
-    const sel = this.#selection;
-    const wall = sel?.kind === 'wall' ? this.plan.walls.find((w) => w.id === sel.id) : undefined;
-    return wall ? { thickness: wall.thickness, material: wall.material } : { ...DEFAULT_WALL };
+  #move(p: Point): void {
+    const next = move(this.#s, this.#ctx(), p);
+    if (next === this.#s) return;
+    this.#s = next;
+    // A drag redraws the plan; the drawing cursor only the overlay.
+    if (next.drag) this.#render();
+    else this.#renderOverlay();
   }
 
   // ---- rendering ----
 
   #render(): void {
-    this.#view.setPlan(this.#preview ?? this.plan, this.#selection);
+    const { tool } = this.#s;
+    for (const [t, b] of this.#toolButtons) b.setAttribute('aria-pressed', String(t === tool));
+    this.#hint.textContent = TOOLS.find((t) => t.tool === tool)?.hint ?? '';
+    this.#view.setEditing(tool);
+    this.#view.setPlan(this.#s.preview ?? this.plan, this.#s.selection);
     this.#view.setUnderlayUrl(this.#underlayUrl);
     this.#renderOverlay();
-    if (!this.#drag) this.#renderInspector();
+    if (!this.#s.drag) this.#renderInspector();
     this.#undoButton.disabled = !this.#history.canUndo;
     this.#redoButton.disabled = !this.#history.canRedo;
   }
 
   #renderOverlay(): void {
-    const plan = this.#preview ?? this.plan;
+    const { tool, selection: sel, draft, measured, hover: cursor, preview } = this.#s;
+    const plan = preview ?? this.plan;
     const k = this.#view.mpp;
     const r = 5 * k;
     const out: SVGElement[] = [];
-    const sel = this.#selection;
-    if (this.#tool === 'select' && sel?.kind === 'wall') {
+    const dot = (cls: string, [cx, cy]: Point, size = r, handle?: string): void => {
+      out.push(s('circle', { class: cls, 'data-handle': handle, cx, cy, r: size }));
+    };
+    if (tool === 'select' && sel?.kind === 'wall') {
       const wall = plan.walls.find((w) => w.id === sel.id);
-      if (wall) {
-        for (const end of ['a', 'b'] as const) {
-          out.push(
-            s('circle', {
-              class: 'handle',
-              'data-handle': `endpoint|${wall.id}|${end}`,
-              cx: wall[end][0],
-              cy: wall[end][1],
-              r: r * 1.4,
-            }),
-          );
-        }
-      }
+      if (wall)
+        for (const end of ['a', 'b'] as const)
+          dot('handle', wall[end], r * 1.4, `endpoint|${wall.id}|${end}`);
     }
-    if (this.#tool === 'select' && sel?.kind === 'room') {
+    if (tool === 'select' && sel?.kind === 'room') {
       const room = plan.rooms.find((x) => x.id === sel.id);
-      room?.polygon.forEach((pt, i) =>
-        out.push(
-          s('circle', {
-            class: 'handle',
-            'data-handle': `vertex|${room.id}|${i}`,
-            cx: pt[0],
-            cy: pt[1],
-            r,
-          }),
-        ),
-      );
+      room?.polygon.forEach((pt, i) => dot('handle', pt, r, `vertex|${room.id}|${i}`));
     }
-    const hover = this.#hover?.point;
-    const chain = [...this.#draft, ...(hover && this.#draft.length > 0 ? [hover] : [])];
+    const hover = cursor?.point;
+    const chain = [...draft, ...(hover && draft.length > 0 ? [hover] : [])];
     if (chain.length > 1) {
       const pts = chain.map((q) => q.join(',')).join(' ');
       out.push(
-        s(this.#tool === 'room' ? 'polygon' : 'polyline', {
-          class: `draft ${this.#tool}`,
+        s(tool === 'room' ? 'polygon' : 'polyline', {
+          class: `draft ${tool}`,
           points: pts,
         }),
       );
@@ -655,38 +413,28 @@ export class PlanEditor {
         ),
       );
     }
-    for (const q of this.#draft)
-      out.push(s('circle', { class: 'draft-point', cx: q[0], cy: q[1], r }));
-    if (this.#measured) {
-      const [a, b] = this.#measured;
+    for (const q of draft) dot('draft-point', q);
+    if (measured) {
+      const [a, b] = measured;
       out.push(s('line', { class: 'draft measure', x1: a[0], y1: a[1], x2: b[0], y2: b[1] }));
-      for (const q of this.#measured)
-        out.push(s('circle', { class: 'draft-point', cx: q[0], cy: q[1], r }));
+      for (const q of measured) dot('draft-point', q);
     }
-    if (hover && this.#tool !== 'select') {
-      out.push(
-        s('circle', {
-          class: this.#hover?.target ? 'cursor target' : 'cursor',
-          cx: hover[0],
-          cy: hover[1],
-          r: r * 0.8,
-        }),
-      );
-    }
+    if (hover && tool !== 'select')
+      dot(cursor?.target ? 'cursor target' : 'cursor', hover, r * 0.8);
     this.#view.drawOverlay(...out);
   }
 
   #renderInspector(): void {
     const plan = this.plan;
-    const sel = this.#selection;
+    const { tool, selection: sel, measured } = this.#s;
     const parts: (HTMLElement | null)[] = [this.#warningsPanel()];
-    if (this.#tool === 'source' && !sel) parts.push(this.#newSourcePanel());
-    if (this.#tool === 'device' && !sel) parts.push(this.#devicesPanel());
-    if (this.#measured) parts.push(this.#measurePanel(this.#measured));
+    if (tool === 'source' && !sel) parts.push(this.#newSourcePanel());
+    if (tool === 'device' && !sel) parts.push(this.#devicesPanel());
+    if (measured) parts.push(this.#measurePanel(measured));
     if (sel) parts.push(this.#itemPanel(sel));
-    else if (this.#tool !== 'device') parts.push(this.#planPanel());
-    if (this.#tool === 'device' || sel?.kind === 'device') this.#deviceKey = this.#deviceListKey();
-    if (!sel && this.#tool !== 'source' && this.#tool !== 'device')
+    else if (tool !== 'device') parts.push(this.#planPanel());
+    if (tool === 'device' || sel?.kind === 'device') this.#deviceKey = this.#deviceListKey();
+    if (!sel && tool !== 'source' && tool !== 'device')
       parts.push(this.#underlayPanel(), this.#materialsPanel());
     this.inspector.replaceChildren(...parts.filter((x): x is HTMLElement => x !== null));
     this.inspector.dataset['selection'] = sel ? `${sel.kind}:${sel.id}` : '';
@@ -698,29 +446,27 @@ export class PlanEditor {
   }
 
   /** Each kind's inspector fields; `#itemPanel` adds the title and the Delete button. */
-  readonly #panels: Record<Kind, (id: string) => Fields | null> = {
-    wall: (id) => this.#wallPanel(id),
-    room: (id) => this.#roomPanel(id),
-    door: (id) => this.#openingPanel(id),
-    window: (id) => this.#openingPanel(id),
-    source: (id) => this.#sourcePanel(id),
-    device: (id) => this.#devicePanel(id),
+  readonly #panels: { readonly [K in Kind]: (item: Items[K]) => Fields } = {
+    wall: (w) => this.#wallPanel(w),
+    room: (r) => this.#roomPanel(r),
+    door: (o) => this.#openingPanel(o),
+    window: (o) => this.#openingPanel(o),
+    source: (x) => this.#sourcePanel(x),
+    device: (d) => this.#devicePanel(d),
   };
 
-  #itemPanel({ kind, id }: Selection): HTMLElement | null {
-    const fields = this.#panels[kind](id);
-    const label = titleOf(kind);
-    return (
-      fields &&
-      this.#section(
-        label,
-        kind,
-        ...fields,
-        button(`Delete ${label.toLowerCase()}`, () => this.deleteSelection(), {
-          class: 'danger',
-          'data-action': 'delete',
-        }),
-      )
+  #itemPanel(sel: Selection): HTMLElement | null {
+    const item = findItem(this.plan, sel);
+    if (!item) return null;
+    const label = titleOf(sel.kind);
+    return this.#section(
+      label,
+      sel.kind,
+      ...(this.#panels[sel.kind] as (item: Item) => Fields)(item),
+      button(`Delete ${label.toLowerCase()}`, () => this.deleteSelection(), {
+        class: 'danger',
+        'data-action': 'delete',
+      }),
     );
   }
 
@@ -728,9 +474,8 @@ export class PlanEditor {
     return [...materialsOf(this.plan).values()].map((m) => ({ value: m.id, label: m.name }));
   }
 
-  #wallPanel(id: string): Fields | null {
-    const wall = this.plan.walls.find((w) => w.id === id);
-    if (!wall) return null;
+  #wallPanel(wall: Wall): Fields {
+    const { id } = wall;
     const length = frame(wall).length;
     return [
       field(
@@ -768,10 +513,8 @@ export class PlanEditor {
     ];
   }
 
-  #openingPanel(id: string): Fields | null {
-    const o =
-      this.plan.doors.find((d) => d.id === id) ?? this.plan.windows.find((w) => w.id === id);
-    if (!o) return null;
+  #openingPanel(o: Door | Window): Fields {
+    const { id } = o;
     const isDoor = 'hinge' in o;
     const set = (patch: Partial<Omit<Door, 'id' | 'wall'>>): void =>
       this.#commit(updateOpening(this.plan, id, patch));
@@ -820,9 +563,8 @@ export class PlanEditor {
     ];
   }
 
-  #roomPanel(id: string): Fields | null {
-    const room = this.plan.rooms.find((r) => r.id === id);
-    if (!room) return null;
+  #roomPanel(room: Room): Fields {
+    const { id } = room;
     const areas = areaChoices(this.#host.hass(), this.plan.floor_id ?? null);
     const area = polygonArea(room.polygon);
     let target = area;
@@ -875,7 +617,7 @@ export class PlanEditor {
     ];
   }
 
-  #measurePanel([a, b]: [Point, Point]): HTMLElement {
+  #measurePanel([a, b]: readonly [Point, Point]): HTMLElement {
     const d = dist(a, b);
     let target = d;
     return this.#section(
@@ -890,7 +632,7 @@ export class PlanEditor {
         'Scale plan to match',
         () => {
           if (!(target > 0) || d === 0) return;
-          this.#measured = null;
+          this.#s = { ...this.#s, measured: null };
           this.#commit(scalePlan(this.plan, twoPointFactor(a, b, target)));
         },
         { 'data-action': 'calibrate-distance', class: 'primary' },
@@ -942,9 +684,8 @@ export class PlanEditor {
   }
 
   /** A new source at `p`: a sensor takes the first one on this floor not placed yet. */
-  #placeSource(p: Point): { plan: Plan; id: string } {
+  #addSource(plan: Plan, p: Point): { plan: Plan; id: string } {
     const kind = this.#sourceKind;
-    const plan = this.plan;
     let entity = '';
     if (kind === 'sensor') {
       const placed = new Set(plan.sources.map((x) => x.entity_id));
@@ -970,9 +711,8 @@ export class PlanEditor {
     );
   }
 
-  #sourcePanel(id: string): Fields | null {
-    const src = this.plan.sources.find((x) => x.id === id);
-    if (!src) return null;
+  #sourcePanel(src: Source): Fields {
+    const { id } = src;
     const hass = this.#host.hass();
     const floor = this.plan.floor_id ?? null;
     const set = (patch: Parameters<typeof updateSource>[2]): void =>
@@ -1049,15 +789,7 @@ export class PlanEditor {
     const choices = this.#deviceChoices()
       .map((c) => `${c.entity_id}=${c.name}@${c.area_id}`)
       .join();
-    return `${placed}|${choices}|${this.#armed}`;
-  }
-
-  #placeDevice(entity: string, p: Point): void {
-    const r = addDevice(this.plan, entity, p);
-    this.#armed = null;
-    this.#note = '';
-    this.#selection = { kind: 'device', id: r.id };
-    this.#commit(r.plan);
+    return `${placed}|${choices}|${this.#s.armed}`;
   }
 
   #autoPlace(): void {
@@ -1084,7 +816,7 @@ export class PlanEditor {
         {
           draggable: 'true',
           'data-entity': c.entity_id,
-          'aria-pressed': String(this.#armed === c.entity_id),
+          'aria-pressed': String(this.#s.armed === c.entity_id),
           role: 'button',
           tabindex: 0,
           title: `${c.entity_id} — drag onto the plan, or click and then click the plan`,
@@ -1093,7 +825,8 @@ export class PlanEditor {
         h('span', { class: 'meta' }, areaName(c.area_id)),
       );
       const arm = (): void => {
-        this.#armed = this.#armed === c.entity_id ? null : c.entity_id;
+        const { armed } = this.#s;
+        this.#s = { ...this.#s, armed: armed === c.entity_id ? null : c.entity_id };
         this.#renderInspector();
       };
       item.addEventListener('click', arm);
@@ -1147,9 +880,8 @@ export class PlanEditor {
     );
   }
 
-  #devicePanel(id: string): Fields | null {
-    const dev = this.plan.devices?.find((d) => d.id === id);
-    if (!dev) return null;
+  #devicePanel(dev: Device): Fields {
+    const { id } = dev;
     const hass = this.#host.hass();
     const placed = new Set((this.plan.devices ?? []).map((d) => d.entity_id));
     const opts = this.#deviceChoices()

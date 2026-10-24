@@ -80,8 +80,11 @@ export class HeatLayer {
   #signalNote: string[] = [];
   readonly #idle: (() => void)[] = [];
   #disposed = false;
-  readonly #reduced =
-    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** How long readings ease to new values (none under reduced motion). */
+  readonly #ms =
+    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? 0
+      : TRANSITION_MS;
   /** Called when the set of readings changes (the view marks sensors and draws value labels). */
   onReadings: ((data: LayerData | null, domain: [number, number] | null) => void) | null = null;
 
@@ -104,10 +107,6 @@ export class HeatLayer {
   get mode(): string {
     const L = this.#layout;
     return L ? (L.mesh?.mode ?? 'signal') : 'none';
-  }
-
-  get ms(): number {
-    return this.#reduced ? 0 : TRANSITION_MS;
   }
 
   /** A new canvas in the box, sized for the view (a canvas keeps its first context type). */
@@ -220,13 +219,13 @@ export class HeatLayer {
     else
       this.#domain.forEach((a, i) => {
         if (a.to !== target[i])
-          Object.assign(a, { from: current(a, now, this.ms), to: target[i], t0: now });
+          Object.assign(a, { from: current(a, now, this.#ms), to: target[i], t0: now });
       });
     for (const r of data.readings) {
       const a = this.#anims.get(r.id);
       if (!a) this.#anims.set(r.id, { from: r.value, to: r.value, t0: now });
       else if (a.to !== r.value)
-        Object.assign(a, { from: current(a, now, this.ms), to: r.value, t0: now });
+        Object.assign(a, { from: current(a, now, this.#ms), to: r.value, t0: now });
     }
     const sig = JSON.stringify([key, values, target, data.excluded, this.#signalNote]);
     if (sig !== this.#sig) {
@@ -283,7 +282,7 @@ export class HeatLayer {
     this.box.hidden = false;
     this.#layout = L;
     this.#key = L.key;
-    const fade = crossFade && this.ms > 0;
+    const fade = crossFade && this.#ms > 0;
     this.#renderer.setLayout(L, fade);
     this.#fade = fade ? { from: 0, to: 1, t0: performance.now() } : null;
     // Readings that left the layout stop animating.
@@ -296,23 +295,23 @@ export class HeatLayer {
     const L = this.#layout!;
     return L.ids.map((id) => {
       const a = this.#anims.get(id);
-      return a ? current(a, now, this.ms) : 0;
+      return a ? current(a, now, this.#ms) : 0;
     });
   }
 
   #domainAt(now: number): [number, number] {
     const d = this.#domain;
-    return d ? [current(d[0], now, this.ms), current(d[1], now, this.ms)] : [0, 1];
+    return d ? [current(d[0], now, this.#ms), current(d[1], now, this.#ms)] : [0, 1];
   }
 
   #moving(now: number): boolean {
     const L = this.#layout;
     if (!L) return false;
-    if (this.#fade && !done(this.#fade, now, this.ms)) return true;
-    if (this.#domain?.some((a) => !done(a, now, this.ms))) return true;
+    if (this.#fade && !done(this.#fade, now, this.#ms)) return true;
+    if (this.#domain?.some((a) => !done(a, now, this.#ms))) return true;
     return L.ids.some((id) => {
       const a = this.#anims.get(id);
-      return !!a && !done(a, now, this.ms);
+      return !!a && !done(a, now, this.#ms);
     });
   }
 
@@ -326,7 +325,7 @@ export class HeatLayer {
     const L = this.#layout;
     if (!L || L.key !== this.#key) return this.#settle();
     const r = this.#renderer;
-    const mix = this.#fade ? current(this.#fade, now, this.ms) : 1;
+    const mix = this.#fade ? current(this.#fade, now, this.#ms) : 1;
     r.setValues(this.#values(now));
     r.draw(this.#view, this.#domainAt(now), HEAT_OPACITY, mix);
     const moving = this.#moving(now);

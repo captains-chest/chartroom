@@ -26,13 +26,16 @@ test('the Chartroom panel renders in the sidebar and talks to the integration', 
 
 test('the Chartroom card renders on a dashboard', async ({ page }) => {
   const card = page.locator('chartroom-card');
-  // On a cold start the dashboard can render before the card module has loaded and show a
-  // configuration error; Home Assistant recovers on reload, so allow a few.
+  // On a cold start the first page load can miss the card module (it is added to the frontend's
+  // extra modules when the config entry loads) and show a configuration error; a reload picks
+  // it up. Each attempt is bounded so the loop really does reload.
   await expect(async () => {
     await page.goto(`/${DASHBOARD}/main`);
-    await page.waitForFunction(() => customElements.get('chartroom-card') !== undefined);
+    await page.waitForFunction(() => customElements.get('chartroom-card') !== undefined, null, {
+      timeout: 10_000,
+    });
     await expect(card.locator('svg.plan')).toBeVisible({ timeout: 5_000 });
-  }).toPass({ timeout: 45_000 });
+  }).toPass({ timeout: 60_000, intervals: [1_000, 2_000, 5_000] });
   await expect(card.locator('h2.title')).toHaveText('Chartroom');
   await expect(card.locator('.floors')).toBeVisible();
   if (SHOTS) await shot(page, { path: `${SHOTS}/card.png` });

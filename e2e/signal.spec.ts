@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { api, deletePlan, savePlan, withSocket } from './ha';
+import { useHeatDebug } from './heat-debug';
 
 // Signal strength and mesh links on a throwaway copy of the example plan with an access point,
 // a radio, a few devices and the bedroom door wired to the kitchen window sensor (both test configs have it). The plan is deleted
@@ -19,24 +20,10 @@ const DEVICES: [string, [number, number]][] = [
   ['lock.front_door_lock', [9.7, 7.5]],
 ];
 
-interface Compare {
-  renderer: string;
-  cells: number;
-  fieldMaxDiff: number;
-  fieldP999Diff: number;
-  fieldOver: number;
-  confMaxDiff: number;
-  fadeMaxDiff: number;
-  range: number;
-  pixelMaxDiff: number;
-  pixelMeanDiff: number;
-}
 interface Heat {
   renderer: string;
   mode: string;
   idle(): Promise<void>;
-  compareRenderers(): Promise<Compare | null>;
-  readField(): Promise<{ renderer: string; field: number[] }>;
 }
 type WithView = HTMLElement & {
   view: { heat: Heat | null; mesh: { links: { quality: number | null }[] } | null };
@@ -74,7 +61,7 @@ async function openPlan(page: Page): Promise<Locator> {
 }
 
 const field = (panel: Locator): Promise<{ renderer: string; field: number[] }> =>
-  panel.evaluate((el) => (el as WithView).view.heat!.readField());
+  panel.evaluate((el) => window.chartroomDebug.readField((el as WithView).view.heat));
 const settled = (panel: Locator): Promise<{ renderer: string; mode: string }> =>
   panel.evaluate(async (el) => {
     const h = (el as WithView).view.heat!;
@@ -89,6 +76,8 @@ const setDoor = (on: boolean): Promise<unknown> =>
 
 const setTopology = (topology: unknown): Promise<unknown> =>
   withSocket(token(), (send) => send({ type: 'chartroom/mesh/test_source', topology }));
+
+test.beforeEach(({ page }) => useHeatDebug(page));
 
 test.describe('signal and mesh', () => {
   test.describe.configure({ mode: 'serial' });
@@ -118,7 +107,9 @@ test.describe('signal and mesh', () => {
     await expect(panel.locator('svg.plan text.heat-value')).toHaveCount(0);
     expect(await settled(panel)).toEqual({ renderer: 'webgl2', mode: 'signal' });
 
-    const r = await panel.evaluate((el) => (el as WithView).view.heat!.compareRenderers());
+    const r = await panel.evaluate((el) =>
+      window.chartroomDebug.compareRenderers((el as WithView).view.heat),
+    );
     console.log('signal agreement', JSON.stringify(r));
     expect(r).not.toBeNull();
     expect(r!.cells).toBeGreaterThan(5000);

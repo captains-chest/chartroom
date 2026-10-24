@@ -223,7 +223,7 @@ void main() {
   outColour = mix(before, now, uMix);
 }`;
 
-interface Target {
+export interface Target {
   tex: WebGLTexture;
   fbo: WebGLFramebuffer;
   grid: FieldGrid | null;
@@ -571,38 +571,9 @@ export class GlRenderer {
     this.#targets[this.#other()].grid = null;
   }
 
-  /** The current field target read back: value, confidence, fade per cell. */
-  readField(): Float32Array | null {
-    const gl = this.gl;
-    const t = this.#targets[this.#cur];
-    if (!t.grid) return null;
-    const { nx, ny } = t.grid;
-    const rgba = new Float32Array(nx * ny * 4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
-    gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, rgba);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const out = new Float32Array(nx * ny * 3);
-    for (let c = 0; c < nx * ny; c++) out.set(rgba.subarray(c * 4, c * 4 + 3), c * 3);
-    return out;
-  }
-
-  /** The drawn canvas as straight (not premultiplied) RGBA, top row first. */
-  readPixels(): Uint8ClampedArray {
-    const gl = this.gl;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
-    const px = new Uint8Array(w * h * 4);
-    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    const out = new Uint8ClampedArray(w * h * 4);
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
-        const s = ((h - 1 - y) * w + x) * 4;
-        const d = (y * w + x) * 4;
-        const a = px[s + 3]!;
-        for (let c = 0; c < 3; c++) out[d + c] = a ? Math.round((px[s + c]! * 255) / a) : 0;
-        out[d + 3] = a;
-      }
-    return out;
+  /** The current field target (for the debug hooks). */
+  get target(): Target {
+    return this.#targets[this.#cur];
   }
 
   dispose(): void {

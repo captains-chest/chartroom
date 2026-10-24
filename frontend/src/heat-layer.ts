@@ -41,7 +41,7 @@ interface CanvasField {
   grid: FieldGrid;
   img: HTMLCanvasElement;
 }
-interface Layout {
+export interface Layout {
   key: string;
   /** The sensor triangulation, or null for the traced signal layer. */
   mesh: FieldMesh | null;
@@ -191,12 +191,9 @@ export class CanvasRenderer {
     ctx.globalAlpha = 1;
   }
 
-  readField(): Float32Array | null {
-    return this.#cur ? this.#cur.field.slice() : null;
-  }
-
-  readPixels(): Uint8ClampedArray {
-    return this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data;
+  /** The settled field (for the debug hooks). */
+  get field(): Float32Array | null {
+    return this.#cur?.field ?? null;
   }
 }
 
@@ -212,6 +209,25 @@ const done = (a: Anim, now: number, ms: number): boolean =>
   ms <= 0 || now - a.t0 >= ms || a.from === a.to;
 
 export type RendererKind = 'webgl2' | 'canvas';
+
+/** A settled heat layer's internals, for the renderer-agreement tests. */
+export interface DebugContext {
+  renderer: RendererKind;
+  gl: GlRenderer | null;
+  c2d: CanvasRenderer | null;
+  layout: Layout | null;
+  view: View;
+  values: number[];
+  /** Put `values` into the GL renderer's mesh. */
+  upload(): void;
+  domain: [number, number];
+  opacity: number;
+  lut: Uint8Array;
+  canvas: HTMLCanvasElement;
+  outline: Point[];
+  request(r: WorkerRequestBody): Promise<WorkerResponse>;
+  canvasRenderer(c: HTMLCanvasElement): CanvasRenderer;
+}
 
 export class HeatLayer {
   readonly box: HTMLElement;
@@ -606,112 +622,26 @@ export class HeatLayer {
     this.legend.hidden = false;
   }
 
-  /** Test hook: the current field (value, confidence, fade per cell) from the active renderer. */
-  async readField(): Promise<{ renderer: RendererKind; grid: FieldGrid | null; field: number[] }> {
-    await this.idle();
-    const grid = this.#layout?.grid ?? null;
-    const f = this.#gl ? this.#gl.readField() : this.#c2d!.readField();
-    return { renderer: this.renderer, grid, field: f ? Array.from(f) : [] };
-  }
-
-  /**
-   * Test hook: draw the settled field with WebGL2 and with the Canvas2D fallback (same values,
-   * same view) and report how far apart the field values and the pixels are.
-   */
-  async compareRenderers(): Promise<{
-    renderer: RendererKind;
-    cells: number;
-    fieldMaxDiff: number;
-    confMaxDiff: number;
-    fadeMaxDiff: number;
-    fieldP999Diff: number;
-    fieldOver: number;
-    worst: { cell: [number, number]; gl: number; cpu: number }[];
-    range: number;
-    pixels: number;
-    pixelMaxDiff: number;
-    pixelMeanDiff: number;
-  } | null> {
-    await this.idle();
-    const L = this.#layout;
-    if (!L || !this.#gl) return null;
+  /** What the e2e debug hooks (e2e/heat-debug.ts) read; call after `idle()`. */
+  debug(): DebugContext {
     const now = performance.now();
     const values = this.#values(now);
-    const domain = this.#domainAt(now);
-    if (L.mesh) this.#gl.setValues(nodeValues(L.mesh, values));
-    this.#gl.draw(this.#view, domain, HEAT_OPACITY, 1);
-    const glField = this.#gl.readField()!;
-    const glPx = this.#gl.readPixels();
-    const { signal } = L;
-    const res = await this.#client.request(
-      signal
-        ? {
-            type: 'signal',
-            key: L.key,
-            grid: L.grid,
-            outline: this.#plan?.outline ?? [],
-            walls: signal.walls,
-            aps: signal.aps,
-          }
-        : { type: 'values', key: L.key, values },
-    );
-    if (res.type !== 'field') return null;
-    const canvas = document.createElement('canvas');
-    canvas.width = this.#canvas.width;
-    canvas.height = this.#canvas.height;
-    const c2d = new CanvasRenderer(canvas);
-    c2d.setField(res.field, res.grid);
-    c2d.draw(this.#view, domain, HEAT_OPACITY, 1, this.#lut);
-    const cpuPx = c2d.readPixels();
-    // Per channel: value, confidence, fade.
-    const diff = [0, 0, 0];
-    const valueDiffs = new Float32Array(glField.length / 3);
-    const worst: { cell: [number, number]; gl: number; cpu: number }[] = [];
-    for (let i = 0; i < glField.length; i++) {
-      const d = Math.abs(glField[i]! - res.field[i]!);
-      if (i % 3 === 0) {
-        valueDiffs[i / 3] = d;
-        if (d > 1e-3 * (domain[1] - domain[0]) && worst.length < 8)
-          worst.push({
-            cell: [(i / 3) % L.grid.nx, Math.floor(i / 3 / L.grid.nx)],
-            gl: glField[i]!,
-            cpu: res.field[i]!,
-          });
-      }
-      diff[i % 3] = Math.max(diff[i % 3]!, d);
-    }
-    valueDiffs.sort();
-    const fieldP999Diff = valueDiffs[Math.floor((valueDiffs.length - 1) * 0.999)] ?? 0;
-    const fieldOver = valueDiffs.filter((d) => d > 1e-3 * (domain[1] - domain[0])).length;
-    const fieldMaxDiff = diff[0]!;
-    // Compare colour where both are clearly visible; alpha everywhere.
-    let pixels = 0;
-    let max = 0;
-    let sum = 0;
-    for (let i = 0; i < glPx.length; i += 4 * 7) {
-      const da = Math.abs(glPx[i + 3]! - cpuPx[i + 3]!);
-      let d = da;
-      if (glPx[i + 3]! > 64 && cpuPx[i + 3]! > 64)
-        for (let c = 0; c < 3; c++) d = Math.max(d, Math.abs(glPx[i + c]! - cpuPx[i + c]!));
-      pixels++;
-      max = Math.max(max, d);
-      sum += d;
-    }
-    // Put the visible canvas back.
-    this.#gl.draw(this.#view, domain, HEAT_OPACITY, 1);
+    const mesh = this.#layout?.mesh;
     return {
       renderer: this.renderer,
-      cells: L.grid.nx * L.grid.ny,
-      fieldMaxDiff,
-      confMaxDiff: diff[1]!,
-      fadeMaxDiff: diff[2]!,
-      fieldP999Diff,
-      fieldOver,
-      worst,
-      range: domain[1] - domain[0],
-      pixels,
-      pixelMaxDiff: max,
-      pixelMeanDiff: sum / Math.max(1, pixels),
+      gl: this.#gl,
+      c2d: this.#c2d,
+      layout: this.#layout,
+      view: this.#view,
+      values,
+      upload: () => mesh && this.#gl?.setValues(nodeValues(mesh, values)),
+      domain: this.#domainAt(now),
+      opacity: HEAT_OPACITY,
+      lut: this.#lut,
+      canvas: this.#canvas,
+      outline: this.#plan?.outline ?? [],
+      request: (r) => this.#client.request(r),
+      canvasRenderer: (c) => new CanvasRenderer(c),
     };
   }
 

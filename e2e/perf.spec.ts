@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Locator } from '@playwright/test';
 import { deletePlan, savePlan } from './ha';
+import { useHeatDebug } from './heat-debug';
 
 // Old-wall-tablet check (docs/render-design.md): a synthetic worst case at the soft caps, 512 walls
 // and 32 access points, timed on a CPU-throttled page. Opt-in: PERF=1 pnpm e2e e2e/perf.spec.ts
@@ -72,7 +73,6 @@ async function measure(panel: Locator, renderer: 'webgl2' | 'canvas'): Promise<T
         setRenderer(k: string): void;
         setPlan(p: unknown): void;
         idle(): Promise<void>;
-        readField(): Promise<unknown>;
         legend: HTMLElement;
       };
       const view = (el as unknown as { view: { heat: Heat; plan: Record<string, unknown> } }).view;
@@ -90,7 +90,7 @@ async function measure(panel: Locator, renderer: 'webgl2' | 'canvas'): Promise<T
         const t0 = performance.now();
         heat.setPlan({ ...base, sources: moved });
         await heat.idle();
-        await heat.readField(); // makes the GPU finish (readPixels)
+        await window.chartroomDebug.readField(heat); // makes the GPU finish (readPixels)
         if (i) times.push(performance.now() - t0);
       }
       heat.setPlan(base);
@@ -137,6 +137,8 @@ async function measure(panel: Locator, renderer: 'webgl2' | 'canvas'): Promise<T
     [renderer, RUNS] as const,
   );
 }
+
+test.beforeEach(({ page }) => useHeatDebug(page));
 
 test('old wall tablet: signal at the soft caps, CPU throttled', async ({ page }) => {
   test.skip(!process.env['PERF'], 'set PERF=1 to run the perf check');

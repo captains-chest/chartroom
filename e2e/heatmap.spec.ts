@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { DASHBOARD, api } from './ha';
+import { useHeatDebug } from './heat-debug';
 
 // Temperature and humidity heatmaps on the example plan (its sensors are placed in the fixture).
 // Readings a test changes are put back afterwards; the layer choice lives in the browser only.
@@ -15,20 +16,6 @@ interface Heat {
     excluded: { entity_id: string }[];
   } | null;
   idle(): Promise<void>;
-  compareRenderers(): Promise<{
-    renderer: string;
-    cells: number;
-    fieldMaxDiff: number;
-    fieldP999Diff: number;
-    fieldOver: number;
-    confMaxDiff: number;
-    fadeMaxDiff: number;
-    range: number;
-    pixels: number;
-    pixelMaxDiff: number;
-    pixelMeanDiff: number;
-  } | null>;
-  readField(): Promise<{ renderer: string; field: number[] }>;
 }
 type WithView = HTMLElement & { view: { heat: Heat | null } };
 
@@ -43,7 +30,7 @@ async function openExample(page: Page): Promise<Locator> {
 }
 
 /** Wait for the heatmap to settle (layout, field and transitions done), then read its state. */
-const heat = (panel: Locator): Promise<Omit<Heat, 'idle' | 'compareRenderers' | 'readField'>> =>
+const heat = (panel: Locator): Promise<Omit<Heat, 'idle'>> =>
   panel.evaluate(async (el) => {
     const h = (el as WithView).view.heat;
     if (!h) throw new Error('no heat layer');
@@ -61,6 +48,8 @@ const numberState = async (entity_id: string): Promise<number> =>
   Number((await api<{ state: string }>(token(), `/api/states/${entity_id}`)).state);
 const setNumber = (entity_id: string, value: number): Promise<unknown> =>
   api(token(), '/api/services/input_number/set_value', { entity_id, value });
+
+test.beforeEach(({ page }) => useHeatDebug(page));
 
 test('the layer buttons switch between temperature, humidity and no heatmap', async ({ page }) => {
   const panel = await openExample(page);
@@ -127,7 +116,9 @@ test('WebGL2 and the Canvas2D fallback draw the same field', async ({ page }) =>
   const panel = await openExample(page);
   await panel.getByRole('button', { name: 'Temperature' }).click();
   expect((await heat(panel)).renderer).toBe('webgl2');
-  const r = await panel.evaluate((el) => (el as WithView).view.heat!.compareRenderers());
+  const r = await panel.evaluate((el) =>
+    window.chartroomDebug.compareRenderers((el as WithView).view.heat),
+  );
   expect(r).not.toBeNull();
   console.log('renderer agreement', JSON.stringify(r));
   expect(r!.cells).toBeGreaterThan(1000);
@@ -155,7 +146,9 @@ test('WebGL2 and the Canvas2D fallback draw the same field', async ({ page }) =>
     await page.reload();
     await expect(panel.locator('.heat-legend')).toBeVisible();
     const h = await heat(panel);
-    const f = await panel.evaluate((el) => (el as WithView).view.heat!.readField());
+    const f = await panel.evaluate((el) =>
+      window.chartroomDebug.readField((el as WithView).view.heat),
+    );
     return { renderer: h.renderer, readings: JSON.stringify(h.data?.readings), field: f.field };
   };
   try {

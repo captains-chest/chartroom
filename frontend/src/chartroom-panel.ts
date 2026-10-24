@@ -497,7 +497,7 @@ export class ChartroomPanel extends HTMLElement {
 
   /** The layer buttons follow the plan's sensors; a layer without sensors shows nothing. */
   #renderLayers(): void {
-    const counts = layerCounts(this.#view.plan, this.#hass);
+    const counts = layerCounts(this.#view.plan, this.#shown());
     this.#layers.update(this.#layer, counts);
     const show = this.#layer && counts[this.#layer] > 0 ? this.#layer : null;
     if (show !== this.#view.layer) void this.#view.setLayer(show);

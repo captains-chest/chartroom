@@ -14,6 +14,7 @@ with role one of coordinator, router, end_device (or None) and LQI 0-255 / RSSI 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 import json
 import logging
@@ -369,18 +370,30 @@ def async_unload(hass: HomeAssistant) -> None:
     hass.data.pop(DATA_MESH_TEST, None)
 
 
+async def _test_source(hass: HomeAssistant) -> Topology | None:
+    """Read the topology set by chartroom/mesh/test_source (already checked by its schema)."""
+    if (test := hass.data.get(DATA_MESH_TEST)) is None:
+        return None
+    nodes = [MeshNode(**{**n, "entities": tuple(n["entities"])}) for n in test["nodes"]]
+    return nodes, [dict(link) for link in test["links"]]
+
+
+Reader = Callable[[HomeAssistant], Awaitable[Topology | str | None]]
+
+
+def _readers(hass: HomeAssistant) -> tuple[tuple[str, Reader], ...]:
+    """Return the sources to read: only the test topology while one is set, else the real ones."""
+    if hass.data.get(DATA_MESH_TEST) is not None:
+        return (("test", _test_source),)
+    return (("zha", _zha), ("zwave_js", _zwave), ("zigbee2mqtt", _z2m))
+
+
 async def async_get_topology(hass: HomeAssistant) -> dict[str, Any]:
     """Every mesh Home Assistant knows about, with the state of each source."""
-    if (test := hass.data.get(DATA_MESH_TEST)) is not None:
-        return {
-            "nodes": [dict(n) for n in test["nodes"]],
-            "links": [dict(link) for link in test["links"]],
-            "sources": {"test": "ok"},
-        }
     nodes: list[MeshNode] = []
     links: list[dict[str, Any]] = []
     sources: dict[str, str] = {}
-    for name, read in (("zha", _zha), ("zwave_js", _zwave), ("zigbee2mqtt", _z2m)):
+    for name, read in _readers(hass):
         try:
             got = await read(hass)
         except Exception:

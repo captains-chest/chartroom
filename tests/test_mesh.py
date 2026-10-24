@@ -251,3 +251,32 @@ async def test_z2m_subscribes_once_under_concurrent_requests(hass: HomeAssistant
     assert len(first[0]) == 3
     mesh.async_unload(hass)
     unsub.assert_called_once()
+
+
+async def test_mesh_test_source_is_resolved(hass: HomeAssistant, hass_ws_client) -> None:
+    """The test topology replaces the readers but goes through the same registry resolution."""
+    await _setup(hass)
+    other = MockConfigEntry(domain="mqtt")
+    other.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=other.entry_id, identifiers={("mqtt", "plug")}
+    )
+    er.async_get(hass).async_get_or_create(
+        "switch", "mqtt", "plug-1", device_id=device.id, suggested_object_id="plug"
+    )
+    ws = await hass_ws_client(hass)
+    topology = {"nodes": [{"id": "p", "device_id": device.id}], "links": []}
+    await ws.send_json_auto_id({"type": "chartroom/mesh/test_source", "topology": topology})
+    assert (await ws.receive_json())["success"]
+    await ws.send_json_auto_id({"type": "chartroom/mesh/get"})
+    result = (await ws.receive_json())["result"]
+    assert result["nodes"] == [
+        {
+            "id": "p",
+            "source": "test",
+            "name": "",
+            "role": None,
+            "device_id": device.id,
+            "entities": ["switch.plug"],
+        }
+    ]

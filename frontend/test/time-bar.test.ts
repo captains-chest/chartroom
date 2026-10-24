@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { Hass, HassConnection } from '../src/ha-types';
 import { layerData } from '../src/heat';
-import { emptyPlan, type Plan } from '../src/plan';
-import { fetchTimeline, hassAt, planEntities, statesAt, type Timeline } from '../src/time-bar';
+import { emptyPlan, planEntities, type Plan } from '../src/plan';
+import { fetchTimeline, hassAt, statesAt, type Timeline } from '../src/time-bar';
 import { squeeze } from '../../scripts/minify-literals';
 
 function plan(): Plan {
@@ -16,6 +16,15 @@ function plan(): Plan {
   p.devices = [
     { id: 'w', entity_id: 'binary_sensor.w', position: [3, 1] },
     { id: 'dup', entity_id: 'sensor.t', position: [3, 2] },
+  ];
+  const opening = { wall: 'none', offset: 0, width: 1, material: 'wood', thickness: 0.04 };
+  p.doors = [
+    { ...opening, id: 'd', hinge: 'a', swing: 1, entity_id: 'binary_sensor.door' },
+    { ...opening, id: 'd2', hinge: 'a', swing: 1, entity_id: null },
+  ];
+  p.windows = [
+    { ...opening, id: 'win', entity_id: 'cover.window' },
+    { ...opening, id: 'win2', entity_id: 'binary_sensor.w' },
   ];
   return p;
 }
@@ -38,7 +47,7 @@ describe('history entities', () => {
   it('splits sensors (for statistics) from everything else, once each', () => {
     expect(planEntities(plan())).toEqual({
       sensors: ['sensor.t', 'sensor.u'],
-      others: ['device_tracker.ap', 'binary_sensor.w'],
+      others: ['device_tracker.ap', 'binary_sensor.w', 'binary_sensor.door', 'cover.window'],
     });
     expect(planEntities(null)).toEqual({ sensors: [], others: [] });
   });
@@ -106,7 +115,13 @@ describe('fetching the timeline', () => {
       'history/history_during_period',
     ]);
     expect(sent[0]).toMatchObject({ statistic_ids: ['sensor.t', 'sensor.u'], period: 'hour' });
-    expect(sent[1]!['entity_ids']).toEqual(['sensor.u', 'device_tracker.ap', 'binary_sensor.w']);
+    expect(sent[1]!['entity_ids']).toEqual([
+      'sensor.u',
+      'device_tracker.ap',
+      'binary_sensor.w',
+      'binary_sensor.door',
+      'cover.window',
+    ]);
     expect(sent[1]).toMatchObject({ minimal_response: true, no_attributes: true });
     expect(tl.get('sensor.t')).toEqual({ t: [1000], s: ['20.46'] });
     expect(tl.get('sensor.u')).toEqual({ t: [1500], s: ['5'] });

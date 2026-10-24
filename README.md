@@ -125,14 +125,15 @@ device.
 a time slider, **Play**/**Pause**, the ranges **6h**, **24h** and **7d**, and **Live**. While it is
 open the plan has an orange frame, and everything on it follows the slider: the heatmaps move to
 the recorded readings with the same smooth transition as live ones, device markers show their
-recorded state, and a source that was unavailable then drops out of the signal map. Play runs
-through the range in about 30 seconds and stops at the end. **Live** closes the bar and returns to
-the current states.
+recorded state, a source that was unavailable then drops out of the signal map, and doors and
+windows with a sensor block heat and signal as they did then. Play runs through the range in about
+30 seconds and stops at the end. **Live** closes the bar and returns to the current states.
 
 - The data comes from Home Assistant's own websocket API: `history/history_during_period` for
   6h and 24h, and for 7d the hourly means from `recorder/statistics_during_period` for sensors
   that keep statistics (those with a `state_class`), with raw history for everything else.
-  Only the plan's placed sensors, sources and devices are fetched.
+  Only the plan's placed sensors, sources and devices, and its doors' and windows' sensors, are
+  fetched.
 - While you look at the past, tapping a marker opens its details instead of toggling it.
 - The history code is loaded only when you first open it (1.9 KB gzip).
 - What you can go back to depends on your recorder settings (`purge_keep_days`, 10 days by

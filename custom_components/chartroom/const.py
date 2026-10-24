@@ -1,10 +1,14 @@
 """Constants for Chartroom."""
 
+import re
 from typing import Final
 
 DOMAIN: Final = "chartroom"
 NAME: Final = "Chartroom"
 VERSION: Final = "0.1.0"
+
+# A plan id: also its underlay's file name, so nothing that could leave the folder.
+PLAN_ID_RE: Final = re.compile(r"\A[a-z0-9_-]{1,64}\Z")
 
 # STORAGE_VERSION versions the Store file around the plans; PLAN_SCHEMA_VERSION versions each
 # plan inside it (frontend/src/plan.ts). They change independently.

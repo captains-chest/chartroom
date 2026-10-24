@@ -196,10 +196,14 @@ export class ChartroomPanel extends HTMLElement {
       () => this.#setStatus('worker', 'worker unavailable'),
     );
     window.addEventListener('keydown', this.#onKey);
+    void this.#view.resume();
   }
 
+  // Home Assistant may detach the panel and attach it again: release the layers meanwhile.
   disconnectedCallback(): void {
     window.removeEventListener('keydown', this.#onKey);
+    this.#view.dispose();
+    this.#time?.pause();
   }
 
   set hass(hass: Hass) {

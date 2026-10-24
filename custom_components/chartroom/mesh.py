@@ -14,7 +14,7 @@ with role one of coordinator, router, end_device (or None) and LQI 0-255 / RSSI 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import logging
 import math
@@ -40,7 +40,36 @@ ROLES = {"coordinator": "coordinator", "router": "router", "enddevice": "end_dev
 # Zigbee neighbour relationships that are not a live link (ZHA names, Zigbee2MQTT numbers).
 STALE_RELATIONSHIPS = {"PreviousChild", "Previous_Child", 4}
 
-Topology = tuple[list[dict[str, Any]], list[dict[str, Any]]]
+# Z-Wave reports 125-127 in its RSSI fields as "not available" markers, not readings.
+ZWAVE_RSSI_UNAVAILABLE_MIN = 125
+
+
+@dataclass(frozen=True)
+class MeshNode:
+    """A node as a parser sees it, before its Home Assistant device is resolved."""
+
+    id: str
+    source: str
+    name: str
+    role: str | None
+    device_id: str | None = None
+    entities: tuple[str, ...] = ()
+    # Device registry identifiers that find the node's device when the source does not say.
+    identifiers: tuple[tuple[str, str], ...] = ()
+
+    def as_wire(self) -> dict[str, Any]:
+        """Return the node as chartroom/mesh/get sends it."""
+        return {
+            "id": self.id,
+            "source": self.source,
+            "name": self.name,
+            "role": self.role,
+            "device_id": self.device_id,
+            "entities": list(self.entities),
+        }
+
+
+Topology = tuple[list[MeshNode], list[dict[str, Any]]]
 
 
 def _role(value: Any) -> str | None:
@@ -55,16 +84,8 @@ def _num(value: Any) -> float | None:
     return n if math.isfinite(n) else None
 
 
-def _node(nid: str, source: str, name: Any, role: str | None, **ha: Any) -> dict[str, Any]:
-    """Build a node; ``ha`` may carry its Home Assistant ``device_id`` and ``entities``."""
-    return {
-        "id": nid,
-        "source": source,
-        "name": str(name) if name else nid,
-        "role": role,
-        "device_id": ha.get("device_id") or None,
-        "entities": [str(e) for e in ha.get("entities") or () if e],
-    }
+def _entities(values: Any) -> tuple[str, ...]:
+    return tuple(str(e) for e in values or () if e)
 
 
 class _Links:
@@ -89,76 +110,77 @@ class _Links:
         return list(self.by_pair.values())
 
 
+def _zha_id(ieee: Any) -> str:
+    return f"zha:{str(ieee).lower()}"
+
+
 def parse_zha(devices: list[dict[str, Any]]) -> Topology:
     """ZHA device info (as ``zha/devices`` returns it): neighbour tables give the links."""
-    nodes: dict[str, dict[str, Any]] = {}
-    for dev in devices:
-        if not isinstance(dev, dict) or not dev.get("ieee"):
-            continue
-        nid = f"zha:{str(dev['ieee']).lower()}"
-        nodes[nid] = _node(
-            nid,
-            "zha",
-            dev.get("user_given_name") or dev.get("name"),
-            _role(dev.get("device_type")),
-            device_id=dev.get("device_reg_id"),
-            entities=[e.get("entity_id") for e in dev.get("entities") or () if isinstance(e, dict)],
+    present = [
+        (_zha_id(dev["ieee"]), dev) for dev in devices if isinstance(dev, dict) and dev.get("ieee")
+    ]
+    nodes = {
+        nid: MeshNode(
+            id=nid,
+            source="zha",
+            name=str(dev.get("user_given_name") or dev.get("name") or nid),
+            role=_role(dev.get("device_type")),
+            device_id=dev.get("device_reg_id") or None,
+            entities=_entities(
+                e.get("entity_id") for e in dev.get("entities") or () if isinstance(e, dict)
+            ),
         )
+        for nid, dev in present
+    }
     links = _Links("zha")
-    for dev in devices:
-        if not isinstance(dev, dict) or not dev.get("ieee"):
-            continue
-        a = f"zha:{str(dev['ieee']).lower()}"
+    for a, dev in present:
         for nb in dev.get("neighbors") or ():
-            b = f"zha:{str(nb.get('ieee', '')).lower()}"
+            b = _zha_id(nb.get("ieee", ""))
             if b in nodes and nb.get("relationship") not in STALE_RELATIONSHIPS:
                 links.add(a, b, lqi=nb.get("lqi"))
     return list(nodes.values()), links.list()
 
 
 def _zwave_rssi(value: Any) -> float | None:
-    # 125-127 are Z-Wave's "not available" markers, not readings.
     n = _num(value)
-    return None if n is None or n >= 125 else n
+    return None if n is None or n >= ZWAVE_RSSI_UNAVAILABLE_MIN else n
+
+
+def _zwave_key(home: Any, node_id: Any) -> str:
+    """Return a node's key in its network, which is also its Z-Wave JS device identifier."""
+    return f"{home}-{node_id}"
 
 
 def parse_zwave(nodes_in: list[dict[str, Any]]) -> Topology:
     """Z-Wave JS nodes with their last working route (LWR): controller → repeaters → node."""
-    nodes: dict[str, dict[str, Any]] = {}
-    controllers: dict[Any, str] = {}
-    for n in nodes_in:
-        if not isinstance(n, dict) or n.get("node_id") is None:
-            continue
-        home = n.get("home_id")
-        nid = f"zwave_js:{home}-{n['node_id']}"
-        role = (
-            "coordinator"
+    present = [
+        (f"zwave_js:{_zwave_key(n.get('home_id'), n['node_id'])}", n)
+        for n in nodes_in
+        if isinstance(n, dict) and n.get("node_id") is not None
+    ]
+    nodes = {
+        nid: MeshNode(
+            id=nid,
+            source="zwave_js",
+            name=str(n.get("name") or f"Node {n['node_id']}"),
+            role="coordinator"
             if n.get("is_controller")
-            else ("router" if n.get("is_routing") else "end_device")
+            else ("router" if n.get("is_routing") else "end_device"),
+            device_id=n.get("device_id") or None,
+            entities=_entities(n.get("entities")),
+            identifiers=(("zwave_js", _zwave_key(n.get("home_id"), n["node_id"])),),
         )
-        node = _node(
-            nid,
-            "zwave_js",
-            n.get("name") or f"Node {n['node_id']}",
-            role,
-            device_id=n.get("device_id"),
-            entities=n.get("entities"),
-        )
-        node["_identifiers"] = [("zwave_js", f"{home}-{n['node_id']}")]
-        nodes[nid] = node
-        if n.get("is_controller"):
-            controllers[home] = nid
+        for nid, n in present
+    }
+    controllers = {n.get("home_id"): nid for nid, n in present if n.get("is_controller")}
     links = _Links("zwave_js")
-    for n in nodes_in:
-        if not isinstance(n, dict) or n.get("node_id") is None or n.get("is_controller"):
-            continue
+    for nid, n in present:
         home = n.get("home_id")
-        nid = f"zwave_js:{home}-{n['node_id']}"
-        if home not in controllers:
+        if n.get("is_controller") or home not in controllers:
             continue
         lwr = n.get("lwr") or {}
         hops = [controllers[home]] + [
-            f"zwave_js:{home}-{r}" for r in lwr.get("repeaters") or () if r is not None
+            f"zwave_js:{_zwave_key(home, r)}" for r in lwr.get("repeaters") or () if r is not None
         ]
         hops = [h for h in hops if h in nodes] + [nid]
         rssi = _zwave_rssi(lwr.get("rssi"))
@@ -174,15 +196,19 @@ def parse_z2m(networkmap: dict[str, Any]) -> Topology:
     """Zigbee2MQTT's raw network map (the bridge/response/networkmap payload)."""
     data = networkmap.get("data", networkmap) if isinstance(networkmap, dict) else {}
     value = data.get("value", data) if isinstance(data, dict) else {}
-    nodes: dict[str, dict[str, Any]] = {}
+    nodes: dict[str, MeshNode] = {}
     for n in value.get("nodes") or ():
         ieee = str(n.get("ieeeAddr") or "").lower()
         if not ieee:
             continue
         nid = f"z2m:{ieee}"
-        node = _node(nid, "zigbee2mqtt", n.get("friendlyName"), _role(n.get("type")))
-        node["_identifiers"] = [("mqtt", f"zigbee2mqtt_{ieee}")]
-        nodes[nid] = node
+        nodes[nid] = MeshNode(
+            id=nid,
+            source="zigbee2mqtt",
+            name=str(n.get("friendlyName") or nid),
+            role=_role(n.get("type")),
+            identifiers=(("mqtt", f"zigbee2mqtt_{ieee}"),),
+        )
     links = _Links("zigbee2mqtt")
     for link in value.get("links") or ():
         src = link.get("source") or {}
@@ -195,21 +221,26 @@ def parse_z2m(networkmap: dict[str, Any]) -> Topology:
 
 
 @callback
-def _resolve(hass: HomeAssistant, nodes: list[dict[str, Any]]) -> None:
-    """Fill in Home Assistant device ids and entity ids from the registries."""
+def _resolve(hass: HomeAssistant, nodes: list[MeshNode]) -> list[dict[str, Any]]:
+    """Return the wire nodes, with device and entity ids filled in from the registries."""
     dev_reg = dr.async_get(hass)
     ent_reg = er.async_get(hass)
-    for node in nodes:
-        idents = node.pop("_identifiers", [])
-        if not node["device_id"]:
-            for ident in idents:
-                if device := dev_reg.async_get_device(identifiers={ident}):
-                    node["device_id"] = device.id
-                    break
-        if node["device_id"] and not node["entities"]:
-            node["entities"] = [
-                e.entity_id for e in er.async_entries_for_device(ent_reg, node["device_id"])
-            ]
+
+    def resolved(node: MeshNode) -> dict[str, Any]:
+        device_id = node.device_id or next(
+            (
+                device.id
+                for ident in node.identifiers
+                if (device := dev_reg.async_get_device(identifiers={ident}))
+            ),
+            None,
+        )
+        entities = node.entities
+        if device_id and not entities:
+            entities = tuple(e.entity_id for e in er.async_entries_for_device(ent_reg, device_id))
+        return replace(node, device_id=device_id, entities=entities).as_wire()
+
+    return [resolved(node) for node in nodes]
 
 
 async def _zha(hass: HomeAssistant) -> Topology | None:
@@ -346,7 +377,7 @@ async def async_get_topology(hass: HomeAssistant) -> dict[str, Any]:
             "links": [dict(link) for link in test["links"]],
             "sources": {"test": "ok"},
         }
-    nodes: list[dict[str, Any]] = []
+    nodes: list[MeshNode] = []
     links: list[dict[str, Any]] = []
     sources: dict[str, str] = {}
     for name, read in (("zha", _zha), ("zwave_js", _zwave), ("zigbee2mqtt", _z2m)):
@@ -364,5 +395,4 @@ async def async_get_topology(hass: HomeAssistant) -> dict[str, Any]:
             sources[name] = "ok"
             nodes.extend(got[0])
             links.extend(got[1])
-    _resolve(hass, nodes)
-    return {"nodes": nodes, "links": links, "sources": sources}
+    return {"nodes": _resolve(hass, nodes), "links": links, "sources": sources}

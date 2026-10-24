@@ -9,10 +9,17 @@ import { button, h } from './ui';
 /** Per entity: times (ms, ascending) and the state from each time on. */
 export type Timeline = Map<string, { t: number[]; s: string[] }>;
 
+const SECOND_MS = 1000;
+const HOUR_MS = 3600 * SECOND_MS;
+const DAY_MS = 24 * HOUR_MS;
+/** Play moves the slider this many steps across the range, one step per tick: about 30 s. */
+const PLAY_STEPS = 120;
+const PLAY_TICK_MS = 250;
+
 export const RANGES = [
-  { label: '6h', ms: 6 * 3600_000, period: null },
-  { label: '24h', ms: 24 * 3600_000, period: null },
-  { label: '7d', ms: 7 * 24 * 3600_000, period: 'hour' },
+  { label: '6h', ms: 6 * HOUR_MS, period: null },
+  { label: '24h', ms: DAY_MS, period: null },
+  { label: '7d', ms: 7 * DAY_MS, period: 'hour' },
 ] as const;
 
 type Stats = Record<string, { start: number; mean?: number | null }[]>;
@@ -56,7 +63,7 @@ export async function fetchTimeline(
       significant_changes_only: false,
     });
     for (const [id, rows] of Object.entries(r))
-      tl.set(id, { t: rows.map((x) => (x.lu ?? x.lc ?? 0) * 1000), s: rows.map((x) => x.s) });
+      tl.set(id, { t: rows.map((x) => (x.lu ?? x.lc ?? 0) * SECOND_MS), s: rows.map((x) => x.s) });
   }
   return tl;
 }
@@ -91,7 +98,7 @@ export function hassAt(hass: Hass | undefined, tl: Timeline, t: number): Hass | 
 const fmt = (t: number, ms: number): string =>
   new Date(t).toLocaleString(
     undefined,
-    ms > 86400_000
+    ms > DAY_MS
       ? { weekday: 'short', hour: '2-digit', minute: '2-digit' }
       : { hour: '2-digit', minute: '2-digit', second: '2-digit' },
   );
@@ -125,7 +132,7 @@ export class TimeBar {
     this.#ranges = RANGES.map((r) =>
       button(r.label, () => ((this.#range = r), void this.load()), { 'aria-pressed': 'false' }),
     );
-    this.#slider = h('input', { type: 'range', step: 1000, 'aria-label': 'Time' });
+    this.#slider = h('input', { type: 'range', step: SECOND_MS, 'aria-label': 'Time' });
     this.#slider.addEventListener('input', () => {
       this.pause();
       this.#seek(this.#slider.valueAsNumber);
@@ -154,7 +161,7 @@ export class TimeBar {
   async load(): Promise<void> {
     const load = ++this.#load;
     // Whole seconds, so the slider's one-second steps land on them.
-    const end = Math.ceil(Date.now() / 1000) * 1000;
+    const end = Math.ceil(Date.now() / SECOND_MS) * SECOND_MS;
     const start = end - this.#range.ms;
     for (const [i, b] of this.#ranges.entries())
       b.setAttribute('aria-pressed', String(RANGES[i] === this.#range));
@@ -189,12 +196,12 @@ export class TimeBar {
     if (this.#at >= max) this.#seek(min);
     this.#play.textContent = '❚❚';
     this.#play.setAttribute('aria-label', 'Pause');
-    // The whole range in about 30 s; the heatmap eases between steps.
+    // The heatmap eases between steps.
     this.#timer = window.setInterval(() => {
-      const t = Math.min(max, this.#at + (max - min) / 120);
+      const t = Math.min(max, this.#at + (max - min) / PLAY_STEPS);
       this.#seek(t);
       if (t >= max) this.pause();
-    }, 250);
+    }, PLAY_TICK_MS);
   }
 
   /** Stop playing (also when the element leaves the page). */

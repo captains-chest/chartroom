@@ -24,6 +24,13 @@ const GLYPHS: Record<Glyph, string> = {
 
 /** Marker radius on screen, in pixels. */
 export const MARKER_PX = 13;
+/** The selection/pending ring sits this far outside the disc (px). */
+const RING_GAP_PX = 3;
+/** How long a tap shows as pending when Home Assistant reports no state change. */
+const PENDING_TIMEOUT_MS = 10_000;
+/** Glyph size on screen (px); GLYPHS are drawn on a 24-unit grid, centred on the marker. */
+const GLYPH_PX = 18;
+const GLYPH_TRANSFORM = `translate(${-GLYPH_PX / 2} ${-GLYPH_PX / 2}) scale(${GLYPH_PX / 24})`;
 
 export class MarkerLayer {
   readonly g: SVGGElement;
@@ -74,7 +81,7 @@ export class MarkerLayer {
     const el = this.#els.get(id)?.el;
     if (!el) return;
     el.classList.add('pending');
-    setTimeout(() => el.classList.remove('pending'), 10_000);
+    setTimeout(() => el.classList.remove('pending'), PENDING_TIMEOUT_MS);
   }
 
   #create(d: Device): SVGGElement {
@@ -88,9 +95,9 @@ export class MarkerLayer {
         role: 'button',
         tabindex: 0,
       },
-      s('circle', { class: 'ring', r: MARKER_PX + 3 }),
+      s('circle', { class: 'ring', r: MARKER_PX + RING_GAP_PX }),
       s('circle', { class: 'disc', r: MARKER_PX }),
-      s('path', { class: 'glyph', transform: 'translate(-9 -9) scale(0.75)' }),
+      s('path', { class: 'glyph', transform: GLYPH_TRANSFORM }),
       s('path', { class: 'slash', d: 'M-8 8L8 -8' }),
       s('title'),
     );

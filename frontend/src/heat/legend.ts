@@ -8,7 +8,8 @@ import {
   SOURCE_STRIDE,
   type CappedSignalInput,
 } from '../signal';
-import { count, h } from '../ui';
+import { count } from '../text';
+import { h } from '../ui';
 import type { LegendContent } from './models';
 
 /** The signal legend's note: sources and wall segments used, and any the limits left out. */

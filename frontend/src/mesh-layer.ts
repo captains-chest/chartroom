@@ -4,7 +4,8 @@
 import { wsApi } from './api';
 import type { Hass } from './ha-types';
 import type { Plan, Point } from './plan';
-import { count, h, s } from './ui';
+import { count } from './text';
+import { h, s } from './ui';
 
 export interface MeshNode {
   id: string;

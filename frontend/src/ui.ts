@@ -1,9 +1,6 @@
 // Tiny DOM helpers. Text always goes in as text nodes, never as HTML.
 export const SVG_NS = 'http://www.w3.org/2000/svg';
 
-/** `n` and the noun, plural unless there is exactly one: "1 sensor", "3 sensors". */
-export const count = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? '' : 's'}`;
-
 type Child = Node | string | null | undefined | false;
 type Attrs = Record<string, string | number | boolean | null | undefined>;
 

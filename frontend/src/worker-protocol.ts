@@ -1,21 +1,24 @@
 // Messages between the main thread and the field worker. The worker triangulates the sensor
 // layout once per change ('mesh') and then turns sensor values into a field grid ('values'); for
 // the signal layer it traces the whole field in one go ('signal', the Canvas2D fallback).
-import {
-  buildMesh,
-  fillField,
-  nodeValues,
-  planField,
-  type FieldGrid,
-  type FieldMesh,
-  type FieldPlan,
-} from './field';
+import { nodeValues, type FieldGrid, type FieldMesh } from './field';
+import { fillField, planField, type FieldPlan } from './field-plan';
 import type { Point } from './plan';
 import { MAX_SIGNAL_SEGMENTS, MAX_SIGNAL_SOURCES, SEG, SRC, signalField } from './signal';
 
 export type WorkerRequest =
   | { type: 'ping'; id: number }
-  | { type: 'mesh'; id: number; key: string; sensors: Point[]; outline: Point[]; grid: FieldGrid }
+  | {
+      type: 'mesh';
+      id: number;
+      key: string;
+      sensors: Point[];
+      outline: Point[];
+      grid: FieldGrid;
+      /** Barrier segments, four floats each (signal.ts barrierSegments), and room polygons. */
+      walls?: ArrayLike<number>;
+      rooms?: Point[][];
+    }
   | { type: 'values'; id: number; key: string; values: number[] }
   | {
       type: 'signal';
@@ -36,14 +39,16 @@ export type WorkerRequestBody = WorkerRequest extends infer R
 
 export type WorkerResponse =
   | { type: 'pong'; id: number; version: string }
-  | { type: 'mesh'; id: number; key: string; mesh: FieldMesh }
+  | { type: 'mesh'; id: number; key: string; mesh: FieldMesh; plan: FieldPlan }
   | { type: 'field'; id: number; key: string; grid: FieldGrid; field: Float32Array }
   | { type: 'error'; id: number; message: string };
 
-export const WORKER_VERSION = '1';
-/** Largest grid side and sensor count the worker accepts. */
+export const WORKER_VERSION = '2';
+/** Largest grid side, sensor count, barrier segments and rooms the worker accepts. */
 export const MAX_FIELD_SIZE = 1024;
-export const MAX_SENSORS = 2000;
+export const MAX_SENSORS = 256;
+export const MAX_BARRIERS = 4096;
+export const MAX_ROOMS = 512;
 
 const validGrid = (g: FieldGrid | undefined): boolean =>
   !!g &&
@@ -73,9 +78,11 @@ export function createHandler(): (req: WorkerRequest) => WorkerResponse {
           };
         if (!Array.isArray(req.sensors) || req.sensors.length > MAX_SENSORS)
           return { type: 'error', id: req.id, message: `at most ${MAX_SENSORS} sensors` };
-        const mesh = buildMesh(req.sensors);
-        current = { key: req.key, mesh, plan: planField(mesh, req.grid, req.outline ?? []) };
-        return { type: 'mesh', id: req.id, key: req.key, mesh };
+        const walls = Array.from(req.walls ?? []).slice(0, MAX_BARRIERS * 4);
+        const rooms = (req.rooms ?? []).slice(0, MAX_ROOMS);
+        const { mesh, plan } = planField(req.sensors, req.grid, req.outline ?? [], walls, rooms);
+        current = { key: req.key, mesh, plan };
+        return { type: 'mesh', id: req.id, key: req.key, mesh, plan };
       }
       case 'values': {
         if (!current || current.key !== req.key)

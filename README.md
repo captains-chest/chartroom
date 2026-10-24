@@ -64,13 +64,19 @@ button again to hide it. Your choice is remembered on this device.
   each point mixes the three corners. Outside the sensors' hull a point takes the value of the
   nearest hull edge. Two sensors, or sensors in a line, give a gradient along the line. One sensor
   colours the plan in one colour.
-- **Honest about guessing.** The colour fades where the nearest sensor is far away and outside the
-  house. Walls do not bend the field.
+- **Walls are boundaries.** A point only takes its value from sensors it can see in a straight
+  line without crossing a wall, so the colour changes sharply at a wall. Open doors and gaps let
+  values through; closed doors (per their entity) and closed windows do not. A room with one
+  sensor is one colour. A room with no sensor of its own is filled through its doorways, paler.
+  Where two rooms with their own sensors meet without a wall, the colour steps at the room line.
+- **Honest about guessing.** The colour fades where the nearest sensor is far away. Anything no
+  sensor reaches (a closed-off room without a sensor) is grey, not a colour leaked through a wall.
+  Outside the house there is only a faint grey halo.
 - **Only good readings.** Unavailable, unknown, non-numeric and stale sensors (no report for 6 h)
   are left out and shown with a dashed label. The legend shows the colour scale, the range of the
   readings, how many sensors are used and how many were left out.
-- **Live.** New readings ease in over about half a second. The triangles are rebuilt only when a
-  sensor is added, moved or removed.
+- **Live.** New readings ease in over about half a second. The field layout is worked out again
+  (in a worker) only when a sensor is added, moved or removed, or a door or window opens or closes.
 - Temperature runs blue, cyan, green, yellow, red (16–28 °C by default, widened to fit the
   readings). Humidity runs sand, yellow, mint, blue (30–70 %).
 - Drawn with WebGL2. Without it (or without float render targets) a Web Worker computes the same

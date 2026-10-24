@@ -52,9 +52,9 @@ Per floor, with `n` sensors that report a fresh numeric value:
   approach shows artefacts.)
 - **Re-triangulate only when sensors move, appear or disappear.** A value update only rewrites
   the per-vertex value buffer.
-- **Walls do not bend temperature or humidity.** The shader and worker keep a disabled hook
-  (`wallInfluence = 0`) so a later mode could attenuate interpolation across walls without
-  changing the pipeline.
+- **Walls (superseded).** This note first left walls out of temperature and humidity. They are now
+  boundaries for the field; see "As built: walls are boundaries" below, which replaces the
+  triangulated mesh and hull pass described here and in Phase 3.
 - **Confidence / staleness**: a sensor that is stale or unavailable is dropped from the set
   (which triggers a re-triangulation); the layer fades where the nearest sensor is far away.
 
@@ -237,6 +237,9 @@ move one source, wait for the new field to be drawn and read back; median (p90),
 | 4x           | 181 ms (202)   | 246 ms (250)   | 47 / 55 fps                  |
 | 6x           | 175 ms (196)   | 241 ms (245)   | 38 / 39 fps                  |
 
+The same check with the 32 sources as temperature sensors (wall-aware field, re-planned on every
+move): 77 / 54 ms at 1x, 159 / 134 ms at 4x, 201 / 181 ms at 6x (WebGL2 / worker, median).
+
 A realistic flat (64 segments, 4 sources) at 6x: 50 ms (62) retrace with either renderer, 38-43 fps
 while panning (the frame cost is the SVG and the colour pass, not the field).
 
@@ -254,6 +257,53 @@ Reading it:
   of walls so a ray only tests the cells it crosses, and tracing at 64 cells first and refining.
   Revisit only if a real tablet without WebGL2 shows multi-second retraces on a plan under the
   caps.
+
+## As built: walls are boundaries for temperature and humidity
+
+Owner decision: the temperature and humidity field must not blend through walls. The colour
+changes sharply at a wall instead of smearing across it.
+
+- **Barriers** (`barrierSegments` in `signal.ts`): every wall part always blocks. A door blocks
+  only while its entity is closed (`off`/`closed`); a window blocks unless its entity is open
+  (`on`/`open`/`opening`/`closing`). Doors without an entity, unknown states and gaps in walls let
+  the field through. Walls are drawn on their centre lines, so two walls meeting at a corner can
+  leave a sliver between the line ends; each wall end is joined to any wall within half their
+  thicknesses plus 5 cm by a short extra barrier segment to the nearest point on it.
+- **Visibility** (`visibility` in `field-plan.ts`): a cell can take a value from a sensor only if
+  the straight ray between them crosses no barrier. For each sensor and barrier the shadow behind
+  the segment is a convex quad, filled row by row over the outline's bounding box (widened by
+  1e-4 cells so neighbouring shadows leave no gap).
+- **Interpolation among visible sensors**: the same linear rule as before, applied to the set of
+  sensors a cell sees: flat for one, segment lerp for two (or collinear), Delaunay barycentric
+  for three or more, nearest hull edge outside their hull. Two sensors at 25 °C and 30 °C in one
+  open room still give 27.5 °C halfway. A sub-mesh is built once per distinct visible set.
+- **Room preference**: if the cell's room has sensors of its own, only those (visible) are used,
+  so a room with one sensor is flat. Consequence, by design: where two rooms that each have a
+  sensor meet without a wall (an open hall into a kitchen-living room), the colour steps at the
+  room line.
+- **Rooms with no sensor of their own** take values from sensors they see through an opening,
+  at confidence x0.6. A cell that sees no sensor at all is filled by a breadth-first carry from
+  its neighbours through openings (never across a barrier cell), with confidence
+  `min(source, 0.6) x (1 - 0.5 smoothstep(0, 6 m, distance carried))`.
+- **No data**: a cell nothing reaches is drawn grey (no colour) at low opacity, never a colour that
+  leaked through a wall; a closed-off room with no sensor looks like this.
+- **Outside the house: faded no-data.** Outside the outline there is no colour, only a faint grey
+  halo fading over 2.5 m. Sourcing outdoor values through windows was considered and left out:
+  an indoor reading says little about the garden.
+- **Where it runs**: the plan (per cell: up to three node indices and weights, confidence, fade)
+  is worked out in the Web Worker whenever sensors, barriers or door/window states change; a new
+  reading only re-mixes values. The WebGL2 path uploads the plan as a texture and a weights pass
+  mixes the node values per cell; the colour pass colours the four neighbouring cells first and
+  then interpolates, so a wall stays a sharp edge rather than a blurred mid-colour. The Canvas2D
+  fallback colours each cell the same way and smooths. The e2e agreement test still compares the
+  two (field max diff about 2e-6 °C, pixel max diff 18/255 at edges).
+- **Bundling**: the worker is a build entry (`workers/worker.js`) sharing chunks with the lazy
+  in-page fallback, so the field code ships once. `pnpm size` checks that nothing the worker loads
+  touches the DOM.
+- **Cost** (planning, on this box, worst case 256 x 208 cells, 512 walls in 192 rooms): 8 sensors
+  56 ms, 32 sensors 85 ms, 128 sensors 356 ms, 256 sensors 411 ms. The throttled e2e check at the
+  soft caps (32 temperature sensors, 512 walls, below) retraces in 77 / 159 / 201 ms with WebGL2
+  and 54 / 134 / 181 ms with the worker at 1x / 4x / 6x.
 
 ## What Phase 1 must provide
 

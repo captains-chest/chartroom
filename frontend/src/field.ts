@@ -7,13 +7,11 @@
 // - 2 sensors, or 3+ nearly on a line: segment mode. Project onto the line through them, lerp
 //   between neighbours, clamp at the ends. That is the same "nearest edge" rule over a chain.
 // - 1 sensor: flat. 0 sensors: nothing.
-// Walls do not bend the gradient; `WALL_INFLUENCE` is a reserved hook and stays 0.
+// Walls are boundaries: field-plan.ts picks, per cell, the sensors this runs over.
 import type { Point } from './plan';
 
 export type FieldMode = 'none' | 'flat' | 'segment' | 'mesh';
 
-/** How strongly walls bend the field. Reserved for later and disabled: the field ignores walls. */
-export const WALL_INFLUENCE = 0;
 /** Sensors closer than this (metres) are one node with their mean value. */
 export const MERGE_DISTANCE = 0.001;
 /** Hull area below this times the squared spread counts as a line (segment mode). */
@@ -22,7 +20,7 @@ export const COLLINEAR_RATIO = 0.02;
 export const CONF_NEAR = 3;
 export const CONF_FAR = 8;
 export const CONF_MIN = 0.3;
-/** Outside the outline the field shows at this strength, fading to nothing over `FADE_DISTANCE`. */
+/** Outside the outline the layer shows at this strength, fading to nothing over `FADE_DISTANCE`. */
 export const OUTSIDE_ALPHA = 0.45;
 export const FADE_DISTANCE = 2.5;
 /** Grid cells along the longer side of the plan. */
@@ -400,59 +398,4 @@ export function fieldGrid(
     nx,
     ny,
   };
-}
-
-/** Per-cell weights, confidence and fade: computed once per sensor layout. */
-export interface FieldPlan {
-  grid: FieldGrid;
-  nodes: number;
-  idx: Int32Array;
-  w: Float32Array;
-  conf: Float32Array;
-  fade: Float32Array;
-}
-
-export function planField(mesh: FieldMesh, grid: FieldGrid, outline: readonly Point[]): FieldPlan {
-  const cells = grid.nx * grid.ny;
-  const idx = new Int32Array(cells * 3);
-  const w = new Float32Array(cells * 3);
-  const conf = new Float32Array(cells);
-  const fade = new Float32Array(cells);
-  for (let j = 0; j < grid.ny; j++) {
-    const y = grid.y0 + (j + 0.5) * grid.cell;
-    for (let i = 0; i < grid.nx; i++) {
-      const x = grid.x0 + (i + 0.5) * grid.cell;
-      const c = j * grid.nx + i;
-      const wt = weightsAt(mesh, x, y);
-      if (wt) {
-        idx.set(wt.idx, c * 3);
-        w.set(wt.w, c * 3);
-      }
-      conf[c] = confidenceAt(mesh, x, y);
-      fade[c] = fadeAt(outline, x, y);
-    }
-  }
-  return { grid, nodes: mesh.nodes.length, idx, w, conf, fade };
-}
-
-/** Field samples for node values: value, confidence, fade per cell (row j = y0 + (j+½)·cell). */
-export function fillField(
-  fp: FieldPlan,
-  nodeVals: ArrayLike<number>,
-  out?: Float32Array,
-): Float32Array {
-  const cells = fp.grid.nx * fp.grid.ny;
-  const f = out ?? new Float32Array(cells * 3);
-  for (let c = 0; c < cells; c++) {
-    const k = c * 3;
-    f[k] =
-      fp.nodes > 0
-        ? fp.w[k]! * nodeVals[fp.idx[k]!]! +
-          fp.w[k + 1]! * nodeVals[fp.idx[k + 1]!]! +
-          fp.w[k + 2]! * nodeVals[fp.idx[k + 2]!]!
-        : 0;
-    f[k + 1] = fp.nodes > 0 ? fp.conf[c]! : 0;
-    f[k + 2] = fp.fade[c]!;
-  }
-  return f;
 }

@@ -4,8 +4,10 @@
 // signal layer is traced instead (signal.ts): in one WebGL2 pass, or by the worker for Canvas2D.
 // Loaded on demand, the first time a layer is switched on.
 import { FADE_DISTANCE, fieldGrid, nodeValues, type FieldGrid, type FieldMesh } from './field';
+import { workerUrl } from './field-worker';
 import { planBounds } from './geometry';
-import { GlRenderer } from './heat-gl';
+import type { FieldPlan } from './field-plan';
+import { GlRenderer, NO_DATA_ALPHA, NO_DATA_GREY } from './heat-gl';
 import { AREA_SIZE, declutter, NAME_SIZE } from './labels';
 import {
   LAYERS,
@@ -21,15 +23,17 @@ import {
 } from './heat';
 import type { Hass } from './ha-types';
 import type { Plan, Point } from './plan';
-import { SEG, SIGNAL_CELLS, signalInput, signalKey, type SignalInput } from './signal';
+import {
+  barrierSegments,
+  SEG,
+  SIGNAL_CELLS,
+  signalInput,
+  signalKey,
+  type SignalInput,
+} from './signal';
 import { h, s } from './ui';
 import type { View } from './viewport';
-import {
-  createHandler,
-  type WorkerRequest,
-  type WorkerRequestBody,
-  type WorkerResponse,
-} from './worker-protocol';
+import type { WorkerRequest, WorkerRequestBody, WorkerResponse } from './worker-protocol';
 
 /** Field opacity at full confidence inside the house. */
 export const HEAT_OPACITY = 0.72;
@@ -43,8 +47,9 @@ interface CanvasField {
 }
 export interface Layout {
   key: string;
-  /** The sensor triangulation, or null for the traced signal layer. */
+  /** The sensor nodes and per-cell weights, or null for the traced signal layer. */
   mesh: FieldMesh | null;
+  field?: FieldPlan;
   grid: FieldGrid;
   ids: string[];
   signal?: SignalInput;
@@ -53,13 +58,13 @@ export interface Layout {
 /** Talks to the field worker; runs the same handler in this thread when workers are unavailable. */
 class FieldClient {
   #worker: Worker | null = null;
-  #local: ((req: WorkerRequest) => WorkerResponse) | null = null;
+  #local: Promise<(req: WorkerRequest) => WorkerResponse> | null = null;
   #id = 0;
   #pending = new Map<number, Pending>();
 
   constructor() {
     try {
-      this.#worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+      this.#worker = new Worker(workerUrl(), { type: 'module' });
       this.#worker.addEventListener('message', (e: MessageEvent<WorkerResponse>) => {
         const p = this.#pending.get(e.data.id);
         this.#pending.delete(e.data.id);
@@ -74,7 +79,7 @@ class FieldClient {
   #toLocal(): void {
     this.#worker?.terminate();
     this.#worker = null;
-    this.#local ??= createHandler();
+    this.#local ??= import('./worker-protocol').then((m) => m.createHandler());
     // Requests in flight are lost with the worker: replay is not worth it, fail them.
     for (const [id, p] of this.#pending) p.resolve({ type: 'error', id, message: 'worker failed' });
     this.#pending.clear();
@@ -83,8 +88,8 @@ class FieldClient {
   request(req: WorkerRequestBody): Promise<WorkerResponse> {
     const full = { ...req, id: ++this.#id } as WorkerRequest;
     if (!this.#worker) {
-      this.#local ??= createHandler();
-      return Promise.resolve(this.#local(full));
+      this.#local ??= import('./worker-protocol').then((m) => m.createHandler());
+      return this.#local.then((handle) => handle(full));
     }
     return new Promise((resolve) => {
       this.#pending.set(full.id, { resolve });
@@ -114,14 +119,19 @@ function colourise(
   const ctx = canvas.getContext('2d')!;
   const img = ctx.createImageData(grid.nx, grid.ny);
   const span = Math.max(1e-6, domain[1] - domain[0]);
+  const grey = Math.round(255 * NO_DATA_GREY);
   for (let c = 0; c < grid.nx * grid.ny; c++) {
     const t = Math.min(1, Math.max(0, (field[c * 3]! - domain[0]) / span));
     const k = Math.round(t * 255) * 4;
     const d = c * 4;
-    img.data[d] = lut[k]!;
-    img.data[d + 1] = lut[k + 1]!;
-    img.data[d + 2] = lut[k + 2]!;
-    img.data[d + 3] = Math.round(255 * opacity * field[c * 3 + 1]! * field[c * 3 + 2]!);
+    // Negative confidence: no data, drawn grey (as the GL colour pass does).
+    const none = field[c * 3 + 1]! < 0;
+    img.data[d] = none ? grey : lut[k]!;
+    img.data[d + 1] = none ? grey : lut[k + 1]!;
+    img.data[d + 2] = none ? grey : lut[k + 2]!;
+    img.data[d + 3] = Math.round(
+      255 * opacity * (none ? NO_DATA_ALPHA : field[c * 3 + 1]!) * field[c * 3 + 2]!,
+    );
   }
   ctx.putImageData(img, 0, 0);
 }
@@ -394,7 +404,9 @@ export class HeatLayer {
     const outline = plan.outline;
     const input = layer === 'signal' ? signalInput(plan, this.#hass, data.readings) : null;
     this.#segments = input ? input.walls.length / SEG : 0;
-    const key = `${layer}|${data.unit}|${input ? signalKey(input) : ''}|${layoutKey(data.readings, outline)}|${bounds ? [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].join(',') : ''}`;
+    // Temperature and humidity stop at walls and closed doors: their layout depends on those.
+    const walls = input ? [] : barrierSegments(plan, this.#hass);
+    const key = `${layer}|${data.unit}|${input ? signalKey(input) : walls.join(',')}|${layoutKey(data.readings, outline)}|${bounds ? [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].join(',') : ''}`;
     const now = performance.now();
     const values = data.readings.map((r) => r.value);
     const target = layerDomain(layer, data.unit, values);
@@ -458,10 +470,12 @@ export class HeatLayer {
           sensors: data.readings.map((r) => r.position),
           outline,
           grid,
+          walls,
+          rooms: plan.rooms.map((r) => [...r.polygon]),
         })
         .then((res) => {
           if (res.type !== 'mesh' || res.key !== this.#wantKey) return;
-          this.#applyLayout({ key, mesh: res.mesh, grid, ids }, crossFade);
+          this.#applyLayout({ key, mesh: res.mesh, field: res.plan, grid, ids }, crossFade);
         });
     } else this.#start();
   }
@@ -472,7 +486,7 @@ export class HeatLayer {
     this.#fieldFor = '';
     const outline = this.#plan?.outline ?? [];
     const fade = crossFade && this.ms > 0;
-    if (this.#gl && L.mesh) this.#gl.setLayout(L.mesh, L.grid, outline, fade);
+    if (this.#gl && L.field) this.#gl.setLayout(L.field, outline, fade);
     else if (this.#gl && L.signal) this.#gl.setSignal(L.signal, L.grid, outline, fade);
     else this.#c2d?.setLayout(fade);
     this.#fade = fade ? { from: 0, to: 1, t0: performance.now() } : null;

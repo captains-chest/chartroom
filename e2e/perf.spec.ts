@@ -4,7 +4,7 @@ import { deletePlan, savePlan } from './ha';
 import { useHeatDebug } from './heat-debug';
 
 // Old-wall-tablet check (docs/render-design.md): a synthetic worst case at the soft caps, 512 walls
-// and 32 access points, timed on a CPU-throttled page. Opt-in: PERF=1 pnpm e2e e2e/perf.spec.ts
+// and 32 access points (or 32 temperature sensors), timed on a CPU-throttled page. Opt-in: PERF=1 pnpm e2e e2e/perf.spec.ts
 // (optionally PERF_RATES=4,6 and PERF_OUT=file.json). Not part of CI.
 const PLAN = 'e2e-perf';
 const token = (): string => process.env['HA_TOKEN'] ?? '';
@@ -16,7 +16,7 @@ const APS = Number(process.env['PERF_APS'] ?? 32);
 
 type Pt = [number, number];
 /** A 16 x 12 m block of 1 m cells: 412 grid walls plus 100 diagonal stubs, and 32 sources. */
-function worstCase(): Record<string, unknown> {
+function worstCase(layer: 'signal' | 'temperature' = 'signal'): Record<string, unknown> {
   const walls: Record<string, unknown>[] = [];
   const add = (a: Pt, b: Pt, material: string, thickness: number): void => {
     walls.push({ id: `w${walls.length}`, a, b, material, thickness });
@@ -32,10 +32,14 @@ function worstCase(): Record<string, unknown> {
     const y = (i * 5) % 12;
     add([x + 0.2, y + 0.2], [x + 0.8, y + 0.8], 'partition', 0.08);
   }
+  // For the temperature check the same spots hold temperature sensors (the example's, reused).
+  const temps = (FIXTURE.sources as { entity_id?: string }[])
+    .map((s) => s.entity_id ?? '')
+    .filter((e) => /temperature/.test(e));
   const sources = Array.from({ length: APS }, (_, i) => ({
     id: `ap${i}`,
-    kind: i % 2 ? 'radio' : 'access_point',
-    entity_id: '',
+    kind: layer === 'signal' ? (i % 2 ? 'radio' : 'access_point') : 'sensor',
+    entity_id: layer === 'signal' ? '' : temps[i % temps.length],
     position: [0.5 + ((i * 5) % 16), 0.5 + ((i * 3) % 12)] as Pt,
   }));
   walls.length = Math.min(walls.length, WALLS);
@@ -140,41 +144,49 @@ async function measure(panel: Locator, renderer: 'webgl2' | 'canvas'): Promise<T
 
 test.beforeEach(({ page }) => useHeatDebug(page));
 
-test('old wall tablet: signal at the soft caps, CPU throttled', async ({ page }) => {
-  test.skip(!process.env['PERF'], 'set PERF=1 to run the perf check');
-  test.setTimeout(10 * 60_000);
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await savePlan(token(), PLAN, worstCase());
-  const results: Record<string, unknown>[] = [];
-  try {
-    await page.goto('/chartroom');
-    const panel = page.locator('chartroom-panel');
-    await panel.locator(`[role=tab][data-plan="${PLAN}"]`).click();
-    await expect(panel).toHaveAttribute('data-plan', PLAN);
-    await panel.getByRole('button', { name: 'Signal' }).click();
-    await expect(panel.locator('.heat-legend')).toContainText(`${APS} sources`);
-    const cdp = await page.context().newCDPSession(page);
-    for (const rate of RATES) {
-      await cdp.send('Emulation.setCPUThrottlingRate', { rate });
-      for (const r of ['webgl2', 'canvas'] as const) {
-        const t = await measure(panel, r);
-        if (t.renderer !== r) console.log('renderer fell back', r, '->', t.renderer);
-        results.push({ cpuSlowdown: rate, ...t });
-        console.log(JSON.stringify({ cpuSlowdown: rate, ...t }));
+for (const layer of ['signal', 'temperature'] as const)
+  test(`old wall tablet: ${layer} at the soft caps, CPU throttled`, async ({ page }) => {
+    test.skip(!process.env['PERF'], 'set PERF=1 to run the perf check');
+    test.setTimeout(10 * 60_000);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await savePlan(token(), PLAN, worstCase(layer));
+    const results: Record<string, unknown>[] = [];
+    try {
+      await page.goto('/chartroom');
+      const panel = page.locator('chartroom-panel');
+      await panel.locator(`[role=tab][data-plan="${PLAN}"]`).click();
+      await expect(panel).toHaveAttribute('data-plan', PLAN);
+      await panel
+        .getByRole('button', { name: layer === 'signal' ? 'Signal' : 'Temperature' })
+        .click();
+      await expect(panel.locator('.heat-legend')).toContainText(
+        layer === 'signal' ? `${APS} sources` : 'sensors',
+      );
+      const cdp = await page.context().newCDPSession(page);
+      for (const rate of RATES) {
+        await cdp.send('Emulation.setCPUThrottlingRate', { rate });
+        for (const r of ['webgl2', 'canvas'] as const) {
+          const t = await measure(panel, r);
+          if (t.renderer !== r) console.log('renderer fell back', r, '->', t.renderer);
+          results.push({ layer, cpuSlowdown: rate, ...t });
+          console.log(JSON.stringify({ layer, cpuSlowdown: rate, ...t }));
+        }
       }
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      const gl = await page.evaluate(() => {
+        const c = document.createElement('canvas').getContext('webgl2');
+        const ext = c?.getExtension('WEBGL_debug_renderer_info');
+        return ext ? c!.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'unknown';
+      });
+      console.log('WebGL renderer:', gl);
+      if (process.env['PERF_OUT'])
+        writeFileSync(
+          process.env['PERF_OUT'].replace('.json', `-${layer}.json`),
+          JSON.stringify({ gl, results }, null, 2),
+        );
+    } finally {
+      await page.evaluate(() => localStorage.removeItem('chartroom:layer'));
+      await deletePlan(token(), PLAN);
     }
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
-    const gl = await page.evaluate(() => {
-      const c = document.createElement('canvas').getContext('webgl2');
-      const ext = c?.getExtension('WEBGL_debug_renderer_info');
-      return ext ? c!.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'unknown';
-    });
-    console.log('WebGL renderer:', gl);
-    if (process.env['PERF_OUT'])
-      writeFileSync(process.env['PERF_OUT'], JSON.stringify({ gl, results }, null, 2));
-  } finally {
-    await page.evaluate(() => localStorage.removeItem('chartroom:layer'));
-    await deletePlan(token(), PLAN);
-  }
-});
+  });

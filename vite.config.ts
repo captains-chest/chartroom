@@ -17,6 +17,9 @@ export default defineConfig({
       input: {
         'chartroom-panel': 'frontend/src/chartroom-panel.ts',
         'chartroom-card': 'frontend/src/chartroom-card.ts',
+        // The field worker is an entry too, so it shares chunks with the in-page fallback
+        // (field-worker.ts) instead of shipping the field code twice.
+        'workers/worker': 'frontend/src/worker.ts',
       },
       output: {
         entryFileNames: '[name].js',
@@ -26,10 +29,6 @@ export default defineConfig({
         assetFileNames: 'assets/[name][extname]',
       },
     },
-  },
-  worker: {
-    format: 'es',
-    rollupOptions: { output: { entryFileNames: 'workers/[name].js' } },
   },
   test: {
     include: ['frontend/test/**/*.test.ts'],

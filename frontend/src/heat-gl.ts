@@ -1,21 +1,13 @@
 // The WebGL2 heatmap renderer, hand-written (docs/render-design.md, "Pipeline"):
-// pass 1a, a full-grid fragment pass: nearest hull edge (clamped lerp), confidence and outside fade
-//   into an RGBA32F field target (value, confidence, fade);
-// pass 1b, the Delaunay mesh with a per-vertex value, so the rasteriser does the barycentric
-//   interpolation, overwriting the value channel inside the hull;
-// or, for the signal layer, one ray-tracing pass over the grid into the same target;
-// pass 2, the colour pass: bilinear field sample, 256x1 ramp, confidence and fade as alpha, the
-//   view transform, and a cross-fade with the previous field.
-import {
-  CONF_FAR,
-  CONF_MIN,
-  CONF_NEAR,
-  FADE_DISTANCE,
-  OUTSIDE_ALPHA,
-  WALL_INFLUENCE,
-  type FieldGrid,
-  type FieldMesh,
-} from './field';
+// pass 1, the field into an RGBA32F target (value, confidence, fade per cell): for temperature and
+//   humidity the per-cell node weights the worker worked out once per layout (field-plan.ts: which
+//   sensors each cell sees past the walls) applied to the current node values; for the signal
+//   layer, one ray-tracing pass over the grid;
+// pass 2, the colour pass: each of the four nearest cells through the 256x1 ramp (or grey where
+//   there is no data), confidence and fade as alpha, mixed bilinearly so colours stop at a wall
+//   instead of blending values across it; the view transform; a cross-fade with the previous field.
+import { FADE_DISTANCE, OUTSIDE_ALPHA, type FieldGrid } from './field';
+import type { FieldPlan } from './field-plan';
 import type { Point } from './plan';
 import {
   MAX_SIGNAL_SEGMENTS,
@@ -27,6 +19,10 @@ import {
   type SignalInput,
 } from './signal';
 import type { View } from './viewport';
+
+/** How cells without data look: a grey level (0..1) and its strength relative to the field. */
+export const NO_DATA_GREY = 0.55;
+export const NO_DATA_ALPHA = 0.35;
 
 const FIELD_VS = `#version 300 es
 in vec2 aPos;
@@ -63,37 +59,21 @@ float fadeAt(vec2 p) {
 }
 `;
 
-const FIELD_FS = `${HEAD}
-uniform sampler2D uNodes;   // x, y, value per node
-uniform sampler2D uEdges;   // node indices a, b per edge
-uniform int uNodeCount;
-uniform int uEdgeCount;
-uniform vec3 uConf;         // near, far, min
-uniform float uWallInfluence; // reserved hook: walls do not bend the field (always 0)
+// Temperature and humidity: up to three node values per cell, weighted (fillField in field-plan.ts).
+const WEIGHTS_FS = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+uniform sampler2D uIdx;  // node indices, confidence (-1: no data)
+uniform sampler2D uW;    // weights, fade
+uniform sampler2D uVals; // node values
+out vec4 outField;
+float val(float i) { return texelFetch(uVals, ivec2(int(i), 0), 0).x; }
 void main() {
-  vec2 p = uGrid.xy + gl_FragCoord.xy * uGrid.z;
-  float best = 1e30;
-  float value = 0.0;
-  for (int e = 0; e < 16384; e++) {
-    if (e >= uEdgeCount) break;
-    vec4 ed = texelFetch(uEdges, ivec2(e, 0), 0);
-    vec4 a = texelFetch(uNodes, ivec2(int(ed.x), 0), 0);
-    vec4 b = texelFetch(uNodes, ivec2(int(ed.y), 0), 0);
-    vec2 ab = b.xy - a.xy;
-    float l2 = dot(ab, ab);
-    float t = l2 > 0.0 ? clamp(dot(p - a.xy, ab) / l2, 0.0, 1.0) : 0.0;
-    vec2 d = p - a.xy - t * ab;
-    float d2 = dot(d, d);
-    if (d2 < best) { best = d2; value = mix(a.z, b.z, t); }
-  }
-  float near = 1e30;
-  for (int i = 0; i < 16384; i++) {
-    if (i >= uNodeCount) break;
-    vec2 q = texelFetch(uNodes, ivec2(i, 0), 0).xy - p;
-    near = min(near, dot(q, q));
-  }
-  float conf = uNodeCount > 0 ? 1.0 - (1.0 - uConf.z) * smoothstep(uConf.x, uConf.y, sqrt(near)) : 0.0;
-  outField = vec4(value + 0.0 * uWallInfluence, conf, fadeAt(p), 1.0);
+  ivec2 c = ivec2(gl_FragCoord.xy);
+  vec4 i = texelFetch(uIdx, c, 0);
+  vec4 w = texelFetch(uW, c, 0);
+  outField = vec4(w.x * val(i.x) + w.y * val(i.y) + w.z * val(i.z), i.w, w.w, 1.0);
 }`;
 
 // The signal pass (signalAt in signal.ts, line for line): per source, log-distance loss from its
@@ -132,42 +112,6 @@ void main() {
   outField = vec4(best, 1.0, fadeAt(p), 1.0);
 }`;
 
-// The triangles: rasterised over the grid, each vertex carrying its triangle's three node
-// indices. The fragment takes barycentric weights from those nodes (positions and values in
-// uNodes), the same sum the CPU reference makes; interpolated varyings would drift by a little
-// in the long thin triangles along the hull, where the gradient is steep.
-const MESH_VS = `#version 300 es
-in vec2 aPos;
-in uvec3 aTri;
-uniform vec3 uGrid;
-uniform vec2 uSize;
-flat out uvec3 vTri;
-void main() {
-  vTri = aTri;
-  gl_Position = vec4((aPos - uGrid.xy) / (uGrid.z * uSize) * 2.0 - 1.0, 0.0, 1.0);
-}`;
-
-const MESH_FS = `#version 300 es
-precision highp float;
-precision highp int;
-precision highp sampler2D;
-uniform sampler2D uNodes;
-uniform vec3 uGrid;
-flat in uvec3 vTri;
-out vec4 outField;
-float orient(vec2 a, vec2 b, vec2 c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
-void main() {
-  vec2 p = uGrid.xy + gl_FragCoord.xy * uGrid.z;
-  vec4 a = texelFetch(uNodes, ivec2(int(vTri.x), 0), 0);
-  vec4 b = texelFetch(uNodes, ivec2(int(vTri.y), 0), 0);
-  vec4 c = texelFetch(uNodes, ivec2(int(vTri.z), 0), 0);
-  float area = orient(a.xy, b.xy, c.xy);
-  float wa = orient(b.xy, c.xy, p) / area;
-  float wb = orient(c.xy, a.xy, p) / area;
-  float wc = 1.0 - wa - wb;
-  outField = vec4(wa * a.z + wb * b.z + wc * c.z, 0.0, 0.0, 1.0);
-}`;
-
 const COLOUR_VS = `#version 300 es
 in vec2 aPos;       // unit quad
 uniform vec3 uGrid;
@@ -195,31 +139,34 @@ uniform vec2 uPrevSize;
 uniform vec2 uDomain;
 uniform float uOpacity;
 uniform float uMix;
+uniform vec2 uNoData;   // grey level, alpha
 in vec2 vPlan;
 out vec4 outColour;
-// Bilinear by hand: linear filtering of float textures is an optional extension.
-vec4 sampleField(sampler2D f, vec2 cellPos, vec2 size) {
-  vec2 q = cellPos - 0.5;
-  vec2 fl = floor(q);
-  vec2 fr = q - fl;
-  ivec2 i0 = ivec2(fl);
-  ivec2 mx = ivec2(size) - 1;
-  vec4 a = texelFetch(f, clamp(i0, ivec2(0), mx), 0);
-  vec4 b = texelFetch(f, clamp(i0 + ivec2(1, 0), ivec2(0), mx), 0);
-  vec4 c = texelFetch(f, clamp(i0 + ivec2(0, 1), ivec2(0), mx), 0);
-  vec4 d = texelFetch(f, clamp(i0 + ivec2(1, 1), ivec2(0), mx), 0);
-  return mix(mix(a, b, fr.x), mix(c, d, fr.x), fr.y);
-}
+// One cell, premultiplied (the Canvas2D colourise, per cell).
 vec4 colour(vec4 s) {
+  if (s.y < 0.0) { float g = uOpacity * uNoData.y * s.z; return vec4(vec3(uNoData.x) * g, g); }
   float t = clamp((s.x - uDomain.x) / max(1e-6, uDomain.y - uDomain.x), 0.0, 1.0);
   vec3 rgb = texture(uRamp, vec2((t * 255.0 + 0.5) / 256.0, 0.5)).rgb;
   float a = uOpacity * s.y * s.z;
   return vec4(rgb * a, a);
 }
+// Bilinear over coloured cells, as Canvas2D smooths the coloured image.
+vec4 sampleColour(sampler2D f, vec2 cellPos, vec2 size) {
+  vec2 q = cellPos - 0.5;
+  vec2 fl = floor(q);
+  vec2 fr = q - fl;
+  ivec2 i0 = ivec2(fl);
+  ivec2 mx = ivec2(size) - 1;
+  vec4 a = colour(texelFetch(f, clamp(i0, ivec2(0), mx), 0));
+  vec4 b = colour(texelFetch(f, clamp(i0 + ivec2(1, 0), ivec2(0), mx), 0));
+  vec4 c = colour(texelFetch(f, clamp(i0 + ivec2(0, 1), ivec2(0), mx), 0));
+  vec4 d = colour(texelFetch(f, clamp(i0 + ivec2(1, 1), ivec2(0), mx), 0));
+  return mix(mix(a, b, fr.x), mix(c, d, fr.x), fr.y);
+}
 void main() {
-  vec4 now = colour(sampleField(uField, (vPlan - uGrid.xy) / uGrid.z, uSize));
+  vec4 now = sampleColour(uField, (vPlan - uGrid.xy) / uGrid.z, uSize);
   if (uMix >= 1.0) { outColour = now; return; }
-  vec4 before = colour(sampleField(uPrev, (vPlan - uPrevGrid.xy) / uPrevGrid.z, uPrevSize));
+  vec4 before = sampleColour(uPrev, (vPlan - uPrevGrid.xy) / uPrevGrid.z, uPrevSize);
   outColour = mix(before, now, uMix);
 }`;
 
@@ -250,15 +197,12 @@ function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgr
 
 export class GlRenderer {
   readonly gl: WebGL2RenderingContext;
-  #field: WebGLProgram;
-  #mesh: WebGLProgram;
+  #weights: WebGLProgram;
   #colour: WebGLProgram;
   #quad: WebGLBuffer;
-  #meshVao: WebGLVertexArrayObject;
-  #meshPos: WebGLBuffer;
-  #meshTri: WebGLBuffer;
-  #nodes: WebGLTexture;
-  #edges: WebGLTexture;
+  #idx: WebGLTexture;
+  #w: WebGLTexture;
+  #vals: WebGLTexture;
   #outline: WebGLTexture;
   #ramp: WebGLTexture;
   #targets: [Target, Target];
@@ -267,8 +211,7 @@ export class GlRenderer {
     return this.#cur === 0 ? 1 : 0;
   }
   #cur: 0 | 1 = 0;
-  #layout: { mesh: FieldMesh; grid: FieldGrid; outlineCount: number } | null = null;
-  #nodeData = new Float32Array(0);
+  #layout: FieldPlan | null = null;
   #u = new Map<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
 
   /** Throws when WebGL2 or float render targets are missing (the caller falls back to Canvas2D). */
@@ -282,27 +225,14 @@ export class GlRenderer {
     if (!gl) throw new Error('no WebGL2');
     if (!gl.getExtension('EXT_color_buffer_float')) throw new Error('no float render targets');
     this.gl = gl;
-    this.#field = compile(gl, FIELD_VS, FIELD_FS);
-    this.#mesh = compile(gl, MESH_VS, MESH_FS);
+    this.#weights = compile(gl, FIELD_VS, WEIGHTS_FS);
     this.#colour = compile(gl, COLOUR_VS, COLOUR_FS);
     this.#quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.#quad);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
-    this.#meshPos = gl.createBuffer();
-    this.#meshTri = gl.createBuffer();
-    this.#meshVao = gl.createVertexArray();
-    gl.bindVertexArray(this.#meshVao);
-    const posLoc = gl.getAttribLocation(this.#mesh, 'aPos');
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.#meshPos);
-    gl.enableVertexAttribArray(posLoc);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-    const triLoc = gl.getAttribLocation(this.#mesh, 'aTri');
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.#meshTri);
-    gl.enableVertexAttribArray(triLoc);
-    gl.vertexAttribIPointer(triLoc, 3, gl.UNSIGNED_INT, 0, 0);
-    gl.bindVertexArray(null);
-    this.#nodes = this.#dataTexture();
-    this.#edges = this.#dataTexture();
+    this.#idx = this.#dataTexture();
+    this.#w = this.#dataTexture();
+    this.#vals = this.#dataTexture();
     this.#outline = this.#dataTexture();
     this.#ramp = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.#ramp);
@@ -365,38 +295,26 @@ export class GlRenderer {
   }
 
   /**
-   * A new sensor layout: upload geometry. With `keepPrevious` the current field becomes the
-   * cross-fade source.
+   * A new sensor layout: upload the per-cell weights (field-plan.ts). With `keepPrevious` the
+   * current field becomes the cross-fade source.
    */
-  setLayout(
-    mesh: FieldMesh,
-    grid: FieldGrid,
-    outline: readonly Point[],
-    keepPrevious: boolean,
-  ): void {
-    const gl = this.gl;
+  setLayout(plan: FieldPlan, outline: readonly Point[], keepPrevious: boolean): void {
+    const { grid } = plan;
     this.#begin(grid, outline, keepPrevious);
-    this.#nodeData = new Float32Array(mesh.nodes.length * 4);
-    mesh.nodes.forEach(([x, y], i) => this.#nodeData.set([x, y, 0, 0], i * 4));
-    const edges = new Float32Array((mesh.edges.length / 2) * 4);
-    for (let e = 0; e < mesh.edges.length / 2; e++)
-      edges.set([mesh.edges[e * 2]!, mesh.edges[e * 2 + 1]!, 0, 0], e * 4);
-    this.#upload(this.#edges, edges, mesh.edges.length / 2);
-    // One vertex per triangle corner, each with its triangle's node indices.
-    const pos = new Float32Array(mesh.tris.length * 2);
-    const tri = new Uint32Array(mesh.tris.length * 3);
-    for (let k = 0; k < mesh.tris.length; k++) {
-      const [x, y] = mesh.nodes[mesh.tris[k]!]!;
-      pos[k * 2] = x;
-      pos[k * 2 + 1] = y;
-      const t0 = k - (k % 3);
-      tri.set([mesh.tris[t0]!, mesh.tris[t0 + 1]!, mesh.tris[t0 + 2]!], k * 3);
+    const cells = grid.nx * grid.ny;
+    const idx = new Float32Array(cells * 4);
+    const w = new Float32Array(cells * 4);
+    for (let c = 0; c < cells; c++) {
+      for (let k = 0; k < 3; k++) {
+        idx[c * 4 + k] = plan.idx[c * 3 + k]!;
+        w[c * 4 + k] = plan.w[c * 3 + k]!;
+      }
+      idx[c * 4 + 3] = plan.conf[c]!;
+      w[c * 4 + 3] = plan.fade[c]!;
     }
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.#meshPos);
-    gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.#meshTri);
-    gl.bufferData(gl.ARRAY_BUFFER, tri, gl.STATIC_DRAW);
-    this.#layout = { mesh, grid, outlineCount: outline.length };
+    this.#upload(this.#idx, idx, grid.nx, grid.ny);
+    this.#upload(this.#w, w, grid.nx, grid.ny);
+    this.#layout = plan;
   }
 
   /** Switch field targets (keeping the current one for a cross-fade) and upload the outline. */
@@ -471,44 +389,22 @@ export class GlRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  /** Node values changed: recompute the field target (passes 1a and 1b). */
+  /** Node values changed: recompute the field target. */
   setValues(nodeVals: ArrayLike<number>): void {
     const gl = this.gl;
     const L = this.#layout;
     if (!L) return;
-    const { mesh, grid } = L;
-    for (let i = 0; i < mesh.nodes.length; i++) this.#nodeData[i * 4 + 2] = nodeVals[i]!;
-    this.#upload(this.#nodes, this.#nodeData, mesh.nodes.length);
-    // 1a: the hull-projection pass over every cell.
-    const fp = this.#field;
-    this.#fieldPass(fp, this.#targets[this.#cur], grid, L.outlineCount);
-    const tex = (unit: number, texture: WebGLTexture, name: string): void => {
+    const vals = new Float32Array(Math.max(1, L.nodes) * 4);
+    for (let i = 0; i < L.nodes; i++) vals[i * 4] = nodeVals[i]!;
+    this.#upload(this.#vals, vals, L.nodes);
+    const p = this.#weights;
+    this.#fieldPass(p, this.#targets[this.#cur], L.grid, 0);
+    [this.#idx, this.#w, this.#vals].forEach((t, unit) => {
       gl.activeTexture(gl.TEXTURE0 + unit);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.uniform1i(this.#loc(fp, name), unit);
-    };
-    tex(0, this.#nodes, 'uNodes');
-    tex(1, this.#edges, 'uEdges');
-    gl.uniform1i(this.#loc(fp, 'uNodeCount'), mesh.nodes.length);
-    gl.uniform1i(this.#loc(fp, 'uEdgeCount'), mesh.edges.length / 2);
-    gl.uniform3f(this.#loc(fp, 'uConf'), CONF_NEAR, CONF_FAR, CONF_MIN);
-    gl.uniform1f(this.#loc(fp, 'uWallInfluence'), WALL_INFLUENCE);
-    this.#drawQuad(fp, [-1, -1, 1, -1, -1, 1, 1, 1]);
-    // 1b: the triangles, value channel only.
-    if (mesh.tris.length > 0) {
-      const mp = this.#mesh;
-      gl.useProgram(mp);
-      gl.uniform3f(this.#loc(mp, 'uGrid'), grid.x0, grid.y0, grid.cell);
-      gl.uniform2f(this.#loc(mp, 'uSize'), grid.nx, grid.ny);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.#nodes);
-      gl.uniform1i(this.#loc(mp, 'uNodes'), 0);
-      gl.colorMask(true, false, false, false);
-      gl.bindVertexArray(this.#meshVao);
-      gl.drawArrays(gl.TRIANGLES, 0, mesh.tris.length);
-      gl.bindVertexArray(null);
-      gl.colorMask(true, true, true, true);
-    }
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.uniform1i(this.#loc(p, ['uIdx', 'uW', 'uVals'][unit]!), unit);
+    });
+    this.#drawQuad(p, [-1, -1, 1, -1, -1, 1, 1, 1]);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
@@ -563,6 +459,7 @@ export class GlRenderer {
     gl.uniform2f(this.#loc(cp, 'uDomain'), domain[0], domain[1]);
     gl.uniform1f(this.#loc(cp, 'uOpacity'), opacity);
     gl.uniform1f(this.#loc(cp, 'uMix'), prev.grid ? mix : 1);
+    gl.uniform2f(this.#loc(cp, 'uNoData'), NO_DATA_GREY, NO_DATA_ALPHA);
     this.#drawQuad(cp, null);
   }
 

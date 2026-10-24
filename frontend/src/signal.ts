@@ -13,6 +13,7 @@ import {
   type Opening,
   type Plan,
   type Point,
+  type Wall,
 } from './plan';
 
 /** Path-loss exponent: 2 in free space, 2-3 indoors. */
@@ -35,39 +36,97 @@ export interface SignalInput {
 
 /** States of a door or window sensor (binary_sensor on, cover open...) that mean "open". */
 const OPEN = new Set(['on', 'open', 'opening', 'closing']);
+/** States that mean "closed": a door is only a temperature boundary when its sensor says so. */
+const CLOSED = new Set(['off', 'closed']);
+
+const stateOf = (o: Opening, hass?: Hass): string =>
+  (o.entity_id && hass?.states?.[o.entity_id]?.state) || '';
+
+/**
+ * Each wall split at its doors and windows, in order along it: `part` is what fills the stretch,
+ * the wall itself or the opening (`door` says which kind of opening).
+ */
+function wallParts(
+  plan: Plan,
+  each: (a: Point, b: Point, part: Wall | Opening, door: boolean | null) => void,
+): void {
+  const openings = new Map<string, [Opening, boolean][]>();
+  for (const [list, door] of [
+    [plan.doors, true],
+    [plan.windows, false],
+  ] as const)
+    for (const o of list) openings.set(o.wall, [...(openings.get(o.wall) ?? []), [o, door]]);
+  for (const w of plan.walls) {
+    const len = wallLength(w);
+    if (!(len > 0)) continue;
+    let at = 0;
+    const list = [...(openings.get(w.id) ?? [])].sort((p, q) => p[0].offset - q[0].offset);
+    for (const [o, door] of list) {
+      const s = Math.min(len, Math.max(at, o.offset));
+      const e = Math.min(len, Math.max(s, o.offset + o.width));
+      each(pointAlong(w, at), pointAlong(w, s), w, null);
+      each(pointAlong(w, s), pointAlong(w, e), o, door);
+      at = e;
+    }
+    each(pointAlong(w, at), w.b, w, null);
+  }
+}
 
 /** Wall segments with their loss: each wall split at its doors and windows. Zero-loss parts are left out. */
 export function wallSegments(plan: Plan, hass?: Hass): number[] {
   const mats = materialsOf(plan);
-  const loss = (material: string, thickness: number): number => {
-    const m = mats.get(material);
-    return m ? lossDb(m, thickness) : 0;
-  };
-  const openings = new Map<string, Opening[]>();
-  for (const o of [...plan.doors, ...plan.windows])
-    openings.set(o.wall, [...(openings.get(o.wall) ?? []), o]);
   const out: number[] = [];
-  const push = (a: Point, b: Point, db: number): void => {
+  wallParts(plan, (a, b, part, door) => {
+    const m = mats.get(part.material);
+    const db =
+      door !== null && OPEN.has(stateOf(part as Opening, hass))
+        ? 0
+        : m
+          ? lossDb(m, part.thickness)
+          : 0;
     if (db > 0 && (a[0] !== b[0] || a[1] !== b[1])) out.push(a[0], a[1], b[0], b[1], db);
-  };
-  for (const w of plan.walls) {
-    const len = wallLength(w);
-    if (!(len > 0)) continue;
-    const wallDb = loss(w.material, w.thickness);
-    let at = 0;
-    const list = [...(openings.get(w.id) ?? [])].sort((p, q) => p.offset - q.offset);
-    for (const o of list) {
-      const s = Math.min(len, Math.max(at, o.offset));
-      const e = Math.min(len, Math.max(s, o.offset + o.width));
-      push(pointAlong(w, at), pointAlong(w, s), wallDb);
-      const open = !!o.entity_id && OPEN.has(hass?.states?.[o.entity_id]?.state ?? '');
-      push(pointAlong(w, s), pointAlong(w, e), open ? 0 : loss(o.material, o.thickness));
-      at = e;
-    }
-    push(pointAlong(w, at), w.b, wallDb);
-  }
+  });
   return out;
 }
+
+/**
+ * What stops temperature and humidity (docs/render-design.md, "Walls are boundaries"): walls,
+ * windows unless their sensor says open, and doors whose sensor says closed. Doorways without a
+ * sensor, open doors and gaps let the field through. Four floats per segment: ax, ay, bx, by.
+ *
+ * Plans store wall centre lines, so a wall that stops at another wall's face leaves a sliver
+ * (half that wall's thickness) between the lines. Each wall end within reach of another wall
+ * is joined to it with a short segment so nothing seeps through the sliver.
+ */
+export function barrierSegments(plan: Plan, hass?: Hass): number[] {
+  const out: number[] = [];
+  wallParts(plan, (a, b, part, door) => {
+    const state = door === null ? '' : stateOf(part as Opening, hass);
+    const blocks = door === null || (door ? CLOSED.has(state) : !OPEN.has(state));
+    if (blocks && (a[0] !== b[0] || a[1] !== b[1])) out.push(a[0], a[1], b[0], b[1]);
+  });
+  for (const w of plan.walls)
+    for (const e of [w.a, w.b])
+      for (const o of plan.walls) {
+        if (o === w) continue;
+        const [ax, ay] = o.a;
+        const dx = o.b[0] - ax;
+        const dy = o.b[1] - ay;
+        const t = Math.min(
+          1,
+          Math.max(0, ((e[0] - ax) * dx + (e[1] - ay) * dy) / (dx * dx + dy * dy || 1)),
+        );
+        const px = ax + t * dx;
+        const py = ay + t * dy;
+        const d = Math.hypot(e[0] - px, e[1] - py);
+        if (d > 1e-9 && d <= (o.thickness + w.thickness) / 2 + JOIN_SLACK)
+          out.push(e[0], e[1], px, py);
+      }
+  return out;
+}
+
+/** How far past touching (m) a wall end still counts as meeting another wall. */
+const JOIN_SLACK = 0.05;
 
 /**
  * Everything the signal pass needs, packed as the shader takes it (and capped to its limits).

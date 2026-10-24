@@ -48,6 +48,20 @@ console.log(
 console.log(`total: ${kb(total)} gzip, budget ${kb(BUDGET.total)}`);
 
 let failed = false;
+// The worker is a build entry sharing chunks with the page: none of them may touch the DOM.
+const workerFiles = new Set();
+const follow = (rel) => {
+  if (workerFiles.has(rel)) return;
+  workerFiles.add(rel);
+  const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/') + 1) : '';
+  for (const m of readFileSync(join(DIST, rel), 'utf8').matchAll(/from"(\.\.?\/[\w./-]+\.js)"/g))
+    follow(relative(DIST, join(DIST, dir, m[1])));
+};
+follow('workers/worker.js');
+for (const f of workerFiles)
+  if (/\b(document|customElements|HTMLElement|window)\b/.test(readFileSync(join(DIST, f), 'utf8')))
+    failed = (console.error(`${f} is loaded by the worker but uses the DOM.`), true);
+console.log(`worker loads: ${[...workerFiles].join(', ')}`);
 if (card > BUDGET['chartroom-card.js']) failed = (console.error('Card is over budget.'), true);
 if (total > BUDGET.total) failed = (console.error('Total frontend is over budget.'), true);
 process.exit(failed ? 1 : 0);

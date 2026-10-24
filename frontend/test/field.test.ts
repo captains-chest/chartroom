@@ -8,14 +8,12 @@ import {
   evalField,
   fadeAt,
   fieldGrid,
-  fillField,
   hullEdges,
   nearestEdge,
   nodeValues,
-  planField,
   polygonArea,
-  WALL_INFLUENCE,
 } from '../src/field';
+import { NO_DATA, fillField, planField } from '../src/field-plan';
 import type { Point } from '../src/plan';
 
 /** A deterministic pseudo-random generator for the property tests. */
@@ -154,10 +152,6 @@ describe('interpolation', () => {
       [2, 3],
     ]);
     expect(evalField(tri, [25, 30, 20], 2, 0)).toBeCloseTo(27.5, 12);
-  });
-
-  it('ignores walls: the wall hook is disabled', () => {
-    expect(WALL_INFLUENCE).toBe(0);
   });
 });
 
@@ -323,24 +317,26 @@ describe('confidence, fade and the grid', () => {
       [2, 6],
     ];
     const vals = [18, 23, 26, 20];
-    const mesh = buildMesh(pts);
-    const fp = planField(mesh, grid, outline);
-    const field = fillField(fp, nodeValues(mesh, vals));
+    const { mesh, plan } = planField(pts, grid, outline);
+    const field = fillField(plan, nodeValues(mesh, vals));
     for (let j = 0; j < grid.ny; j += 3)
       for (let i = 0; i < grid.nx; i += 3) {
         const x = grid.x0 + (i + 0.5) * grid.cell;
         const y = grid.y0 + (j + 0.5) * grid.cell;
         const c = (j * grid.nx + i) * 3;
-        expect(field[c]).toBeCloseTo(evalField(mesh, vals, x, y), 4);
-        expect(field[c + 1]).toBeCloseTo(confidenceAt(mesh, x, y), 5);
         expect(field[c + 2]).toBeCloseTo(fadeAt(outline, x, y), 5);
+        // Without walls every cell inside sees every sensor: the plain linear field.
+        if (field[c + 2] === 1) {
+          expect(field[c]).toBeCloseTo(evalField(mesh, vals, x, y), 4);
+          expect(field[c + 1]).toBeCloseTo(confidenceAt(mesh, x, y), 5);
+        } else expect(field[c + 1]).toBe(NO_DATA);
       }
   });
 
-  it('fills zeros when there are no sensors', () => {
+  it('has no data anywhere when there are no sensors', () => {
     const grid = fieldGrid({ minX: 0, minY: 0, maxX: 1, maxY: 1 }, 0, 4);
-    const fp = planField(buildMesh([]), grid, []);
-    expect(Array.from(fillField(fp, [])).every((v, i) => (i % 3 === 2 ? v === 1 : v === 0))).toBe(
+    const { plan } = planField([], grid, []);
+    expect(Array.from(fillField(plan, [])).every((v, i) => v === [0, NO_DATA, 1][i % 3])).toBe(
       true,
     );
   });

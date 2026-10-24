@@ -3,9 +3,9 @@
 Floor plans for Home Assistant: draw your home once, then see temperature, humidity and Wi-Fi
 signal as live heatmaps over it — in a sidebar panel and as a dashboard card.
 
-> **Status: Phase 1 (plan and editor).** The panel shows one tab per Home Assistant floor, with
-> pan and zoom, and a built-in editor for walls, doors, windows and rooms over an image underlay.
-> Heatmaps come next. See [docs/render-design.md](docs/render-design.md) for how they will be
+> **Status: Phase 1 (plan and editor) is complete.** The panel shows one tab per Home Assistant
+> floor, with pan and zoom and an optional underlay drawing, and a built-in editor for walls,
+> doors, windows, rooms and sensor/signal sources. Heatmaps come next (Phase 2). See [docs/render-design.md](docs/render-design.md) for how they will be
 > rendered.
 
 ![Chartroom panel](docs/images/panel.png)
@@ -22,10 +22,23 @@ without one). Admins only; changes save automatically.
 - **Door** / **Window**: click on a wall. Width, swing and an optional open/closed entity are set
   in the inspector.
 - **Room**: click the corners, double-click to close, then link the room to a Home Assistant area.
+- **Source**: place a temperature/humidity sensor, a Wi-Fi access point or a radio (Zigbee,
+  Z-Wave, Thread…). Sensors are picked from the Home Assistant temperature and humidity sensors in
+  the plan's floor's areas; access points and radios take any entity and a level at 1 m. Drag to
+  move, Delete to remove.
 - **Underlay**: import a PNG, JPEG, WebP or SVG drawing to trace over, then calibrate the scale
-  with **Measure** (two points and their real distance) or by a room's known area.
+  with **Measure** (two points and their real distance) or by a room's known area. In the panel
+  outside the editor, the **Underlay** button and slider hide the drawing or change its opacity
+  (just for you, not saved in the plan).
 - **Undo** / **Redo**: Ctrl+Z and Ctrl+Shift+Z.
 - **Materials**: the loss per centimetre for each wall material, used by the signal heatmap.
+- The outer outline is worked out from the walls; there is no outline tool.
+- A floor with more than 512 walls or 32 access points and radios shows a warning: the heatmaps
+  may be slow on phones and tablets (see [docs/render-design.md](docs/render-design.md)).
+
+![Placing sources in the editor](docs/images/editor-sources.png)
+
+![The panel with an underlay](docs/images/panel-underlay.png)
 
 ![Chartroom card](docs/images/card.png)
 

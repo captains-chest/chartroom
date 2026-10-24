@@ -48,6 +48,7 @@ import {
   wallAt,
 } from './plan-ops';
 import type { PlanView } from './plan-view';
+import { signalLimitWarnings } from './signal';
 import { button, field, h, numberInput, s, select, textInput } from './ui';
 import { importUnderlay, loadUnderlayUrl } from './underlay';
 
@@ -1030,7 +1031,7 @@ export class PlanEditor {
   }
 
   #warningsPanel(): HTMLElement | null {
-    const warnings = limitWarnings(this.plan);
+    const warnings = [...limitWarnings(this.plan), ...signalLimitWarnings(this.plan)];
     if (warnings.length === 0) return null;
     return h(
       'section',

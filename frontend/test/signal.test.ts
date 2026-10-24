@@ -2,16 +2,20 @@ import { describe, expect, it } from 'vite-plus/test';
 import { fieldGrid } from '../src/field';
 import type { Hass } from '../src/ha-types';
 import { layerCounts, layerData, layerDomain } from '../src/heat';
-import { emptyPlan, type Plan } from '../src/plan';
+import { emptyPlan, type Plan, type Point } from '../src/plan';
 import {
   MAX_SIGNAL_SEGMENTS,
+  MAX_SIGNAL_SOURCES,
   SEG,
   SIGNAL_FLOOR,
   SIGNAL_N,
+  SRC,
   signalAt,
   signalField,
   signalInput,
   signalKey,
+  signalLimitWarnings,
+  signalNote,
   wallSegments,
 } from '../src/signal';
 import { createHandler } from '../src/worker-protocol';
@@ -106,16 +110,64 @@ describe('wall segments', () => {
     expect(wallSegments(plan, hass).length / SEG).toBe(3);
   });
 
-  it('caps the segment count', () => {
+  /** A plan with `n` separate partition walls, one segment each. */
+  const walls = (n: number): Plan => {
     const plan = emptyPlan('Many');
-    plan.walls = Array.from({ length: MAX_SIGNAL_SEGMENTS + 10 }, (_, i) => ({
+    plan.walls = Array.from({ length: n }, (_, i) => ({
       id: `w${i}`,
       a: [i, 0] as [number, number],
       b: [i, 1] as [number, number],
       thickness: 0.1,
       material: 'partition',
     }));
-    expect(signalInput(plan, undefined, []).walls.length).toBe(MAX_SIGNAL_SEGMENTS * SEG);
+    return plan;
+  };
+
+  it('caps the segment count and says how many it left out', () => {
+    const input = signalInput(walls(MAX_SIGNAL_SEGMENTS + 10), undefined, []);
+    expect(input.walls.length).toBe(MAX_SIGNAL_SEGMENTS * SEG);
+    expect(input.leftOut).toEqual({ sources: 0, segments: 10 });
+  });
+
+  it('caps the sources and says how many it left out', () => {
+    const sources = Array.from({ length: MAX_SIGNAL_SOURCES + 8 }, (_, i) => ({
+      position: [i, 0] as Point,
+      value: -40,
+    }));
+    const input = signalInput(walls(1), undefined, sources);
+    expect(input.aps.length).toBe(MAX_SIGNAL_SOURCES * SRC);
+    expect(input.leftOut).toEqual({ sources: 8, segments: 0 });
+    expect(signalInput(walls(1), undefined, sources.slice(0, 2)).leftOut.sources).toBe(0);
+  });
+
+  it('warns in the editor when the walls make more segments than the signal map takes', () => {
+    expect(signalLimitWarnings(walls(MAX_SIGNAL_SEGMENTS))).toEqual([]);
+    const [w, ...rest] = signalLimitWarnings(walls(MAX_SIGNAL_SEGMENTS + 3));
+    expect(rest).toEqual([]);
+    expect(w).toMatch(/2051 wall segments .*more than 2048.*leaves out the rest/);
+  });
+});
+
+describe('signalNote', () => {
+  const input = (sources: number, segments: number, leftOut = { sources: 0, segments: 0 }) => ({
+    aps: new Float32Array(sources * SRC),
+    walls: new Float32Array(segments * SEG),
+    leftOut,
+  });
+
+  it('counts the sources and wall segments the map uses', () => {
+    expect(signalNote(input(3, 1))).toEqual(['3 sources', '1 wall segment']);
+    expect(signalNote(input(1, 0))).toEqual(['1 source', '0 wall segments']);
+    expect(signalNote(input(0, 4))).toEqual(['No sources', '4 wall segments']);
+  });
+
+  it('says how many it left out over the limits', () => {
+    expect(signalNote(input(32, 2048, { sources: 1, segments: 12 }))).toEqual([
+      '32 sources',
+      '2048 wall segments',
+      '1 source left out (limit 32)',
+      '12 wall segments left out (limit 2048)',
+    ]);
   });
 });
 

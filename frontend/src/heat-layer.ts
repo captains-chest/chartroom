@@ -25,10 +25,10 @@ import type { Hass } from './ha-types';
 import type { Plan, Point } from './plan';
 import {
   barrierSegments,
-  SEG,
   SIGNAL_CELLS,
   signalInput,
   signalKey,
+  signalNote,
   type SignalInput,
 } from './signal';
 import { h, s } from './ui';
@@ -268,7 +268,7 @@ export class HeatLayer {
   #fieldFor = '';
   #sig = '';
   #lut: Uint8Array = rampLut(LAYERS.temperature.ramp);
-  #segments = 0;
+  #signalNote: string[] = [];
   #idle: (() => void)[] = [];
   #disposed = false;
   #reduced =
@@ -404,7 +404,7 @@ export class HeatLayer {
     const bounds = planBounds(plan);
     const outline = plan.outline;
     const input = layer === 'signal' ? signalInput(plan, this.#hass, data.readings) : null;
-    this.#segments = input ? input.walls.length / SEG : 0;
+    this.#signalNote = input ? signalNote(input) : [];
     // Temperature and humidity stop at walls and closed doors: their layout depends on those.
     const walls = input ? [] : barrierSegments(plan, this.#hass);
     const key = `${layer}|${data.unit}|${input ? signalKey(input) : walls.join(',')}|${layoutKey(data.readings, outline)}|${bounds ? [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].join(',') : ''}`;
@@ -427,7 +427,7 @@ export class HeatLayer {
       else if (a.to !== r.value)
         Object.assign(a, { from: current(a, now, this.ms), to: r.value, t0: now });
     }
-    const sig = JSON.stringify([key, values, target, data.excluded]);
+    const sig = JSON.stringify([key, values, target, data.excluded, this.#signalNote]);
     if (sig !== this.#sig) {
       this.#sig = sig;
       this.#renderLegend(data, target);
@@ -617,12 +617,7 @@ export class HeatLayer {
       ),
     );
     const note: string[] = [];
-    const n = vals.length;
-    if (signal)
-      note.push(
-        n ? `${n} source${n === 1 ? '' : 's'}` : 'No sources',
-        `${this.#segments} wall segment${this.#segments === 1 ? '' : 's'}`,
-      );
+    if (signal) note.push(...this.#signalNote);
     else if (vals.length) {
       note.push(`${fmt(Math.min(...vals))}–${fmt(Math.max(...vals))} ${data.unit}`);
       note.push(`${vals.length} sensor${vals.length === 1 ? '' : 's'}`);

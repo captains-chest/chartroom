@@ -1,0 +1,7 @@
+# Home Assistant config for the CI end-to-end job (copied into a fresh config dir).
+default_config:
+
+logger:
+  default: warning
+  logs:
+    custom_components.chartroom: debug

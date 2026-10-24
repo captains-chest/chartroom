@@ -1,0 +1,14 @@
+node_modules/
+/coverage
+/test-results
+/playwright-report
+/blob-report
+/.ci/ha-config/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+.vitest/
+.DS_Store
+Thumbs.db

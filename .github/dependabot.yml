@@ -1,0 +1,48 @@
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '07:00'
+      timezone: 'Europe/Copenhagen'
+    groups:
+      # vite-plus pins its own Vite core; the `vite` catalog alias in pnpm-workspace.yaml must
+      # move with it, so keep them in one PR. CI fails if they drift apart.
+      vite-plus:
+        patterns:
+          - 'vite-plus'
+          - 'vite'
+          - '@voidzero-dev/*'
+      # Majors get their own PRs so they don't hold back minor/patch updates.
+      npm-dependencies:
+        patterns:
+          - '*'
+        update-types:
+          - 'minor'
+          - 'patch'
+  # Python test and lint tools (pyproject.toml + uv.lock). Home Assistant itself is pinned by
+  # pytest-homeassistant-custom-component; home-assistant-frontend must match that HA release.
+  - package-ecosystem: 'uv'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '07:00'
+      timezone: 'Europe/Copenhagen'
+    groups:
+      python-dependencies:
+        patterns:
+          - '*'
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '07:00'
+      timezone: 'Europe/Copenhagen'
+    groups:
+      github-actions:
+        patterns:
+          - '*'

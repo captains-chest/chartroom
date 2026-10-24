@@ -1,0 +1,23 @@
+{
+  "name": "chartroom",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.4.2",
+  "scripts": {
+    "build": "vp build",
+    "test": "vp test run",
+    "e2e": "playwright test",
+    "size": "node scripts/check-size.mjs",
+    "format": "vp fmt .",
+    "format:check": "vp fmt --check .",
+    "lint": "vp lint",
+    "check": "vp check"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^24.19.2",
+    "typescript": "~6.0.2",
+    "vite-plus": "catalog:"
+  }
+}

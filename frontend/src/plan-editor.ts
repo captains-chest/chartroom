@@ -1,5 +1,6 @@
 // The wall and room editor: tools, selection, dragging with snapping, an inspector for the
 // selection, undo/redo and autosave. Loaded on demand by the panel (its own chunk).
+import { autoPlace, deviceChoices, deviceLook } from './devices';
 import { add, along, dist, frame, mm, sub } from './geometry';
 import type { Hass } from './ha-types';
 import { History } from './history';
@@ -15,16 +16,19 @@ import {
   type SourceKind,
 } from './plan';
 import {
+  addDevice,
   addOpening,
   addRoom,
   addSource,
   addWall,
   areaFactor,
+  deleteDevice,
   deleteOpening,
   deleteRoom,
   deleteSource,
   deleteWall,
   DEFAULT_WALL,
+  moveDevice,
   moveEndpoint,
   moveOpening,
   moveRoom,
@@ -36,6 +40,7 @@ import {
   snap,
   snapTargets,
   twoPointFactor,
+  updateDevice,
   updateOpening,
   updateRoom,
   updateSource,
@@ -53,9 +58,10 @@ export type Tool =
   | 'door'
   | 'window'
   | 'source'
+  | 'device'
   | 'measure'
   | 'underlay';
-type Kind = 'wall' | 'room' | 'door' | 'window' | 'source';
+type Kind = 'wall' | 'room' | 'door' | 'window' | 'source' | 'device';
 
 const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
   { value: 'sensor', label: 'Temperature / humidity sensor' },
@@ -72,6 +78,7 @@ type Drag =
   | { type: 'wall'; base: Plan; id: string; start: Point }
   | { type: 'opening'; base: Plan; id: string }
   | { type: 'source'; base: Plan; id: string; start: Point; from: Point }
+  | { type: 'device'; base: Plan; id: string; start: Point; from: Point }
   | { type: 'room'; base: Plan; id: string; start: Point }
   | { type: 'vertex'; base: Plan; id: string; index: number }
   | { type: 'underlay'; base: Plan; start: Point };
@@ -112,6 +119,12 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
     hint: 'Click to place a sensor, access point or radio; pick its entity on the right.',
   },
   {
+    tool: 'device',
+    label: 'Device',
+    key: 'e',
+    hint: 'Drag an entity from the list onto the plan, or pick it and click. Auto-place uses areas.',
+  },
+  {
     tool: 'measure',
     label: 'Measure',
     key: 'm',
@@ -130,6 +143,8 @@ const SNAP_PX = 10;
 const SAVE_DELAY = 600;
 
 const DOUBLE_CLICK_PX = 6;
+/** Drag-and-drop type for an entity dragged from the Device list onto the plan. */
+const ENTITY_MIME = 'application/x-chartroom-entity';
 
 export class PlanEditor {
   readonly toolbar: HTMLElement;
@@ -157,6 +172,21 @@ export class PlanEditor {
   #lastClick = { t: 0, x: 0, y: 0 };
   /** What the Source tool places next. */
   #sourceKind: SourceKind = 'sensor';
+  /** The entity the Device tool places on the next click. */
+  #armed: string | null = null;
+  #deviceKey = '';
+  #note = '';
+  readonly #onDragOver = (e: DragEvent): void => {
+    if (!e.dataTransfer?.types.includes(ENTITY_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  readonly #onDrop = (e: DragEvent): void => {
+    const entity = e.dataTransfer?.getData(ENTITY_MIME);
+    if (!entity) return;
+    e.preventDefault();
+    this.#placeDevice(entity, this.#view.toPlan(e));
+  };
 
   constructor(host: EditorHost) {
     this.#host = host;
@@ -200,6 +230,8 @@ export class PlanEditor {
     };
     this.#view.onViewChange = () => this.#renderOverlay();
     this.#view.svg.classList.add('editing');
+    this.#view.svg.addEventListener('dragover', this.#onDragOver);
+    this.#view.svg.addEventListener('drop', this.#onDrop);
     this.setTool('select');
     this.#render();
     void this.#loadUnderlay();
@@ -224,10 +256,18 @@ export class PlanEditor {
     this.#view.onViewChange = null;
     this.#view.overlay.replaceChildren();
     this.#view.svg.classList.remove('editing');
+    this.#view.svg.removeEventListener('dragover', this.#onDragOver);
+    this.#view.svg.removeEventListener('drop', this.#onDrop);
   }
 
   hassChanged(): void {
     const k = this.#selection?.kind;
+    if (this.#tool === 'device' || k === 'device') {
+      // States change all the time; only redraw the list when the entities on offer change (a
+      // redraw mid-drag would drop the item being dragged).
+      if (this.#deviceListKey() !== this.#deviceKey) this.#renderInspector();
+      return;
+    }
     if (!k || k === 'room' || k === 'source') this.#renderInspector();
   }
 
@@ -238,7 +278,9 @@ export class PlanEditor {
     for (const [t, b] of this.#toolButtons) b.setAttribute('aria-pressed', String(t === tool));
     this.#hint.textContent = TOOLS.find((t) => t.tool === tool)?.hint ?? '';
     this.#view.svg.dataset['tool'] = tool;
-    if (tool === 'underlay' || tool === 'source') this.#selection = null;
+    if (tool === 'underlay' || tool === 'source' || tool === 'device') this.#selection = null;
+    if (tool !== 'device') this.#armed = null;
+    this.#note = '';
     this.#render();
   }
 
@@ -354,7 +396,9 @@ export class PlanEditor {
           ? deleteRoom(p, sel.id)
           : sel.kind === 'source'
             ? deleteSource(p, sel.id)
-            : deleteOpening(p, sel.id);
+            : sel.kind === 'device'
+              ? deleteDevice(p, sel.id)
+              : deleteOpening(p, sel.id);
     this.#selection = null;
     this.#commit(next);
   }
@@ -447,6 +491,13 @@ export class PlanEditor {
         this.#commit(r.plan);
         return true;
       }
+      case 'device': {
+        const onMarker = (e.target as Element | null)?.closest('[data-kind=device]');
+        if (onMarker) return this.#selectDown(p, e);
+        if (!this.#armed) return false;
+        this.#placeDevice(this.#armed, p);
+        return true;
+      }
       case 'measure': {
         const q = this.#snapped(p, true).point;
         if (this.#draft.length === 0 || this.#measured) {
@@ -485,6 +536,14 @@ export class PlanEditor {
     const el = target?.closest<SVGElement>('[data-kind]');
     const kind = el?.dataset['kind'] as Kind | undefined;
     const id = el?.dataset['id'];
+    if (kind === 'device' && id) {
+      const dev = base.devices?.find((x) => x.id === id);
+      if (!dev) return false;
+      this.#selection = { kind, id };
+      this.#drag = { type: 'device', base, id, start: p, from: dev.position };
+      this.#render();
+      return true;
+    }
     if (kind === 'source' && id) {
       const src = base.sources.find((x) => x.id === id);
       if (!src) return false;
@@ -561,6 +620,9 @@ export class PlanEditor {
       case 'source':
         next = moveSource(d.base, d.id, add(d.from, sub(p, d.start)));
         break;
+      case 'device':
+        next = moveDevice(d.base, d.id, add(d.from, sub(p, d.start)));
+        break;
       case 'underlay': {
         const u = d.base.underlay;
         if (!u) return;
@@ -621,6 +683,7 @@ export class PlanEditor {
     if (sel.kind === 'wall') return p.walls.find((w) => w.id === sel.id);
     if (sel.kind === 'room') return p.rooms.find((r) => r.id === sel.id);
     if (sel.kind === 'source') return p.sources.find((x) => x.id === sel.id);
+    if (sel.kind === 'device') return p.devices?.find((x) => x.id === sel.id);
     return findOpening(p, sel.id);
   }
 
@@ -722,13 +785,17 @@ export class PlanEditor {
     const sel = this.#selection;
     const parts: (HTMLElement | null)[] = [this.#warningsPanel()];
     if (this.#tool === 'source' && !sel) parts.push(this.#newSourcePanel());
+    if (this.#tool === 'device' && !sel) parts.push(this.#devicesPanel());
     if (this.#measured) parts.push(this.#measurePanel(this.#measured));
     if (sel?.kind === 'wall') parts.push(this.#wallPanel(sel.id));
     else if (sel?.kind === 'room') parts.push(this.#roomPanel(sel.id));
     else if (sel?.kind === 'door' || sel?.kind === 'window') parts.push(this.#openingPanel(sel.id));
     else if (sel?.kind === 'source') parts.push(this.#sourcePanel(sel.id));
-    else parts.push(this.#planPanel());
-    if (!sel && this.#tool !== 'source') parts.push(this.#underlayPanel(), this.#materialsPanel());
+    else if (sel?.kind === 'device') parts.push(this.#devicePanel(sel.id));
+    else if (this.#tool !== 'device') parts.push(this.#planPanel());
+    if (this.#tool === 'device' || sel?.kind === 'device') this.#deviceKey = this.#deviceListKey();
+    if (!sel && this.#tool !== 'source' && this.#tool !== 'device')
+      parts.push(this.#underlayPanel(), this.#materialsPanel());
     this.inspector.replaceChildren(...parts.filter((x): x is HTMLElement => x !== null));
     this.inspector.dataset['selection'] = sel ? `${sel.kind}:${sel.id}` : '';
     this.inspector.dataset['walls'] = String(plan.walls.length);
@@ -957,7 +1024,7 @@ export class PlanEditor {
       h(
         'p',
         { class: 'meta' },
-        `${plan.walls.length} walls · ${plan.rooms.length} rooms · ${plan.doors.length} doors · ${plan.windows.length} windows · ${plan.sources.length} sources · ${area.toFixed(1)} m²`,
+        `${plan.walls.length} walls · ${plan.rooms.length} rooms · ${plan.doors.length} doors · ${plan.windows.length} windows · ${plan.sources.length} sources · ${plan.devices?.length ?? 0} devices · ${area.toFixed(1)} m²`,
       ),
     );
   }
@@ -1069,6 +1136,148 @@ export class PlanEditor {
         `${areaName ? `In ${areaName}` : 'No area'} · ${src.position[0].toFixed(2)}, ${src.position[1].toFixed(2)} m`,
       ),
       button('Delete source', () => this.deleteSelection(), {
+        class: 'danger',
+        'data-action': 'delete',
+      }),
+    );
+  }
+
+  // ---- devices ----
+
+  #deviceChoices(): ReturnType<typeof deviceChoices> {
+    return deviceChoices(this.#host.hass(), this.plan.floor_id ?? null);
+  }
+
+  #deviceListKey(): string {
+    const placed = (this.plan.devices ?? []).map((d) => d.entity_id).join();
+    const choices = this.#deviceChoices()
+      .map((c) => `${c.entity_id}=${c.name}@${c.area_id}`)
+      .join();
+    return `${placed}|${choices}|${this.#armed}`;
+  }
+
+  #placeDevice(entity: string, p: Point): void {
+    const r = addDevice(this.plan, entity, p);
+    this.#armed = null;
+    this.#note = '';
+    this.#selection = { kind: 'device', id: r.id };
+    this.#commit(r.plan);
+  }
+
+  #autoPlace(): void {
+    const spots = autoPlace(this.plan, this.#deviceChoices());
+    let plan = this.plan;
+    for (const s of spots) plan = addDevice(plan, s.entity_id, s.position).plan;
+    this.#note =
+      spots.length > 0
+        ? `Placed ${spots.length} device${spots.length === 1 ? '' : 's'} in their rooms. Drag them where they really are.`
+        : 'Nothing to place: link rooms to areas first, or every device in them is on the plan.';
+    if (spots.length > 0) this.#commit(plan);
+    else this.#renderInspector();
+  }
+
+  #devicesPanel(): HTMLElement {
+    const hass = this.#host.hass();
+    const placed = new Set((this.plan.devices ?? []).map((d) => d.entity_id));
+    const free = this.#deviceChoices().filter((c) => !placed.has(c.entity_id));
+    const areaName = (a: string | null): string => (a ? (hass?.areas?.[a]?.name ?? a) : 'No area');
+    const list = h('ul', { class: 'entities', 'aria-label': 'Entities not on the plan' });
+    for (const c of free) {
+      const item = h(
+        'li',
+        {
+          draggable: 'true',
+          'data-entity': c.entity_id,
+          'aria-pressed': String(this.#armed === c.entity_id),
+          role: 'button',
+          tabindex: 0,
+          title: `${c.entity_id} — drag onto the plan, or click and then click the plan`,
+        },
+        h('span', { class: 'name' }, c.name),
+        h('span', { class: 'meta' }, areaName(c.area_id)),
+      );
+      const arm = (): void => {
+        this.#armed = this.#armed === c.entity_id ? null : c.entity_id;
+        this.#renderInspector();
+      };
+      item.addEventListener('click', arm);
+      item.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          arm();
+        }
+      });
+      item.addEventListener('dragstart', (e) => {
+        e.dataTransfer?.setData(ENTITY_MIME, c.entity_id);
+        e.dataTransfer?.setData('text/plain', c.entity_id);
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
+      });
+      list.append(item);
+    }
+    const filter = h('input', {
+      type: 'search',
+      name: 'device-filter',
+      placeholder: 'Filter',
+      'aria-label': 'Filter entities',
+    });
+    filter.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      for (const li of list.children) {
+        const el = li as HTMLElement;
+        el.hidden =
+          q !== '' &&
+          !el.textContent!.toLowerCase().includes(`${q}`) &&
+          !el.dataset['entity']!.includes(q);
+      }
+    });
+    return this.#section(
+      'Devices',
+      'devices',
+      h(
+        'p',
+        { class: 'meta' },
+        `${placed.size} on the plan · ${free.length} to place${this.plan.floor_id ? ' on this floor' : ''}`,
+      ),
+      button('Auto-place by area', () => this.#autoPlace(), { 'data-action': 'auto-place' }),
+      this.#note ? h('p', { class: 'hint', role: 'status' }, this.#note) : null,
+      free.length > 0 ? field('Entities', filter) : null,
+      free.length > 0
+        ? list
+        : h(
+            'p',
+            { class: 'hint' },
+            'Every light, switch, door, window, motion sensor, fan, cover and lock here is on the plan.',
+          ),
+    );
+  }
+
+  #devicePanel(id: string): HTMLElement | null {
+    const dev = this.plan.devices?.find((d) => d.id === id);
+    if (!dev) return null;
+    const hass = this.#host.hass();
+    const placed = new Set((this.plan.devices ?? []).map((d) => d.entity_id));
+    const opts = this.#deviceChoices()
+      .filter((c) => c.entity_id === dev.entity_id || !placed.has(c.entity_id))
+      .map((c) => ({ value: c.entity_id, label: c.name }));
+    if (!opts.some((o) => o.value === dev.entity_id))
+      opts.unshift({ value: dev.entity_id, label: `${dev.entity_id} (not on this floor)` });
+    const area = hass ? entityArea(hass, dev.entity_id) : null;
+    const look = deviceLook(dev.entity_id, hass?.states?.[dev.entity_id]);
+    return this.#section(
+      'Device',
+      'device',
+      field(
+        'Entity',
+        select(opts, dev.entity_id, (v) => this.#commit(updateDevice(this.plan, id, v)), {
+          name: 'entity',
+        }),
+      ),
+      h(
+        'p',
+        { class: 'meta', 'data-entity': dev.entity_id },
+        `${look.label} · ${area ? (hass?.areas?.[area]?.name ?? area) : 'No area'} · ${dev.position[0].toFixed(2)}, ${dev.position[1].toFixed(2)} m`,
+      ),
+      button('Delete device', () => this.deleteSelection(), {
         class: 'danger',
         'data-action': 'delete',
       }),
@@ -1217,7 +1426,16 @@ const editorStyles = `
   svg.editing { cursor: default; }
   svg.editing[data-tool=wall], svg.editing[data-tool=room], svg.editing[data-tool=measure],
   svg.editing[data-tool=door], svg.editing[data-tool=window], svg.editing[data-tool=source] { cursor: crosshair; }
-  svg.editing .source { cursor: move; }
+  svg.editing .source, svg.editing .device { cursor: move; }
+  svg.editing[data-tool=device] { cursor: crosshair; }
+  .inspector ul.entities { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+  .inspector ul.entities li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px;
+    border-radius: 4px; cursor: grab; font-size: 0.85rem; border: 1px solid transparent; }
+  .inspector ul.entities li:hover { border-color: var(--divider-color, #ddd); }
+  .inspector ul.entities li[aria-pressed=true] { border-color: var(--primary-color, #03a9f4);
+    background: color-mix(in srgb, var(--primary-color, #03a9f4) 10%, transparent); }
+  .inspector ul.entities .meta { margin: 0; white-space: nowrap; }
+  .inspector [data-action=auto-place] { margin: 0 0 8px; }
   .inspector .warnings { margin: 8px 0 0; padding: 4px 8px; border-radius: 4px; font-size: 0.85rem;
     background: color-mix(in srgb, var(--warning-color, #ffa600) 15%, transparent);
     border-left: 3px solid var(--warning-color, #ffa600); }

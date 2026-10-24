@@ -105,7 +105,7 @@ test('creating a plan for an empty floor opens the editor on it', async ({ page 
 });
 
 test('the Chartroom card renders on a dashboard', async ({ page }) => {
-  const card = page.locator('chartroom-card');
+  const card = page.locator('chartroom-card[data-plan=example]');
   // On a cold start the first page load can miss the card module (it is added to the frontend's
   // extra modules when the config entry loads) and show a configuration error; a reload picks
   // it up. Each attempt is bounded so the loop really does reload.
@@ -117,6 +117,5 @@ test('the Chartroom card renders on a dashboard', async ({ page }) => {
     await expect(card.locator('svg.plan')).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 60_000, intervals: [1_000, 2_000, 5_000] });
   await expect(card.locator('h2.title')).toHaveText('Chartroom');
-  await expect(card.locator('.floors')).toBeVisible();
-  if (SHOTS) await shot(page, { path: `${SHOTS}/card.png` });
+  await expect(card.locator('svg.plan [data-kind=room]')).toHaveCount(5);
 });

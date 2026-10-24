@@ -1,6 +1,8 @@
 // The plan as live SVG: underlay image, the plan body, and an overlay group the editor draws
 // handles into. Handles pan (drag), zoom (wheel, pinch, buttons) and keeps the viewBox in metres.
 import { planBounds } from './geometry';
+import type { Hass } from './ha-types';
+import { MarkerLayer, markerStyles } from './markers';
 import type { Plan, Point } from './plan';
 import { planBody } from './plan-svg';
 import { s } from './ui';
@@ -21,6 +23,8 @@ export interface PointerDelegate {
   move(p: Point, e: PointerEvent): void;
   up(p: Point, e: PointerEvent): void;
   hover?(p: Point, e: PointerEvent): void;
+  /** The browser took the pointer (a scroll started): drop the gesture without acting. */
+  cancel?(): void;
 }
 
 export class PlanView {
@@ -28,6 +32,10 @@ export class PlanView {
   readonly overlay: SVGGElement;
   readonly #underlay: SVGGElement;
   readonly #body: SVGGElement;
+  /** Live device markers, above the plan and below the editor's handles. */
+  readonly markers = new MarkerLayer();
+  #hass: Hass | undefined;
+  #selectedDevice: string | null = null;
   #view: View = { x: 0, y: 0, w: 10, h: 6 };
   #plan: Plan | null = null;
   #fitted = false;
@@ -39,22 +47,29 @@ export class PlanView {
   /** Called after every pan or zoom (the editor rescales its handles). */
   onViewChange: (() => void) | null = null;
 
-  constructor() {
+  /**
+   * `fixed`: the dashboard card. No pan or zoom, so the page still scrolls over it, and the plan is
+   * refitted whenever the card changes size.
+   */
+  constructor(readonly fixed = false) {
     this.#underlay = s('g', { class: 'underlay' });
     this.#body = s('g', { class: 'body' });
     this.overlay = s('g', { class: 'overlay' });
     this.svg = s(
       'svg',
-      { class: 'plan', role: 'img', 'aria-label': 'Floor plan', preserveAspectRatio: 'none' },
+      // A group, not an image, so the device markers inside are buttons screen readers reach.
+      { class: 'plan', role: 'group', 'aria-label': 'Floor plan', preserveAspectRatio: 'none' },
       this.#underlay,
       this.#body,
+      this.markers.g,
       this.overlay,
     );
-    this.svg.addEventListener('wheel', (e) => this.#wheel(e), { passive: false });
+    if (fixed) this.svg.classList.add('fixed');
+    else this.svg.addEventListener('wheel', (e) => this.#wheel(e), { passive: false });
     this.svg.addEventListener('pointerdown', (e) => this.#down(e));
     this.svg.addEventListener('pointermove', (e) => this.#move(e));
     this.svg.addEventListener('pointerup', (e) => this.#up(e));
-    this.svg.addEventListener('pointercancel', (e) => this.#up(e));
+    this.svg.addEventListener('pointercancel', (e) => this.#up(e, true));
     this.svg.addEventListener('contextmenu', (e) => e.preventDefault());
     new ResizeObserver(() => this.#resize()).observe(this.svg);
   }
@@ -83,8 +98,16 @@ export class PlanView {
       const room = plan?.rooms.find((r) => r.id === (el as SVGElement).dataset['id']);
       if (room?.area_id) el.classList.add('linked');
     }
+    this.#selectedDevice = selected?.kind === 'device' ? selected.id : null;
+    this.markers.render(plan?.devices ?? [], this.#hass, this.#selectedDevice);
     this.#renderUnderlay();
     if (!this.#fitted) this.fit();
+  }
+
+  /** New states from Home Assistant: restyle the markers whose entity changed. */
+  setHass(hass: Hass | undefined): void {
+    this.#hass = hass;
+    this.markers.update(hass);
   }
 
   /** The underlay image as a URL the browser can load (a blob URL). */
@@ -154,6 +177,7 @@ export class PlanView {
     this.#view = v;
     this.svg.setAttribute('viewBox', viewBoxOf(v));
     this.svg.style.setProperty('--mpp', String(this.mpp));
+    this.markers.setScale(this.mpp);
     this.onViewChange?.();
   }
 
@@ -161,7 +185,7 @@ export class PlanView {
     const w = this.svg.clientWidth;
     const h = this.svg.clientHeight;
     if (w === 0 || h === 0) return;
-    if (!this.#fitted) this.fit();
+    if (!this.#fitted || this.fixed) this.fit();
     else this.#setView(withAspect(this.#view, w / h));
   }
 
@@ -173,6 +197,13 @@ export class PlanView {
   }
 
   #down(e: PointerEvent): void {
+    if (this.fixed) {
+      if (this.#pointers.size === 0 && this.delegate?.down(this.toPlan(e), e)) {
+        this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        this.#gesture = 'delegate';
+      }
+      return;
+    }
     this.svg.setPointerCapture?.(e.pointerId);
     this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (this.#pointers.size === 2) {
@@ -224,9 +255,12 @@ export class PlanView {
     }
   }
 
-  #up(e: PointerEvent): void {
-    this.#pointers.delete(e.pointerId);
-    if (this.#gesture === 'delegate') this.delegate?.up(this.toPlan(e), e);
+  #up(e: PointerEvent, cancelled = false): void {
+    if (!this.#pointers.delete(e.pointerId) && this.fixed) return;
+    if (this.#gesture === 'delegate') {
+      if (cancelled && this.delegate?.cancel) this.delegate.cancel();
+      else this.delegate?.up(this.toPlan(e), e);
+    }
     if (this.#pointers.size === 0) {
       this.#gesture = null;
       this.#last = null;
@@ -245,6 +279,7 @@ export const planViewStyles = `
   svg.plan { display: block; width: 100%; height: 100%; touch-action: none; user-select: none;
     background: var(--primary-background-color, #fafafa); cursor: grab; }
   svg.plan.panning { cursor: grabbing; }
+  svg.plan.fixed { touch-action: pan-x pan-y; cursor: default; background: none; }
   .room { fill: var(--card-background-color, #fff); stroke: var(--divider-color, #ddd); stroke-width: 1px; vector-effect: non-scaling-stroke; }
   .with-underlay .room { fill-opacity: 0.35; }
   .room.linked { fill: color-mix(in srgb, var(--primary-color, #03a9f4) 6%, var(--card-background-color, #fff)); }
@@ -263,4 +298,4 @@ export const planViewStyles = `
   .selected.room { fill: color-mix(in srgb, var(--primary-color, #03a9f4) 18%, transparent); stroke: var(--primary-color, #03a9f4); stroke-width: 2px; }
   .selected .door, .selected .swing { stroke: var(--primary-color, #03a9f4); }
   .underlay { pointer-events: none; }
-`;
+${markerStyles}`;

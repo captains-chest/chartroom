@@ -109,6 +109,13 @@ export interface Underlay {
   opacity: number;
 }
 
+/** A Home Assistant entity shown as a live marker on the plan. Its name and icon come from HA. */
+export interface Device {
+  id: string;
+  entity_id: string;
+  position: Point;
+}
+
 export interface Plan {
   schema_version: typeof PLAN_SCHEMA_VERSION;
   name: string;
@@ -120,6 +127,8 @@ export interface Plan {
   doors: Door[];
   windows: Window[];
   sources: Source[];
+  /** Live device markers (Phase 2). Older plans have none. */
+  devices?: Device[];
   /** Materials added to or overriding DEFAULT_MATERIALS. */
   materials?: Material[];
   underlay?: Underlay | null;
@@ -161,6 +170,7 @@ export function normalizePlan(raw: unknown): Plan {
     doors: r.doors ?? [],
     windows: r.windows ?? [],
     sources: r.sources ?? [],
+    devices: r.devices ?? [],
   };
 }
 
@@ -257,6 +267,14 @@ export function validatePlan(plan: Plan): string[] {
     if (r.polygon.length < 3) problems.push(`room ${r.id} has fewer than 3 corners`);
   }
   for (const s of plan.sources) unique('source', s.id);
+  const placed = new Set<string>();
+  for (const d of plan.devices ?? []) {
+    unique('device', d.id);
+    if (!/^[a-z_]+\.[a-z0-9_]+$/.test(d.entity_id))
+      problems.push(`device ${d.id}: bad entity_id ${d.entity_id}`);
+    if (placed.has(d.entity_id)) problems.push(`device ${d.id}: ${d.entity_id} is placed twice`);
+    placed.add(d.entity_id);
+  }
   if (plan.outline.length < 3 && plan.walls.length > 0) {
     problems.push('outline has fewer than 3 corners');
   }
@@ -267,7 +285,7 @@ export function validatePlan(plan: Plan): string[] {
  * Soft limits per floor from docs/render-design.md: above them the signal heatmap may get slow on
  * phones and wall tablets, so the editor warns (it still saves).
  */
-export const LIMITS = { walls: 512, accessPoints: 32 } as const;
+export const LIMITS = { walls: 512, accessPoints: 32, devices: 256 } as const;
 
 /** Access points and radios: the sources the signal layer traces rays from. */
 export const isSignalSource = (s: Source): boolean =>
@@ -284,6 +302,11 @@ export function limitWarnings(plan: Plan): string[] {
   if (aps > LIMITS.accessPoints)
     out.push(
       `${aps} access points and radios on this floor (more than ${LIMITS.accessPoints}): the signal map may be slow on phones and tablets.`,
+    );
+  const devices = plan.devices?.length ?? 0;
+  if (devices > LIMITS.devices)
+    out.push(
+      `${devices} devices on this floor (more than ${LIMITS.devices}): markers may be slow to update on phones and tablets.`,
     );
   return out;
 }

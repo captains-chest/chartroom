@@ -33,3 +33,100 @@ template:
         unit_of_measurement: 'dBm'
         device_class: signal_strength
         state_class: measurement
+  - light:
+      - name: Kitchen ceiling light
+        unique_id: e2e_kitchen_ceiling_light
+        state: "{{ is_state('input_boolean.kitchen_light', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target: { entity_id: input_boolean.kitchen_light }
+        turn_off:
+          - action: input_boolean.turn_off
+            target: { entity_id: input_boolean.kitchen_light }
+      - name: Living room ceiling light
+        unique_id: e2e_living_room_ceiling_light
+        state: "{{ is_state('input_boolean.living_room_light', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target: { entity_id: input_boolean.living_room_light }
+        turn_off:
+          - action: input_boolean.turn_off
+            target: { entity_id: input_boolean.living_room_light }
+      - name: Kitchen pendant unreachable
+        unique_id: e2e_kitchen_pendant_unreachable
+        state: '{{ false }}'
+        availability: '{{ false }}'
+        turn_on: []
+        turn_off: []
+  - switch:
+      - name: Coffee maker
+        unique_id: e2e_coffee_maker
+        state: "{{ is_state('input_boolean.coffee_maker', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target: { entity_id: input_boolean.coffee_maker }
+        turn_off:
+          - action: input_boolean.turn_off
+            target: { entity_id: input_boolean.coffee_maker }
+  - binary_sensor:
+      - name: Front door
+        unique_id: e2e_front_door
+        device_class: door
+        state: "{{ is_state('input_boolean.front_door', 'on') }}"
+      - name: Kitchen window
+        unique_id: e2e_kitchen_window
+        device_class: window
+        state: "{{ is_state('input_boolean.kitchen_window', 'on') }}"
+      - name: Hall motion
+        unique_id: e2e_hall_motion
+        device_class: motion
+        state: "{{ is_state('input_boolean.hall_motion', 'on') }}"
+  - lock:
+      - name: Front door lock
+        unique_id: e2e_front_door_lock
+        state: "{{ 'locked' if is_state('input_boolean.front_door_lock', 'on') else 'unlocked' }}"
+        lock:
+          - action: input_boolean.turn_on
+            target: { entity_id: input_boolean.front_door_lock }
+        unlock:
+          - action: input_boolean.turn_off
+            target: { entity_id: input_boolean.front_door_lock }
+  - cover:
+      - name: Living room blind
+        unique_id: e2e_living_room_blind
+        device_class: blind
+        state: "{{ 'open' if is_state('input_boolean.living_room_blind', 'on') else 'closed' }}"
+        open_cover:
+          - action: input_boolean.turn_on
+            target: { entity_id: input_boolean.living_room_blind }
+        close_cover:
+          - action: input_boolean.turn_off
+            target: { entity_id: input_boolean.living_room_blind }
+
+# Devices for the marker tests, named like the developer instance's simulated ones. Template
+# entities backed by input booleans, so turning them on and off really changes state.
+input_boolean:
+  kitchen_light:
+    name: Kitchen light (sim)
+    initial: false
+  living_room_light:
+    name: Living room light (sim)
+    initial: true
+  coffee_maker:
+    name: Coffee maker (sim)
+    initial: false
+  front_door:
+    name: Front door (sim)
+    initial: false
+  kitchen_window:
+    name: Kitchen window (sim)
+    initial: true
+  hall_motion:
+    name: Hall motion (sim)
+    initial: false
+  front_door_lock:
+    name: Front door lock (sim)
+    initial: true
+  living_room_blind:
+    name: Living room blind (sim)
+    initial: false

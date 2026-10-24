@@ -16,6 +16,8 @@ export interface EntityEntry {
   area_id?: string | null;
   device_id?: string | null;
   name?: string | null;
+  hidden?: boolean;
+  entity_category?: string | null;
 }
 
 export interface DeviceEntry {
@@ -27,6 +29,7 @@ export interface EntityState {
   entity_id: string;
   state: string;
   attributes: { friendly_name?: string; device_class?: string; unit_of_measurement?: string };
+  last_changed?: string;
 }
 
 export interface HassConnection {
@@ -42,6 +45,12 @@ export interface Hass {
   states?: Record<string, EntityState>;
   connection?: HassConnection;
   user?: { is_admin: boolean };
+  callService?: (
+    domain: string,
+    service: string,
+    data?: Record<string, unknown>,
+    target?: Record<string, unknown>,
+  ) => Promise<unknown>;
   /** fetch() with the user's access token, for the integration's HTTP views. */
   fetchWithAuth?: (path: string, init?: RequestInit) => Promise<Response>;
 }

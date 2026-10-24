@@ -41,6 +41,7 @@ export function nextId(plan: Plan, prefix: string): string {
     ...plan.doors.map((x) => x.id),
     ...plan.windows.map((x) => x.id),
     ...plan.sources.map((x) => x.id),
+    ...(plan.devices ?? []).map((x) => x.id),
   ]);
   for (let i = 1; ; i++) {
     const id = `${prefix}_${i}`;
@@ -279,6 +280,9 @@ export function scalePlan(plan: Plan, k: number): Plan {
     doors: plan.doors.map(op),
     windows: plan.windows.map(op),
     sources: plan.sources.map((x) => ({ ...x, position: s(x.position) })),
+    ...(plan.devices
+      ? { devices: plan.devices.map((x) => ({ ...x, position: s(x.position) })) }
+      : {}),
     underlay: plan.underlay
       ? { ...plan.underlay, scale: plan.underlay.scale * k, origin: s(plan.underlay.origin) }
       : plan.underlay,
@@ -434,4 +438,40 @@ export function updateSource(plan: Plan, id: string, patch: Partial<Omit<Source,
 
 export function deleteSource(plan: Plan, id: string): Plan {
   return { ...plan, sources: plan.sources.filter((x) => x.id !== id) };
+}
+
+// ---- devices ----
+
+/** Place an entity as a device marker. An entity already on the plan is moved instead. */
+export function addDevice(
+  plan: Plan,
+  entity_id: string,
+  position: Point,
+): { plan: Plan; id: string } {
+  const devices = plan.devices ?? [];
+  const existing = devices.find((d) => d.entity_id === entity_id);
+  if (existing) return { plan: moveDevice(plan, existing.id, position), id: existing.id };
+  const id = nextId(plan, 'device');
+  return {
+    plan: { ...plan, devices: [...devices, { id, entity_id, position: mmPoint(position) }] },
+    id,
+  };
+}
+
+export function moveDevice(plan: Plan, id: string, to: Point): Plan {
+  return {
+    ...plan,
+    devices: (plan.devices ?? []).map((d) => (d.id === id ? { ...d, position: mmPoint(to) } : d)),
+  };
+}
+
+export function updateDevice(plan: Plan, id: string, entity_id: string): Plan {
+  return {
+    ...plan,
+    devices: (plan.devices ?? []).map((d) => (d.id === id ? { ...d, entity_id } : d)),
+  };
+}
+
+export function deleteDevice(plan: Plan, id: string): Plan {
+  return { ...plan, devices: (plan.devices ?? []).filter((d) => d.id !== id) };
 }

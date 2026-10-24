@@ -3,6 +3,8 @@
 export const HA_URL = process.env['HA_URL'] ?? 'http://127.0.0.1:8123';
 export const CLIENT_ID = `${HA_URL}/`;
 export const DASHBOARD = 'chartroom-e2e';
+/** Throwaway plan the device tests create and delete. */
+export const DEVICES_PLAN = 'e2e-devices';
 
 export interface Tokens {
   access_token: string;
@@ -174,7 +176,10 @@ export async function ensureDashboard(token: string): Promise<void> {
           {
             title: 'Chartroom',
             path: 'main',
-            cards: [{ type: 'custom:chartroom-card', title: 'Chartroom' }],
+            cards: [
+              { type: 'custom:chartroom-card', title: 'Chartroom', plan_id: 'example' },
+              { type: 'custom:chartroom-card', title: 'Devices', plan_id: DEVICES_PLAN },
+            ],
           },
         ],
       },
@@ -227,6 +232,16 @@ export const SENSOR_AREAS: Record<string, string> = {
   'sensor.kitchen_humidity': 'kitchen',
   'sensor.bedroom_temperature': 'bedroom',
   'sensor.hall_sensor_rssi': 'hall',
+  // Devices for the marker tests.
+  'light.kitchen_ceiling_light': 'kitchen',
+  'light.living_room_ceiling_light': 'living_room',
+  'light.kitchen_pendant_unreachable': 'kitchen',
+  'switch.coffee_maker': 'kitchen',
+  'binary_sensor.front_door': 'hall',
+  'binary_sensor.kitchen_window': 'kitchen',
+  'binary_sensor.hall_motion': 'hall',
+  'lock.front_door_lock': 'hall',
+  'cover.living_room_blind': 'living_room',
 };
 
 /** Wait until Home Assistant has finished starting (integrations such as template are set up). */

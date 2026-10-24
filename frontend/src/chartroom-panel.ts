@@ -3,6 +3,7 @@ import { pingWorker } from './field-worker';
 import { emptyPlan, normalizePlan, type Plan } from './plan';
 import { type FloorTab, floorTabs, planIdForFloor } from './model';
 import type { PlanEditor } from './plan-editor';
+import { DeviceControls, deviceControlStyles } from './device-controls';
 import { PlanView, planViewStyles } from './plan-view';
 import { button, h } from './ui';
 import { loadUnderlayUrl } from './underlay';
@@ -36,6 +37,7 @@ function readUnderlayPref(): UnderlayPref {
 export class ChartroomPanel extends HTMLElement {
   #hass?: Hass;
   #view = new PlanView();
+  #controls = new DeviceControls(this.#view, this, () => this.#hass);
   #tabsEl: HTMLElement;
   #status: HTMLElement;
   #stage: HTMLElement;
@@ -65,7 +67,8 @@ export class ChartroomPanel extends HTMLElement {
     super();
     const root = this.attachShadow({ mode: 'open' });
     const style = h('style');
-    style.textContent = panelStyles + planViewStyles;
+    style.textContent = panelStyles + planViewStyles + deviceControlStyles;
+    this.#controls.attach();
     this.#menuButton = button('☰', () => this.#toggleMenu(), {
       class: 'menu',
       'aria-label': 'Sidebar',
@@ -118,6 +121,7 @@ export class ChartroomPanel extends HTMLElement {
       this.#empty,
       zoom,
       this.#underlayControls,
+      this.#controls.dialog,
     );
     root.append(
       style,
@@ -150,6 +154,7 @@ export class ChartroomPanel extends HTMLElement {
 
   set hass(hass: Hass) {
     this.#hass = hass;
+    this.#view.setHass(hass);
     this.toggleAttribute('narrow', this.narrow);
     this.#menuButton.hidden = !this.narrow;
     if (!this.#plansRequested && hass.connection) {
@@ -378,6 +383,7 @@ export class ChartroomPanel extends HTMLElement {
     this.#editButton.textContent = 'Edit';
     this.toggleAttribute('editing', false);
     this.#view.setPlan(this.#plan);
+    this.#controls.attach();
     this.#renderUnderlayControls();
   }
 

@@ -4,6 +4,7 @@
 // free when their sensor says open), the strongest source winning. Pure, so the worker (Canvas2D
 // fallback), the tests and the WebGL2 shader's agreement check all use this one definition.
 import { fadeAt, type FieldGrid } from './field';
+import { closestOnSegment } from './geometry';
 import type { Hass } from './ha-types';
 import {
   lossDb,
@@ -109,18 +110,9 @@ export function barrierSegments(plan: Plan, hass?: Hass): number[] {
     for (const e of [w.a, w.b])
       for (const o of plan.walls) {
         if (o === w) continue;
-        const [ax, ay] = o.a;
-        const dx = o.b[0] - ax;
-        const dy = o.b[1] - ay;
-        const t = Math.min(
-          1,
-          Math.max(0, ((e[0] - ax) * dx + (e[1] - ay) * dy) / (dx * dx + dy * dy || 1)),
-        );
-        const px = ax + t * dx;
-        const py = ay + t * dy;
-        const d = Math.hypot(e[0] - px, e[1] - py);
+        const { point, d } = closestOnSegment(o.a, o.b, e);
         if (d > 1e-9 && d <= (o.thickness + w.thickness) / 2 + JOIN_SLACK)
-          out.push(e[0], e[1], px, py);
+          out.push(e[0], e[1], point[0], point[1]);
       }
   return out;
 }

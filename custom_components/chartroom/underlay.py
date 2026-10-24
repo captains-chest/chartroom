@@ -5,15 +5,13 @@ from __future__ import annotations
 import hashlib
 from http import HTTPStatus
 from pathlib import Path
-import re
 
 from aiohttp import web
 from homeassistant.components.http import KEY_HASS, KEY_HASS_USER, HomeAssistantView
 from homeassistant.core import HomeAssistant
 
-from .const import UNDERLAY_DIR, UNDERLAY_MAX_BYTES, UNDERLAY_URL
+from .const import PLAN_ID_RE, UNDERLAY_DIR, UNDERLAY_MAX_BYTES, UNDERLAY_URL
 
-PLAN_ID_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
 TYPES = {
     "image/png": "png",
     "image/jpeg": "jpg",

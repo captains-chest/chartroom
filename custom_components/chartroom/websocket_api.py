@@ -9,12 +9,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 import voluptuous as vol
 
-from .const import DOMAIN, PLAN_SCHEMA_VERSION, SIGNAL_PLAN_CHANGED, VERSION
+from .const import DOMAIN, PLAN_ID_RE, PLAN_SCHEMA_VERSION, SIGNAL_PLAN_CHANGED, VERSION
 from .mesh import DATA_MESH_TEST, async_get_topology
 from .store import ChartroomStore
 from .underlay import async_remove_underlay
 
-PLAN_ID = vol.All(str, vol.Length(min=1, max=64), vol.Match(r"^[a-z0-9_-]+$"))
+PLAN_ID = vol.All(str, vol.Match(PLAN_ID_RE))
 
 
 def _plan_schema_version(value: Any) -> int:

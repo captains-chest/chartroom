@@ -77,11 +77,12 @@ async def test_plans_survive_restart(hass: HomeAssistant, hass_storage: dict[str
     assert hass.data[DOMAIN].list_plans() == [{"id": "up", "name": "Upstairs", "floor_id": "up"}]
 
 
-async def test_rejects_bad_plan_id(hass: HomeAssistant, hass_ws_client) -> None:
+@pytest.mark.parametrize("plan_id", ["../etc", "", "up\n", "x" * 65, "Up"])
+async def test_rejects_bad_plan_id(hass: HomeAssistant, hass_ws_client, plan_id: str) -> None:
     await _setup(hass)
     ws = await hass_ws_client(hass)
     await ws.send_json_auto_id(
-        {"type": "chartroom/plans/save", "plan_id": "../etc", "plan": {"name": "x"}}
+        {"type": "chartroom/plans/save", "plan_id": plan_id, "plan": {"name": "x"}}
     )
     msg = await ws.receive_json()
     assert not msg["success"]

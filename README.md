@@ -4,12 +4,13 @@ Floor plans for Home Assistant: draw your home once, put your lights, switches, 
 on it, and see temperature, humidity and Wi-Fi/radio signal as live heatmaps over it, plus your
 Zigbee and Z-Wave mesh links — in a sidebar panel and as a dashboard card.
 
-> **Status: Phase 4 (signal strength and mesh links) is complete.** Phase 1 gave the panel one
-> tab per Home Assistant floor, pan and zoom, an optional underlay and an editor for walls, doors,
-> windows, rooms and sensor/signal sources. Phase 2 added live device markers (tap to toggle, hold
-> for details). Phase 3 added live temperature and humidity fields between your sensors. Phase 4
-> adds an estimated signal-strength map from your access points and radios through your walls, and
-> the ZHA, Z-Wave JS and Zigbee2MQTT mesh drawn between your devices. See
+> **Status: Phase 5 (history and phones) is complete.** Phase 1 gave the panel one tab per Home
+> Assistant floor, pan and zoom, an optional underlay and an editor for walls, doors, windows,
+> rooms and sensor/signal sources. Phase 2 added live device markers (tap to toggle, hold for
+> details). Phase 3 added live temperature and humidity fields between your sensors. Phase 4 added
+> an estimated signal-strength map from your access points and radios through your walls, and the
+> ZHA, Z-Wave JS and Zigbee2MQTT mesh drawn between your devices. Phase 5 adds a history slider
+> that plays the plan back from Home Assistant's recorder, and a phone layout for the panel. See
 > [docs/render-design.md](docs/render-design.md) for how the heatmaps are rendered and how fast
 > they are.
 
@@ -111,6 +112,45 @@ makes the routers scan). The toggle works with any heatmap or none, and is remem
 device.
 
 ![Mesh links over the signal heatmap](docs/images/mesh-links.png)
+
+## History
+
+**History** (next to the layer buttons) shows the plan as it was. A bar opens under the plan with
+a time slider, **Play**/**Pause**, the ranges **6h**, **24h** and **7d**, and **Live**. While it is
+open the plan has an orange frame, and everything on it follows the slider: the heatmaps move to
+the recorded readings with the same smooth transition as live ones, device markers show their
+recorded state, and a source that was unavailable then drops out of the signal map. Play runs
+through the range in about 30 seconds and stops at the end. **Live** closes the bar and returns to
+the current states.
+
+- The data comes from Home Assistant's own websocket API: `history/history_during_period` for
+  6h and 24h, and for 7d the hourly means from `recorder/statistics_during_period` for sensors
+  that keep statistics (those with a `state_class`), with raw history for everything else.
+  Only the plan's placed sensors, sources and devices are fetched.
+- While you look at the past, tapping a marker opens its details instead of toggling it.
+- The history code is loaded only when you first open it (1.9 KB gzip).
+- What you can go back to depends on your recorder settings (`purge_keep_days`, 10 days by
+  default); long-term statistics are kept beyond that.
+
+![History: the plan at an earlier time](docs/images/panel-history.png)
+
+## On a phone
+
+On a narrow screen (600 px or less, as in the Home Assistant companion apps) the panel gives the
+plan the whole screen:
+
+- The controls dock in a bottom sheet under the plan: layer buttons in one row you can swipe, the
+  history bar with a full-width slider, and a handle that opens the rest (the underlay controls).
+- Floors stay as tabs in the header, next to the button that opens Home Assistant's sidebar.
+- One finger pans and two fingers pinch-zoom; **⤢** fits the plan again.
+- The heatmap legend moves to the top left; markers and labels keep their on-screen size at any
+  zoom, and buttons are at least 36 px tall for a finger.
+- The sheet leaves room for the phone's home indicator (`safe-area-inset-bottom`).
+
+<p>
+  <img src="docs/images/phone.png" alt="The panel on a phone" width="260">
+  <img src="docs/images/phone-history.png" alt="The history bar on a phone" width="260">
+</p>
 
 ## Devices
 
@@ -223,6 +263,16 @@ End-to-end tests need a running Home Assistant with Chartroom copied into its
 pnpm exec playwright install chromium
 HA_URL=http://127.0.0.1:8123 pnpm e2e
 ```
+
+Playwright runs three projects: `chromium` (desktop), `phone` (a Pixel 7 viewport with touch,
+for the phone layout) and `history`, which runs after the desktop tests because it records
+readings far from the others' on the shared instance.
+
+The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
+(with what it shares) 20 KB gzip and everything together 50 KB gzip. The heatmap renderer, editor,
+mesh layer and history bar are separate chunks loaded when first used. The build squeezes the CSS,
+GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
+byte for byte.
 
 `PERF=1 pnpm e2e e2e/perf.spec.ts` runs the CPU-throttled wall-tablet check (not in CI).
 

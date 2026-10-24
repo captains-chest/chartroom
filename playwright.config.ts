@@ -2,6 +2,12 @@ import { defineConfig, devices } from '@playwright/test';
 
 // End-to-end tests against a running Home Assistant with Chartroom installed.
 // CI starts one in Docker (see .github/workflows/ci.yml); locally point HA_URL / HA_TOKEN at yours.
+const desktop = {
+  ...devices['Desktop Chrome'],
+  viewport: { width: 1280, height: 800 },
+  ...(process.env['PW_CHANNEL'] ? { channel: process.env['PW_CHANNEL'] } : {}),
+};
+
 export default defineConfig({
   testDir: 'e2e',
   testMatch: '**/*.spec.ts',
@@ -18,9 +24,23 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: ['**/phone.spec.ts', '**/history.spec.ts'],
+      use: desktop,
+    },
+    {
+      // History records readings far from the others' (31 °C, 12 °C) on the shared instance, so
+      // it runs after the desktop tests rather than beside them.
+      name: 'history',
+      testMatch: '**/history.spec.ts',
+      dependencies: ['chromium'],
+      use: desktop,
+    },
+    {
+      // A phone with touch, the size of the companion app's view.
+      name: 'phone',
+      testMatch: '**/phone.spec.ts',
       use: {
-        ...devices['Desktop Chrome'],
-        viewport: { width: 1280, height: 800 },
+        ...devices['Pixel 7'],
         ...(process.env['PW_CHANNEL'] ? { channel: process.env['PW_CHANNEL'] } : {}),
       },
     },

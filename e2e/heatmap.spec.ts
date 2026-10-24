@@ -142,19 +142,36 @@ test('WebGL2 and the Canvas2D fallback draw the same field', async ({ page }) =>
   expect(r!.pixelMeanDiff).toBeLessThan(2);
   expect(r!.pixelMaxDiff).toBeLessThanOrEqual(24);
 
-  // Forced onto the fallback, the heatmap still shows the same field.
-  const gl = await panel.evaluate((el) => (el as WithView).view.heat!.readField());
-  await page.evaluate(() => localStorage.setItem('chartroom:renderer', 'canvas'));
-  try {
+  // Forced onto the fallback, the heatmap still shows the same field. Both loads must see the
+  // same readings (a reading can move between them), so a pair that doesn't is taken again.
+  const load = async (renderer: string | null) => {
+    await page.evaluate(
+      (r) =>
+        r
+          ? localStorage.setItem('chartroom:renderer', r)
+          : localStorage.removeItem('chartroom:renderer'),
+      renderer,
+    );
     await page.reload();
     await expect(panel.locator('.heat-legend')).toBeVisible();
-    expect((await heat(panel)).renderer).toBe('canvas');
-    const cpu = await panel.evaluate((el) => (el as WithView).view.heat!.readField());
+    const h = await heat(panel);
+    const f = await panel.evaluate((el) => (el as WithView).view.heat!.readField());
+    return { renderer: h.renderer, readings: JSON.stringify(h.data?.readings), field: f.field };
+  };
+  try {
+    let gl = await load(null);
+    let cpu = await load('canvas');
+    for (let i = 0; i < 3 && cpu.readings !== gl.readings; i++) {
+      gl = await load(null);
+      cpu = await load('canvas');
+    }
+    expect(gl.renderer).toBe('webgl2');
+    expect(cpu.renderer).toBe('canvas');
+    expect(cpu.readings).toBe(gl.readings);
     expect(cpu.field.length).toBe(gl.field.length);
     let max = 0;
     for (let i = 0; i < cpu.field.length; i += 3)
       max = Math.max(max, Math.abs(cpu.field[i]! - gl.field[i]!));
-    // Live readings may drift between the two loads on the developer instance.
     expect(max).toBeLessThan(1);
     await shot(page, 'heatmap-canvas-fallback.png');
   } finally {
@@ -177,7 +194,8 @@ test('a new reading moves the field smoothly', async ({ page }) => {
     // Mid-transition the drawn value is between the old and new one; settled, it is the new one.
     const h = await heat(panel);
     const kitchen = h.data!.readings.find((r) => r.entity_id === 'sensor.kitchen_temperature')!;
-    expect(kitchen.value).toBeGreaterThan(30);
+    // (The box HA's simulation can nudge 31 down a little at any moment.)
+    expect(kitchen.value).toBeGreaterThan(29);
   } finally {
     await setNumber(entity, was);
   }

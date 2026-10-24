@@ -1,10 +1,12 @@
 import { defineConfig } from 'vite-plus';
+import { minifyLiterals } from './scripts/minify-literals';
 
 // Two entry modules served by the integration from /chartroom_static/. File names carry no hash:
 // the integration adds ?v=<version> to the URLs, which is what busts caches in the companion apps.
 export default defineConfig({
   base: './',
   publicDir: false,
+  plugins: [minifyLiterals()],
   build: {
     outDir: 'custom_components/chartroom/frontend',
     emptyOutDir: true,

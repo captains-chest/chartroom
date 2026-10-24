@@ -3,6 +3,7 @@ import { pingWorker } from './field-worker';
 import { emptyPlan, normalizePlan, type Plan } from './plan';
 import { type FloorTab, floorTabs, planIdForFloor } from './model';
 import type { PlanEditor } from './plan-editor';
+import type { TimeBar } from './time-bar';
 import { DeviceControls, deviceControlStyles } from './device-controls';
 import { PlanView, planViewStyles } from './plan-view';
 import { isHeatLayer, layerCounts, type HeatLayerId } from './heat';
@@ -41,7 +42,7 @@ function readUnderlayPref(): UnderlayPref {
 export class ChartroomPanel extends HTMLElement {
   #hass?: Hass;
   #view = new PlanView();
-  #controls = new DeviceControls(this.#view, this, () => this.#hass);
+  #controls = new DeviceControls(this.#view, this, () => this.#shown());
   #tabsEl: HTMLElement;
   #status: HTMLElement;
   #stage: HTMLElement;
@@ -69,8 +70,22 @@ export class ChartroomPanel extends HTMLElement {
     (on) => this.#setMesh(on),
   );
   #layer: HeatLayerId | null = null;
-  narrow = false;
+  #time: TimeBar | null = null;
+  #timeButton: HTMLButtonElement;
+  #sheet: HTMLElement;
+  #narrow = false;
   panel?: PanelInfo;
+
+  /** Home Assistant sets this when its sidebar is hidden (phones, the companion app). */
+  set narrow(v: boolean) {
+    this.#narrow = v;
+    this.toggleAttribute('narrow', v);
+    this.#menuButton.hidden = !v;
+  }
+
+  get narrow(): boolean {
+    return this.#narrow;
+  }
 
   constructor() {
     super();
@@ -81,6 +96,7 @@ export class ChartroomPanel extends HTMLElement {
     this.#menuButton = button('☰', () => this.#toggleMenu(), {
       class: 'menu',
       'aria-label': 'Sidebar',
+      hidden: !this.#narrow,
     });
     this.#tabsEl = h('nav', { class: 'tabs', role: 'tablist', 'aria-label': 'Floors' });
     this.#editButton = button('Edit', () => void this.#toggleEditor(), {
@@ -128,14 +144,30 @@ export class ChartroomPanel extends HTMLElement {
     if (localStorage.getItem(MESH_KEY) === '1') this.#setMesh(true);
     this.#view.onPlan = () => this.#renderLayers();
     this.#layers.el.classList.add('layers');
+    this.#timeButton = button('History', () => void this.#toggleTime(), {
+      'data-action': 'history',
+      'aria-pressed': 'false',
+      title: 'Show the plan at an earlier time',
+    });
+    this.#layers.el.append(this.#timeButton);
+    // On a desktop the sheet's parts float over the plan; on a phone they dock below it.
+    this.#sheet = h(
+      'div',
+      { class: 'sheet' },
+      button('', () => this.#sheet.classList.toggle('open'), {
+        class: 'grip',
+        'aria-label': 'More controls',
+      }),
+      this.#layers.el,
+      this.#underlayControls,
+    );
     this.#stage = h(
       'div',
       { class: 'stage' },
       this.#view.el,
       this.#empty,
-      this.#layers.el,
       zoom,
-      this.#underlayControls,
+      this.#sheet,
       this.#controls.dialog,
     );
     root.append(
@@ -169,10 +201,8 @@ export class ChartroomPanel extends HTMLElement {
 
   set hass(hass: Hass) {
     this.#hass = hass;
-    this.#view.setHass(hass);
+    this.#view.setHass(this.#shown());
     this.#renderLayers();
-    this.toggleAttribute('narrow', this.narrow);
-    this.#menuButton.hidden = !this.narrow;
     if (!this.#plansRequested && hass.connection) {
       this.#plansRequested = true;
       void this.#refreshPlans();
@@ -193,6 +223,41 @@ export class ChartroomPanel extends HTMLElement {
   /** The view, for tests. */
   get view(): PlanView {
     return this.#view;
+  }
+
+  /** What the plan shows: live, or the recorded states at the slider's time. */
+  #shown(): Hass | undefined {
+    return this.#time ? this.#time.view(this.#hass) : this.#hass;
+  }
+
+  async #toggleTime(): Promise<void> {
+    if (this.#time) return this.#closeTime();
+    const { TimeBar, timeBarStyles } = await import('./time-bar');
+    if (this.#time) return;
+    const root = this.shadowRoot!;
+    if (!root.querySelector('style.time'))
+      root.append(h('style', { class: 'time' }, timeBarStyles));
+    this.#time = new TimeBar({
+      hass: () => this.#hass,
+      plan: () => this.#view.plan,
+      changed: () => this.#view.setHass(this.#shown()),
+      live: () => this.#closeTime(),
+    });
+    this.#sheet.append(this.#time.el);
+    this.#markTime();
+    await this.#time.load();
+  }
+
+  #closeTime(): void {
+    this.#time?.close();
+    this.#time = null;
+    this.#view.setHass(this.#hass);
+    this.#markTime();
+  }
+
+  #markTime(): void {
+    this.#timeButton.setAttribute('aria-pressed', String(!!this.#time));
+    this.toggleAttribute('history', !!this.#time);
   }
 
   get isAdmin(): boolean {
@@ -265,6 +330,7 @@ export class ChartroomPanel extends HTMLElement {
     localStorage.setItem(TAB_KEY, key);
     this.#markTab();
     if (!tab.plan_id) {
+      this.#closeTime();
       this.#planId = null;
       this.#plan = null;
       this.#view.setPlan(null);
@@ -283,6 +349,7 @@ export class ChartroomPanel extends HTMLElement {
       this.#showEmpty(null);
       this.#view.setPlan(this.#plan);
       this.#view.fit();
+      void this.#time?.load();
       void this.#loadUnderlay();
       this.#editButton.hidden = !this.isAdmin;
       this.dataset['plan'] = tab.plan_id;
@@ -377,6 +444,7 @@ export class ChartroomPanel extends HTMLElement {
       return;
     }
     if (!this.#plan || !this.#planId) return;
+    this.#closeTime();
     const { PlanEditor } = await import('./plan-editor');
     this.#editor = new PlanEditor({
       view: this.#view,
@@ -448,7 +516,7 @@ export class ChartroomPanel extends HTMLElement {
 }
 
 const panelStyles = `
-  :host { display: flex; flex-direction: column; height: 100vh; box-sizing: border-box;
+  :host { display: flex; flex-direction: column; height: 100vh; height: 100dvh; box-sizing: border-box;
     color: var(--primary-text-color, #212121); background: var(--primary-background-color, #fafafa);
     font-family: var(--ha-font-family-body, system-ui, sans-serif); }
   [hidden] { display: none !important; }
@@ -468,7 +536,7 @@ const panelStyles = `
   .tabs .no-plan { opacity: 0.75; font-style: italic; }
   .spacer { flex: 1; }
   main { flex: 1; display: flex; min-height: 0; }
-  .stage { position: relative; flex: 1; min-width: 0; }
+  .stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
   .layers { position: absolute; left: 12px; top: 12px; padding: 4px; border-radius: 8px;
     background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent); }
   .zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
@@ -483,8 +551,30 @@ const panelStyles = `
     background: var(--card-background-color, #fff); }
   :host([narrow]) main { flex-direction: column; }
   :host([narrow]) .inspector-slot { width: auto; max-height: 40vh; border-left: 0; border-top: 1px solid var(--divider-color, #ddd); }
+  :host([history]) .stage { box-shadow: inset 0 0 0 3px var(--warning-color, #ff9800); }
+  .sheet { display: contents; }
+  .grip { display: none; }
   footer { padding: 2px 16px; }
   .status { margin: 0; color: var(--secondary-text-color, #727272); font-size: 0.8rem; }
+  @media (max-width: 600px) {
+    header { gap: 8px; padding: 4px 8px; }
+    header h1, footer { display: none; }
+    .stage { display: flex; flex-direction: column; }
+    .stage > .plan-box { flex: 1; min-height: 0; height: auto; }
+    .sheet { display: flex; flex-direction: column; gap: 6px; padding: 0 8px calc(8px + env(safe-area-inset-bottom));
+      background: var(--card-background-color, #fff); border-radius: 12px 12px 0 0; box-shadow: 0 -1px 6px rgba(0,0,0,0.15); }
+    .stage .sheet > * { position: static; transform: none; width: auto; padding: 0; box-shadow: none; background: none; }
+    .sheet > .grip { display: block; align-self: center; width: 48px; height: 20px; border: 0; }
+    .grip::before { content: ''; display: block; height: 4px; border-radius: 2px; background: var(--divider-color, #ccc); }
+    .sheet:not(.open) > .underlay-controls { display: none; }
+    .layers { display: flex; gap: 4px; overflow-x: auto; }
+    .sheet button { min-height: 36px; }
+    .sheet > .timebar { flex-wrap: wrap; }
+    .sheet > .timebar input { order: 9; flex-basis: 100%; }
+    .zoom { top: 8px; bottom: auto; right: 8px; }
+    .zoom button:not(:last-child) { display: none; }
+    .heat-legend { top: 8px; left: 8px; right: auto; width: 150px; font-size: 11px; }
+  }
 `;
 
 if (!customElements.get('chartroom-panel'))

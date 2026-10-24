@@ -57,7 +57,7 @@ export class ViewerController {
       title: 'Show the plan at an earlier time',
     });
     this.layers.el.append(this.timeButton);
-    view.onPlan = () => this.#renderLayers();
+    view.onPlan(() => this.#renderLayers());
   }
 
   get hass(): Hass | undefined {

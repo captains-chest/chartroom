@@ -49,8 +49,8 @@ export class DeviceControls implements PointerDelegate {
       ),
     );
     this.dialog.addEventListener('close', () => this.#close(false));
-    view.svg.addEventListener('keydown', (e) => this.#key(e));
-    view.svg.addEventListener('contextmenu', (e) => {
+    view.el.addEventListener('keydown', (e) => this.#key(e));
+    view.el.addEventListener('contextmenu', (e) => {
       const el = this.#marker(e.target);
       // A long touch fires contextmenu too; the hold already opened the dialog.
       if (el && this.active && !this.#press?.held) this.moreInfo(el.dataset['entity']!);
@@ -59,7 +59,7 @@ export class DeviceControls implements PointerDelegate {
 
   /** Take over pointer handling of the view (after the editor closes). */
   attach(): void {
-    this.view.delegate = this;
+    this.view.setDelegate(this);
   }
 
   get active(): boolean {

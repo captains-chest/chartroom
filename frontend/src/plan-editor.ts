@@ -223,16 +223,15 @@ export class PlanEditor {
       this.#saveState,
     );
     this.inspector = h('div', { class: 'inspector' });
-    this.#view.delegate = {
+    this.#view.setDelegate({
       down: (p, e) => this.#down(p, e),
       move: (p, e) => this.#move(p, e),
       up: (p, e) => this.#up(p, e),
       hover: (p, e) => this.#hoverAt(p, e),
-    };
-    this.#view.onViewChange = () => this.#renderOverlay();
-    this.#view.svg.classList.add('editing');
-    this.#view.svg.addEventListener('dragover', this.#onDragOver);
-    this.#view.svg.addEventListener('drop', this.#onDrop);
+      viewChanged: () => this.#renderOverlay(),
+    });
+    this.#view.el.addEventListener('dragover', this.#onDragOver);
+    this.#view.el.addEventListener('drop', this.#onDrop);
     this.setTool('select');
     this.#render();
     void this.#loadUnderlay();
@@ -253,12 +252,11 @@ export class PlanEditor {
   /** Flush pending saves and detach from the view. */
   async close(): Promise<void> {
     await this.flush();
-    this.#view.delegate = null;
-    this.#view.onViewChange = null;
-    this.#view.overlay.replaceChildren();
-    this.#view.svg.classList.remove('editing');
-    this.#view.svg.removeEventListener('dragover', this.#onDragOver);
-    this.#view.svg.removeEventListener('drop', this.#onDrop);
+    this.#view.setDelegate(null);
+    this.#view.drawOverlay();
+    this.#view.setEditing(null);
+    this.#view.el.removeEventListener('dragover', this.#onDragOver);
+    this.#view.el.removeEventListener('drop', this.#onDrop);
   }
 
   hassChanged(): void {
@@ -278,7 +276,7 @@ export class PlanEditor {
     this.#measured = null;
     for (const [t, b] of this.#toolButtons) b.setAttribute('aria-pressed', String(t === tool));
     this.#hint.textContent = TOOLS.find((t) => t.tool === tool)?.hint ?? '';
-    this.#view.svg.dataset['tool'] = tool;
+    this.#view.setEditing(tool);
     if (tool === 'underlay' || tool === 'source' || tool === 'device') this.#selection = null;
     if (tool !== 'device') this.#armed = null;
     this.#note = '';
@@ -778,7 +776,7 @@ export class PlanEditor {
         }),
       );
     }
-    this.#view.overlay.replaceChildren(...out);
+    this.#view.drawOverlay(...out);
   }
 
   #renderInspector(): void {

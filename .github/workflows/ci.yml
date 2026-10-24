@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install uv and Python
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: '3.14'
           enable-cache: true
@@ -101,7 +101,21 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # The HACS action can only validate public repositories. Until the repository goes public
+      # at release this job only records that; afterwards validation runs with no change here.
+      - name: Repository visibility
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)
+          echo "private=$private" >> "$GITHUB_OUTPUT"
+          if [ "$private" = true ]; then
+            echo '::notice::Repository is private; HACS validation is skipped until it is public.'
+          fi
+
       - name: HACS validation
+        if: steps.repo.outputs.private == 'false'
         uses: hacs/action@22.5.0
         with:
           category: integration

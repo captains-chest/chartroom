@@ -128,6 +128,9 @@ export function barrierSegments(plan: Plan, hass?: Hass): number[] {
 /** How far past touching (m) a wall end still counts as meeting another wall. */
 const JOIN_SLACK = 0.05;
 
+/** The signal pass's input, with how many sources and wall segments the limits left out. */
+export type CappedSignalInput = SignalInput & { leftOut: { sources: number; segments: number } };
+
 /**
  * Everything the signal pass needs, packed as the shader takes it (and capped to its limits).
  * `sources` are the signal layer's readings: position and level at 1 m.
@@ -136,14 +139,48 @@ export function signalInput(
   plan: Plan,
   hass: Hass | undefined,
   sources: readonly { position: Point; value: number }[],
-): SignalInput {
+): CappedSignalInput {
   const aps = sources
     .slice(0, MAX_SIGNAL_SOURCES)
     .flatMap((s) => [s.position[0], s.position[1], s.value]);
+  const walls = wallSegments(plan, hass);
   return {
-    walls: new Float32Array(wallSegments(plan, hass).slice(0, MAX_SIGNAL_SEGMENTS * SEG)),
+    walls: new Float32Array(walls.slice(0, MAX_SIGNAL_SEGMENTS * SEG)),
     aps: new Float32Array(aps),
+    leftOut: {
+      sources: Math.max(0, sources.length - MAX_SIGNAL_SOURCES),
+      segments: Math.max(0, walls.length / SEG - MAX_SIGNAL_SEGMENTS),
+    },
   };
+}
+
+const count = (n: number, what: string): string => `${n} ${what}${n === 1 ? '' : 's'}`;
+
+/** The signal legend's note: sources and wall segments used, and any the limits left out. */
+export function signalNote(input: CappedSignalInput): string[] {
+  const sources = input.aps.length / SRC;
+  const { leftOut } = input;
+  return [
+    sources ? count(sources, 'source') : 'No sources',
+    count(input.walls.length / SEG, 'wall segment'),
+    ...(leftOut.sources
+      ? [`${count(leftOut.sources, 'source')} left out (limit ${MAX_SIGNAL_SOURCES})`]
+      : []),
+    ...(leftOut.segments
+      ? [`${count(leftOut.segments, 'wall segment')} left out (limit ${MAX_SIGNAL_SEGMENTS})`]
+      : []),
+  ];
+}
+
+/** The editor's warning when the walls make more segments than the signal map takes. */
+export function signalLimitWarnings(plan: Plan): string[] {
+  // Without states every door counts as closed: the most segments the plan can have.
+  const segments = wallSegments(plan).length / SEG;
+  return segments > MAX_SIGNAL_SEGMENTS
+    ? [
+        `${segments} wall segments on this floor (more than ${MAX_SIGNAL_SEGMENTS}): the signal map uses the first ${MAX_SIGNAL_SEGMENTS} and leaves out the rest.`,
+      ]
+    : [];
 }
 
 /** Received level at (x, y) in dBm. The loops and tests mirror the shader exactly. */

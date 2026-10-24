@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import type { Hass } from '../src/ha-types';
 import { entityArea, sourceChoices } from '../src/model';
 import { emptyPlan, LIMITS, limitWarnings, type Plan, validatePlan } from '../src/plan';
+import { MAX_SIGNAL_SOURCES } from '../src/signal';
 import {
   addSource,
   addWall,
@@ -133,6 +134,12 @@ describe('limitWarnings', () => {
     expect(w).toHaveLength(1);
     expect(w[0]).toMatch(/513 walls/);
     plan = addSource(plan, 'radio', [0, 4]).plan;
-    expect(limitWarnings(plan)[1]).toMatch(/33 access points and radios/);
+    expect(limitWarnings(plan)[1]).toMatch(
+      /33 access points and radios .*uses the first 32 and leaves out the rest/,
+    );
+  });
+
+  it("warns at the signal map's own source limit", () => {
+    expect(LIMITS.accessPoints).toBe(MAX_SIGNAL_SOURCES);
   });
 });

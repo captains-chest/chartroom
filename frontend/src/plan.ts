@@ -282,8 +282,9 @@ export function validatePlan(plan: Plan): string[] {
 }
 
 /**
- * Soft limits per floor from docs/render-design.md: above them the signal heatmap may get slow on
- * phones and wall tablets, so the editor warns (it still saves).
+ * Limits per floor from docs/render-design.md, where the editor warns (it still saves). Above the
+ * wall and device limits the plan may get slow on phones and wall tablets; access points and radios
+ * are the signal map's hard limit (MAX_SIGNAL_SOURCES): it leaves out any beyond it.
  */
 export const LIMITS = { walls: 512, accessPoints: 32, devices: 256 } as const;
 
@@ -320,7 +321,7 @@ export function limitWarnings(plan: Plan): string[] {
   const aps = plan.sources.filter(isSignalSource).length;
   if (aps > LIMITS.accessPoints)
     out.push(
-      `${aps} access points and radios on this floor (more than ${LIMITS.accessPoints}): the signal map may be slow on phones and tablets.`,
+      `${aps} access points and radios on this floor (more than ${LIMITS.accessPoints}): the signal map uses the first ${LIMITS.accessPoints} and leaves out the rest.`,
     );
   const devices = plan.devices?.length ?? 0;
   if (devices > LIMITS.devices)

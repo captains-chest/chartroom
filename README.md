@@ -44,8 +44,10 @@ without one). Admins only; changes save automatically.
 - **Undo** / **Redo**: Ctrl+Z and Ctrl+Shift+Z.
 - **Materials**: the loss per centimetre for each wall material, used by the signal heatmap.
 - The outer outline is worked out from the walls; there is no outline tool.
-- A floor with more than 512 walls, 32 access points and radios or 256 devices shows a warning: the heatmaps
-  may be slow on phones and tablets (see [docs/render-design.md](https://github.com/captains-chest/chartroom/blob/main/docs/render-design.md)).
+- A floor with more than 512 walls or 256 devices shows a warning: the heatmaps may be slow on
+  phones and tablets. The signal map takes at most 32 access points and radios and 2048 wall
+  segments (walls split at their doors and windows); above that the editor warns that it leaves
+  out the rest (see [docs/render-design.md](https://github.com/captains-chest/chartroom/blob/main/docs/render-design.md)).
 
 ![Placing sources in the editor](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/editor-sources.png)
 
@@ -99,7 +101,8 @@ the access points and radios placed with **Source**:
 - **Level at 1 m** is set per source in the inspector (default -40 dBm for an access point,
   -45 dBm for a radio). A source whose entity is unavailable is left out.
 - The scale is fixed from -90 dBm (violet, unusable) through red and amber to green (-30 dBm).
-  The legend shows how many sources and wall segments are used.
+  The legend shows how many sources and wall segments are used, and how many were left out above
+  the limits of 32 sources and 2048 wall segments.
 - It is an estimate, not a measurement: there is no calibration to real RSSI yet.
 - Drawn by a WebGL2 shader, or by the Web Worker on a 2D canvas, with the same results.
 

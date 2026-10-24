@@ -126,8 +126,11 @@ access points: pos, tx, PL0   ->   uniforms                         ->  fragment
   bilinear upscaling in pass 2 smooth it; walls stay sharp because they are SVG. Example: 256x256,
   8 access points, 200 walls is about 105 M simple tests, fine on desktop GPUs and mid-range
   phones, and it only runs while values change.
-- **Limits**: soft caps of 512 wall segments and 32 access points per floor, with an editor
-  warning above them. Optional culling of walls by bounding box per access point.
+- **Limits**: a soft cap of 512 walls per floor (an editor warning that it may be slow) and
+  hard caps of 32 sources and 2048 wall segments, the shader's uniform array and texture row.
+  Beyond the hard caps the signal map uses the first ones and leaves out the rest: the editor
+  warns and the legend says how many were left out. Optional culling of walls by bounding box per
+  access point.
 - Measure on old wall tablets in Phase 3 (WebGL2 availability, float render targets, fill rate)
   before raising caps.
 

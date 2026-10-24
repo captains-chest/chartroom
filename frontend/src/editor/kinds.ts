@@ -36,13 +36,14 @@ export interface Selection {
 }
 
 interface KindOps<T extends { id: string }> {
-  /** The inspector's title ("Delete <label>" in lower case). */
-  readonly label: string;
   list(plan: Plan): readonly T[];
   remove(plan: Plan, id: string): Plan;
   /** `base` with `item` dragged by `delta` to `p`, or nothing when it cannot move. */
   drag(base: Plan, item: T, delta: Point, p: Point): Plan | undefined;
 }
+
+/** A tool's or kind's name for the UI: `wall` is "Wall". */
+export const titleOf = (name: string): string => name[0]!.toUpperCase() + name.slice(1);
 
 const onGrid = (v: Point): Point => snap(v, { radius: 0, grid: GRID, targets: [] }).point;
 
@@ -56,27 +57,23 @@ const opening = {
 
 export const KINDS: { readonly [K in Kind]: KindOps<Items[K]> } = {
   wall: {
-    label: 'Wall',
     list: (p) => p.walls,
     remove: deleteWall,
     drag: (base, w, delta) => moveWall(base, w.id, onGrid(delta)),
   },
   room: {
-    label: 'Room',
     list: (p) => p.rooms,
     remove: deleteRoom,
     drag: (base, r, delta) => moveRoom(base, r.id, onGrid(delta)),
   },
-  door: { label: 'Door', list: (p) => p.doors, ...opening },
-  window: { label: 'Window', list: (p) => p.windows, ...opening },
+  door: { list: (p) => p.doors, ...opening },
+  window: { list: (p) => p.windows, ...opening },
   source: {
-    label: 'Source',
     list: (p) => p.sources,
     remove: deleteSource,
     drag: (base, s, delta) => moveSource(base, s.id, add(s.position, delta)),
   },
   device: {
-    label: 'Device',
     list: (p) => p.devices ?? [],
     remove: deleteDevice,
     drag: (base, d, delta) => moveDevice(base, d.id, add(d.position, delta)),

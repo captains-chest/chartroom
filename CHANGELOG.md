@@ -28,6 +28,8 @@ The first release.
   far room, and changes sharply at a wall or closed door. A room without a sensor gets a fainter
   value through its doorways; a room nothing reaches is shown greyed as no data.
 - An estimated Wi-Fi/radio signal map from your access points and radios, attenuated by walls.
+  Beyond its limits (32 sources, 2048 wall segments) the legend and the editor say what the map
+  leaves out.
 - Zigbee (ZHA and Zigbee2MQTT) and Z-Wave JS mesh links drawn between devices, coloured by link
   quality.
 - Rendered with WebGL2, with a Web Worker and a Canvas 2D fallback that give the same picture.
@@ -35,7 +37,8 @@ The first release.
 ### History
 
 - A history slider in the panel, and optionally on the card (`history: true`), that plays the
-  plan back from the recorder. Marker colours fade between states while you scrub.
+  plan back from the recorder. Marker colours fade between states while you scrub, and the card's
+  device controls and layer counts follow the slider.
 
 ### Phones
 
@@ -54,4 +57,4 @@ The first release.
 ### Requirements
 
 - Home Assistant 2026.10 or newer. No Python requirements and no runtime JavaScript
-  dependencies. Frontend: 16.3 KB gzip for the card, 49.2 KB gzip in total.
+  dependencies. Frontend: 14.7 KB gzip for the card, 49.98 KB gzip in total.

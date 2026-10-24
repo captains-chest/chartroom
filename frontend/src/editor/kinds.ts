@@ -19,7 +19,7 @@ import {
 /** The snapping grid for drawing and for dragged walls and rooms, in metres. */
 export const GRID = 0.05;
 
-interface Items {
+export interface Items {
   wall: Wall;
   room: Room;
   door: Door;

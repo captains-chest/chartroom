@@ -6,8 +6,8 @@ import {
   cross,
   dist,
   frame,
-  mm,
-  mmPoint,
+  roundToMm,
+  roundPointToMm,
   outlineFromWalls,
   polygonArea,
   same,
@@ -91,8 +91,8 @@ function fitOpenings(plan: Plan): Plan {
   const fit = <T extends Opening>(o: T): T => {
     const l = lengths.get(o.wall);
     if (l === undefined) return o;
-    const width = mm(Math.min(o.width, l));
-    const offset = mm(Math.max(0, Math.min(o.offset, l - width)));
+    const width = roundToMm(Math.min(o.width, l));
+    const offset = roundToMm(Math.max(0, Math.min(o.offset, l - width)));
     return width === o.width && offset === o.offset ? o : { ...o, width, offset };
   };
   return mapOpenings(plan, fit);
@@ -112,8 +112,8 @@ export function addWall(
   const id = nextId(plan, 'wall');
   const wall: Wall = {
     id,
-    a: mmPoint(a),
-    b: mmPoint(b),
+    a: roundPointToMm(a),
+    b: roundPointToMm(b),
     thickness: props.thickness ?? DEFAULT_WALL.thickness,
     material: props.material ?? DEFAULT_WALL.material,
   };
@@ -125,7 +125,7 @@ export function addWall(
  * Walls that would collapse to (almost) nothing keep their old endpoint.
  */
 export function moveEndpoint(plan: Plan, from: Point, to: Point): Plan {
-  const target = mmPoint(to);
+  const target = roundPointToMm(to);
   const walls = plan.walls.map((w) => {
     const a = same(w.a, from) ? target : w.a;
     const b = same(w.b, from) ? target : w.b;
@@ -139,8 +139,8 @@ export function moveEndpoint(plan: Plan, from: Point, to: Point): Plan {
 export function moveWall(plan: Plan, id: string, delta: Point): Plan {
   const wall = plan.walls.find((w) => w.id === id);
   if (!wall) return plan;
-  const a = mmPoint(add(wall.a, delta));
-  const b = mmPoint(add(wall.b, delta));
+  const a = roundPointToMm(add(wall.a, delta));
+  const b = roundPointToMm(add(wall.b, delta));
   const walls = plan.walls.map((w) => {
     if (w.id === id) return { ...w, a, b };
     let next = w;
@@ -156,7 +156,7 @@ export function moveWall(plan: Plan, id: string, delta: Point): Plan {
 export function updateWall(plan: Plan, id: string, patch: Partial<Omit<Wall, 'id'>>): Plan {
   const clean: Partial<Wall> = { ...patch };
   if (clean.thickness !== undefined)
-    clean.thickness = mm(Math.max(MIN_WALL_THICKNESS, clean.thickness));
+    clean.thickness = roundToMm(Math.max(MIN_WALL_THICKNESS, clean.thickness));
   return finish({ ...plan, walls: updateById(plan.walls, id, (w) => ({ ...w, ...clean })) });
 }
 
@@ -199,8 +199,8 @@ export function addOpening(
   if (!wall) return { plan, id: null };
   const l = frame(wall).length;
   const d = kind === 'door' ? DEFAULT_DOOR : DEFAULT_WINDOW;
-  const width = mm(Math.min(d.width, l));
-  const offset = mm(Math.max(0, Math.min(centre - width / 2, l - width)));
+  const width = roundToMm(Math.min(d.width, l));
+  const offset = roundToMm(Math.max(0, Math.min(centre - width / 2, l - width)));
   const id = nextId(plan, kind);
   const base = { id, wall: wallId, offset, width, material: d.material, thickness: d.thickness };
   if (kind === 'door') {
@@ -218,7 +218,7 @@ export function moveOpening(plan: Plan, id: string, centre: number): Plan {
   const lengths = new Map(plan.walls.map((w) => [w.id, frame(w).length]));
   return changeOpening(plan, id, (o) => {
     const l = lengths.get(o.wall) ?? o.width;
-    return { ...o, offset: mm(Math.max(0, Math.min(centre - o.width / 2, l - o.width))) };
+    return { ...o, offset: roundToMm(Math.max(0, Math.min(centre - o.width / 2, l - o.width))) };
   });
 }
 
@@ -232,11 +232,11 @@ export function updateOpening(
       const next = { ...o, ...patch };
       if (patch.width !== undefined) {
         // Keep the centre where it was.
-        next.width = mm(Math.max(MIN_OPENING_WIDTH, patch.width));
-        next.offset = mm(o.offset + (o.width - next.width) / 2);
+        next.width = roundToMm(Math.max(MIN_OPENING_WIDTH, patch.width));
+        next.offset = roundToMm(o.offset + (o.width - next.width) / 2);
       }
       if (patch.thickness !== undefined)
-        next.thickness = mm(Math.max(MIN_OPENING_THICKNESS, patch.thickness));
+        next.thickness = roundToMm(Math.max(MIN_OPENING_THICKNESS, patch.thickness));
       return next;
     }),
   );
@@ -256,7 +256,7 @@ export function addRoom(
   const room: Room = {
     id,
     name: name ?? `Room ${plan.rooms.length + 1}`,
-    polygon: polygon.map(mmPoint),
+    polygon: polygon.map(roundPointToMm),
   };
   return { plan: { ...plan, rooms: [...plan.rooms, room] }, id };
 }
@@ -277,7 +277,7 @@ export function moveRoomVertex(plan: Plan, id: string, index: number, to: Point)
     ...plan,
     rooms: updateById(plan.rooms, id, (r) => ({
       ...r,
-      polygon: r.polygon.map((p, i) => (i === index ? mmPoint(to) : p)),
+      polygon: r.polygon.map((p, i) => (i === index ? roundPointToMm(to) : p)),
     })),
   };
 }
@@ -292,11 +292,11 @@ export function deleteRoom(plan: Plan, id: string): Plan {
  */
 export function scalePlan(plan: Plan, k: number): Plan {
   if (!(k > 0) || !Number.isFinite(k)) throw new Error('scale factor must be positive');
-  const s = (p: Point): Point => mmPoint([p[0] * k, p[1] * k]);
+  const s = (p: Point): Point => roundPointToMm([p[0] * k, p[1] * k]);
   const op = <T extends Opening>(o: T): T => ({
     ...o,
-    offset: mm(o.offset * k),
-    width: mm(o.width * k),
+    offset: roundToMm(o.offset * k),
+    width: roundToMm(o.width * k),
   });
   return withOutline(
     mapOpenings(
@@ -357,7 +357,7 @@ export function snapTargets(plan: Plan, faces: boolean): Point[] {
           const b0 = add(q.a, [fq.n[0] * sq * (q.thickness / 2), fq.n[1] * sq * (q.thickness / 2)]);
           const den = fp.u[0] * fq.u[1] - fp.u[1] * fq.u[0];
           const t = ((b0[0] - a0[0]) * fq.u[1] - (b0[1] - a0[1]) * fq.u[0]) / den;
-          pts.push(mmPoint([a0[0] + fp.u[0] * t, a0[1] + fp.u[1] * t]));
+          pts.push(roundPointToMm([a0[0] + fp.u[0] * t, a0[1] + fp.u[1] * t]));
         }
       }
     }
@@ -391,7 +391,7 @@ export function snap(p: Point, o: SnapOptions): { point: Point; target: boolean 
   }
   if (best) return { point: best, target: true };
   const g = o.grid > 0 ? o.grid : 0.001;
-  let q: Point = [mm(Math.round(p[0] / g) * g), mm(Math.round(p[1] / g) * g)];
+  let q: Point = [roundToMm(Math.round(p[0] / g) * g), roundToMm(Math.round(p[1] / g) * g)];
   if (o.anchor) {
     const dx = Math.abs(q[0] - o.anchor[0]);
     const dy = Math.abs(q[1] - o.anchor[1]);
@@ -407,7 +407,7 @@ export function moveRoom(plan: Plan, id: string, delta: Point): Plan {
     ...plan,
     rooms: updateById(plan.rooms, id, (r) => ({
       ...r,
-      polygon: r.polygon.map((p) => mmPoint(add(p, delta))),
+      polygon: r.polygon.map((p) => roundPointToMm(add(p, delta))),
     })),
   };
 }
@@ -432,7 +432,7 @@ export function addSource(
   area_id: string | null = null,
 ): { plan: Plan; id: string } {
   const id = nextId(plan, kind === 'sensor' ? 'sensor' : kind);
-  const source: Source = { id, kind, entity_id, position: mmPoint(position) };
+  const source: Source = { id, kind, entity_id, position: roundPointToMm(position) };
   if (area_id) source.area_id = area_id;
   if (kind !== 'sensor') source.tx_dbm = DEFAULT_TX_DBM[kind];
   return { plan: { ...plan, sources: [...plan.sources, source] }, id };
@@ -441,7 +441,7 @@ export function addSource(
 export function moveSource(plan: Plan, id: string, to: Point): Plan {
   return {
     ...plan,
-    sources: updateById(plan.sources, id, (x) => ({ ...x, position: mmPoint(to) })),
+    sources: updateById(plan.sources, id, (x) => ({ ...x, position: roundPointToMm(to) })),
   };
 }
 
@@ -476,7 +476,7 @@ export function addDevice(
   if (existing) return { plan: moveDevice(plan, existing.id, position), id: existing.id };
   const id = nextId(plan, 'device');
   return {
-    plan: { ...plan, devices: [...devices, { id, entity_id, position: mmPoint(position) }] },
+    plan: { ...plan, devices: [...devices, { id, entity_id, position: roundPointToMm(position) }] },
     id,
   };
 }
@@ -484,7 +484,7 @@ export function addDevice(
 export function moveDevice(plan: Plan, id: string, to: Point): Plan {
   return {
     ...plan,
-    devices: updateById(plan.devices ?? [], id, (d) => ({ ...d, position: mmPoint(to) })),
+    devices: updateById(plan.devices ?? [], id, (d) => ({ ...d, position: roundPointToMm(to) })),
   };
 }
 

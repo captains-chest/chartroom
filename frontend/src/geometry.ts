@@ -12,8 +12,8 @@ export const dist = (a: Point, b: Point): number => Math.hypot(a[0] - b[0], a[1]
 export const same = (a: Point, b: Point, eps = 1e-6): boolean => dist(a, b) <= eps;
 
 /** Round to millimetres, so stored plans stay small and comparisons stay exact. */
-export const mm = (v: number): number => Math.round(v * 1000) / 1000;
-export const mmPoint = (p: Point): Point => [mm(p[0]), mm(p[1])];
+export const roundToMm = (v: number): number => Math.round(v * 1000) / 1000;
+export const roundPointToMm = (p: Point): Point => [roundToMm(p[0]), roundToMm(p[1])];
 
 /** Unit direction of a wall and its left normal (the side where `(b - a) x (p - a) > 0`). */
 export function frame(wall: Wall): { u: Point; n: Point; length: number } {
@@ -199,17 +199,17 @@ export function outlineFromWalls(plan: Plan, exterior = 'exterior'): Point[] {
       const prev = lines[(i + lines.length - 1) % lines.length]!;
       const cur = lines[i]!;
       // Collinear neighbours (a straight run split in two): keep the shared corner's offset.
-      pts.push(mmPoint(lineIntersection(prev.p, prev.d, cur.p, cur.d) ?? cur.p));
+      pts.push(roundPointToMm(lineIntersection(prev.p, prev.d, cur.p, cur.d) ?? cur.p));
     }
     return pts;
   }
   if (plan.walls.length === 0) return [];
   const b = boundsOf(plan.walls.flatMap((w) => wallRect(w, 0, frame(w).length, true, true)))!;
   return [
-    mmPoint([b.minX, b.minY]),
-    mmPoint([b.maxX, b.minY]),
-    mmPoint([b.maxX, b.maxY]),
-    mmPoint([b.minX, b.maxY]),
+    roundPointToMm([b.minX, b.minY]),
+    roundPointToMm([b.maxX, b.minY]),
+    roundPointToMm([b.maxX, b.maxY]),
+    roundPointToMm([b.minX, b.maxY]),
   ];
 }
 
@@ -222,7 +222,7 @@ interface Step {
 /** Walls chained end to end into one closed loop, each endpoint shared by exactly two walls. */
 export function exteriorLoop(walls: readonly Wall[]): Step[] | null {
   if (walls.length < 3) return null;
-  const key = (p: Point): string => `${mm(p[0])},${mm(p[1])}`;
+  const key = (p: Point): string => `${roundToMm(p[0])},${roundToMm(p[1])}`;
   const at = new Map<string, Wall[]>();
   for (const w of walls) {
     for (const p of [w.a, w.b]) at.set(key(p), [...(at.get(key(p)) ?? []), w]);

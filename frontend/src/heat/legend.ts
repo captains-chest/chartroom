@@ -4,8 +4,8 @@ import { LAYERS, rampCss, type LayerData } from '../heat';
 import {
   MAX_SIGNAL_SEGMENTS,
   MAX_SIGNAL_SOURCES,
-  SEG,
-  SRC,
+  SEGMENT_STRIDE,
+  SOURCE_STRIDE,
   type CappedSignalInput,
 } from '../signal';
 import { count, h } from '../ui';
@@ -13,11 +13,11 @@ import type { LegendContent } from './models';
 
 /** The signal legend's note: sources and wall segments used, and any the limits left out. */
 export function signalNote(input: CappedSignalInput): string[] {
-  const sources = input.aps.length / SRC;
+  const sources = input.aps.length / SOURCE_STRIDE;
   const { leftOut } = input;
   return [
     sources ? count(sources, 'source') : 'No sources',
-    count(input.walls.length / SEG, 'wall segment'),
+    count(input.walls.length / SEGMENT_STRIDE, 'wall segment'),
     ...(leftOut.sources
       ? [`${count(leftOut.sources, 'source')} left out (limit ${MAX_SIGNAL_SOURCES})`]
       : []),

@@ -1,7 +1,7 @@
 // The wall and room editor: tools, selection, dragging with snapping, an inspector for the
 // selection, undo/redo and autosave. Loaded on demand by the panel (its own chunk).
 import { autoPlace, deviceChoices, deviceLook } from './devices';
-import { add, dist, frame, mm, polygonArea } from './geometry';
+import { add, dist, frame, roundToMm, polygonArea } from './geometry';
 import type { Hass } from './ha-types';
 import { type Autosaver, autosaver } from './editor/autosaver';
 import {
@@ -491,7 +491,7 @@ export class PlanEditor {
       field(
         'Thickness (cm)',
         numberInput(
-          mm(wall.thickness * 100),
+          roundToMm(wall.thickness * 100),
           (v) => this.#commit(updateWall(this.plan, id, { thickness: v / 100 })),
           { name: 'thickness', min: 1, max: 100, step: 0.5 },
         ),
@@ -499,7 +499,7 @@ export class PlanEditor {
       field(
         'Length (m)',
         numberInput(
-          mm(length),
+          roundToMm(length),
           (v) => {
             if (v <= 0.05) return;
             const { u } = frame(wall);
@@ -520,7 +520,7 @@ export class PlanEditor {
     return [
       field(
         'Width (cm)',
-        numberInput(mm(o.width * 100), (v) => set({ width: v / 100 }), {
+        numberInput(roundToMm(o.width * 100), (v) => set({ width: v / 100 }), {
           name: 'width',
           min: 10,
           step: 1,
@@ -534,7 +534,7 @@ export class PlanEditor {
       ),
       field(
         'Thickness (cm)',
-        numberInput(mm(o.thickness * 100), (v) => set({ thickness: v / 100 }), {
+        numberInput(roundToMm(o.thickness * 100), (v) => set({ thickness: v / 100 }), {
           name: 'thickness',
           min: 0.1,
           step: 0.1,
@@ -599,7 +599,11 @@ export class PlanEditor {
         { class: 'calibrate' },
         field(
           'Real area (m²)',
-          numberInput(mm(area), (v) => (target = v), { name: 'real-area', min: 0.1, step: 0.1 }),
+          numberInput(roundToMm(area), (v) => (target = v), {
+            name: 'real-area',
+            min: 0.1,
+            step: 0.1,
+          }),
         ),
         button(
           'Scale plan to match',
@@ -625,7 +629,11 @@ export class PlanEditor {
       h('p', { class: 'meta', 'data-distance': d.toFixed(3) }, `${d.toFixed(2)} m drawn`),
       field(
         'Real distance (m)',
-        numberInput(mm(d), (v) => (target = v), { name: 'real-distance', min: 0.01, step: 0.01 }),
+        numberInput(roundToMm(d), (v) => (target = v), {
+          name: 'real-distance',
+          min: 0.01,
+          step: 0.01,
+        }),
       ),
       button(
         'Scale plan to match',

@@ -1,6 +1,6 @@
 // The editor's tools as pure steps: (state, pointer input) → the next state, plus the plan change
 // to commit. plan-editor.ts turns DOM events into inputs, commits through History and renders.
-import { add, dist, mmPoint, sub } from '../geometry';
+import { add, dist, roundPointToMm, sub } from '../geometry';
 import type { Plan, Point, Wall } from '../plan';
 import {
   addDevice,
@@ -266,7 +266,10 @@ export function move(s: ToolState, ctx: ToolContext, p: Point): ToolState {
     case 'underlay': {
       const u = base.underlay;
       if (u)
-        next = { ...base, underlay: { ...u, origin: mmPoint(add(u.origin, sub(p, d.start))) } };
+        next = {
+          ...base,
+          underlay: { ...u, origin: roundPointToMm(add(u.origin, sub(p, d.start))) },
+        };
     }
   }
   return next ? { ...s, preview: next } : s;

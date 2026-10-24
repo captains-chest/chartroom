@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { openField } from './open-field';
 import {
+  CONF_FAR,
+  CONF_MIN,
+  CONF_NEAR,
   OUTSIDE_ALPHA,
   buildMesh,
-  confidenceAt,
   convexHull,
   delaunay,
-  evalField,
   fadeAt,
   fieldGrid,
-  hullEdges,
-  nearestEdge,
   nodeValues,
+  smoothstep,
 } from '../src/field';
 import { signedArea } from '../src/geometry';
 import { NO_DATA, fillField, planField } from '../src/field-plan';
@@ -78,7 +78,6 @@ describe('Delaunay triangulation', () => {
       expect(circumcircleEmpty(pts, tris)).toBe(true);
       // Euler: triangles = 2n - 2 - hull vertices (no collinear hull points in random data).
       expect(tris.length / 3).toBe(2 * n - 2 - hull.length);
-      expect(hullEdges(tris).length / 2).toBe(hull.length);
     }
   });
 
@@ -103,122 +102,17 @@ describe('Delaunay triangulation', () => {
   });
 });
 
-describe('interpolation', () => {
-  it('is exactly 27.5° halfway between a 25° and a 30° sensor', () => {
-    const mesh = buildMesh([
-      [0, 0],
-      [4, 0],
-    ]);
-    expect(mesh.mode).toBe('segment');
-    expect(evalField(mesh, [25, 30], 2, 0)).toBe(27.5);
-    // Off the line too: segment mode projects onto it.
-    expect(evalField(mesh, [25, 30], 2, 1.7)).toBeCloseTo(27.5, 12);
-  });
-
-  it('clamps beyond the ends of a two-sensor segment', () => {
-    const mesh = buildMesh([
-      [0, 0],
-      [4, 0],
-    ]);
-    expect(evalField(mesh, [25, 30], -3, 0)).toBeCloseTo(25, 12);
-    expect(evalField(mesh, [25, 30], 9, -2)).toBeCloseTo(30, 12);
-    expect(evalField(mesh, [25, 30], 1, 0)).toBeCloseTo(26.25, 12);
-  });
-
-  it('is barycentric (linear) inside triangles and exact at the sensors', () => {
-    const pts: Point[] = [
-      [0, 0],
-      [6, 0],
-      [0, 6],
-      [6, 6],
-      [3, 2],
-    ];
-    // A linear field is reproduced exactly by barycentric interpolation.
-    const f = (x: number, y: number): number => 18 + 0.5 * x - 0.25 * y;
-    const vals = pts.map(([x, y]) => f(x, y));
-    const mesh = buildMesh(pts);
-    expect(mesh.mode).toBe('mesh');
-    for (const [x, y] of [
-      [1, 1],
-      [3, 3],
-      [5.5, 0.5],
-      [2.9, 5.9],
-    ] as Point[])
-      expect(evalField(mesh, vals, x, y)).toBeCloseTo(f(x, y), 10);
-    pts.forEach(([x, y], i) => expect(evalField(mesh, vals, x, y)).toBeCloseTo(vals[i]!, 10));
-    // Halfway along a triangle edge between 25 and 30: 27.5.
-    const tri = buildMesh([
-      [0, 0],
-      [4, 0],
-      [2, 3],
-    ]);
-    expect(evalField(tri, [25, 30, 20], 2, 0)).toBeCloseTo(27.5, 12);
-  });
-});
-
-describe('outside the hull', () => {
-  const pts: Point[] = [
-    [0, 0],
-    [4, 0],
-    [4, 4],
-    [0, 4],
-  ];
-  const vals = [20, 24, 28, 22];
-  const mesh = buildMesh(pts);
-
-  it('projects onto the nearest hull edge and lerps along it', () => {
-    // Below the bottom edge, a quarter of the way along: 20 + (24-20)/4.
-    expect(evalField(mesh, vals, 1, -2)).toBeCloseTo(21, 12);
-    const e = nearestEdge(mesh, 1, -2);
-    expect(e.t).toBeCloseTo(0.25, 12);
-    expect(Math.sqrt(e.d2)).toBeCloseTo(2, 12);
-    // Right of the right edge, halfway up: (24+28)/2.
-    expect(evalField(mesh, vals, 7, 2)).toBeCloseTo(26, 12);
-  });
-
-  it('clamps to the corner value beyond a hull vertex', () => {
-    expect(evalField(mesh, vals, 6, 7)).toBeCloseTo(28, 12);
-    expect(evalField(mesh, vals, -1, -1)).toBeCloseTo(20, 12);
-  });
-
-  it('is continuous across the hull boundary', () => {
-    for (const [x, y] of [
-      [2, 0],
-      [4, 1.3],
-      [0.5, 4],
-    ] as Point[]) {
-      const inside = evalField(
-        mesh,
-        vals,
-        x + (x === 4 ? -1e-7 : 0),
-        y + (y === 0 ? 1e-7 : y === 4 ? -1e-7 : 0),
-      );
-      const outside = evalField(
-        mesh,
-        vals,
-        x + (x === 4 ? 1e-7 : 0),
-        y + (y === 0 ? -1e-7 : y === 4 ? 1e-7 : 0),
-      );
-      expect(Math.abs(inside - outside)).toBeLessThan(1e-5);
-    }
-  });
-
-  it('builds the hull as counter-clockwise boundary edges', () => {
-    expect(mesh.edges.length / 2).toBe(4);
-  });
-});
-
-describe('degenerate layouts', () => {
+describe('sensor layouts', () => {
   it('has nothing to show without sensors', () => {
     const mesh = buildMesh([]);
     expect(mesh.mode).toBe('none');
-    expect(evalField(mesh, [], 0, 0)).toBeNaN();
+    expect(mesh.nodes).toEqual([]);
   });
 
   it('is flat with one sensor', () => {
     const mesh = buildMesh([[2, 3]]);
     expect(mesh.mode).toBe('flat');
-    expect(evalField(mesh, [21.4], -10, 50)).toBe(21.4);
+    expect(mesh.nodes).toEqual([[2, 3]]);
   });
 
   it('merges sensors at the same spot into their mean', () => {
@@ -235,7 +129,7 @@ describe('degenerate layouts', () => {
       [1, 1],
     ]);
     expect(same.mode).toBe('flat');
-    expect(evalField(same, [20, 24], 9, 9)).toBe(22);
+    expect(Array.from(nodeValues(same, [20, 24]))).toEqual([22]);
   });
 
   it('falls back to segment mode for (nearly) collinear sensors', () => {
@@ -245,8 +139,11 @@ describe('degenerate layouts', () => {
       [10, 0],
     ]);
     expect(line.mode).toBe('segment');
-    expect(line.edges).toEqual([0, 1, 1, 2]);
-    expect(evalField(line, [20, 25, 21], 7.5, 3)).toBeCloseTo(23, 12);
+    expect(line.nodes).toEqual([
+      [0, 0],
+      [5, 0],
+      [10, 0],
+    ]);
     // 10 cm off a 10 m line is still a line.
     const nearly = buildMesh([
       [0, 0],
@@ -254,13 +151,14 @@ describe('degenerate layouts', () => {
       [10, 0],
     ]);
     expect(nearly.mode).toBe('segment');
-    // Out of order input is chained along the line.
+    // Off-line sensors are projected onto it, and out of order input is chained along it.
+    expect(nearly.nodes.every(([, y]) => Math.abs(y - 0.1 / 3) < 1e-9)).toBe(true);
     const shuffled = buildMesh([
       [10, 10],
       [0, 0],
       [5, 5],
     ]);
-    expect(evalField(shuffled, [30, 20, 22], 7.5, 7.5)).toBeCloseTo(26, 10);
+    expect(shuffled.members).toEqual([[1], [2], [0]]);
     // A proper triangle is not.
     expect(
       buildMesh([
@@ -288,15 +186,6 @@ describe('confidence, fade and the grid', () => {
     [10, 8],
     [0, 8],
   ];
-
-  it('trusts the field near sensors and fades it far away', () => {
-    const mesh = buildMesh([[1, 1]]);
-    expect(confidenceAt(mesh, 1, 2)).toBe(1);
-    expect(confidenceAt(mesh, 1, 30)).toBeCloseTo(0.3, 9);
-    const mid = confidenceAt(mesh, 1, 6.5);
-    expect(mid).toBeGreaterThan(0.3);
-    expect(mid).toBeLessThan(1);
-  });
 
   it('is full inside the house and fades outside it', () => {
     expect(fadeAt(outline, 5, 4)).toBe(1);
@@ -332,7 +221,11 @@ describe('confidence, fade and the grid', () => {
             openField(mesh.nodes, nodeValues(mesh, vals), x, y, grid.cell),
             4,
           );
-          expect(field[c + 1]).toBeCloseTo(confidenceAt(mesh, x, y), 5);
+          const nearest = Math.min(...mesh.nodes.map(([nx, ny]) => Math.hypot(x - nx, y - ny)));
+          expect(field[c + 1]).toBeCloseTo(
+            1 - (1 - CONF_MIN) * smoothstep(CONF_NEAR, CONF_FAR, nearest),
+            5,
+          );
         } else expect(field[c + 1]).toBe(NO_DATA);
       }
   });

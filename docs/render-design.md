@@ -95,10 +95,10 @@ no longer the Delaunay plane.
 
 What is left of the plan:
 
-- `buildMesh` in `field.ts` still merges sensors closer than 1 mm into one node (mean value), and
-  still triangulates to name the layout's mode (`none`, `flat`, `segment`, `mesh`), which the e2e
-  checks read. The interpolation functions beside it (`weightsAt`, `evalField`, `confidenceAt`)
-  are only used by the unit tests.
+- `buildMesh` in `field.ts` still merges sensors closer than 1 mm into one node (mean value). It
+  still triangulates to choose the layout's mode (`none`, `flat`, `segment`, `mesh`), which the
+  e2e checks read; in segment mode it projects the nodes onto their line. The linear
+  interpolation itself is gone.
 - A value update only re-mixes the node values. The layout is planned again only when sensors,
   walls or door and window states change; a stale or unavailable sensor leaves the set, which
   plans again.

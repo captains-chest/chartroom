@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import PLAN_ID_RE, UNDERLAY_DIR, UNDERLAY_MAX_BYTES, UNDERLAY_URL
 
+UPLOAD_CHUNK_BYTES = 64 * 1024
 TYPES = {
     "image/png": "png",
     "image/jpeg": "jpg",
@@ -132,7 +133,7 @@ async def _read_upload(request: web.Request, plan_id: str) -> tuple[str, bytes]:
     if (request.content_length or 0) > UNDERLAY_MAX_BYTES:
         raise too_large
     data = bytearray()
-    async for chunk in request.content.iter_chunked(64 * 1024):
+    async for chunk in request.content.iter_chunked(UPLOAD_CHUNK_BYTES):
         data.extend(chunk)
         if len(data) > UNDERLAY_MAX_BYTES:
             raise too_large

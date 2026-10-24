@@ -1,7 +1,7 @@
 // The layer buttons shared by the panel and the card: the heatmaps (Temperature, Humidity,
 // Signal), one at a time, pressing the active one turns it off; and Mesh, on or off by itself.
 import { HEAT_LAYERS, LAYERS, type HeatLayerId } from './heat';
-import { button, h } from './ui';
+import { button, count, h } from './ui';
 
 export class LayerToggles {
   readonly el: HTMLElement;
@@ -43,7 +43,7 @@ export class LayerToggles {
           ? id === 'signal'
             ? 'No access points or radios placed on this plan'
             : `No ${LAYERS[id].label.toLowerCase()} sensors placed on this plan`
-          : `${LAYERS[id].label} heatmap (${counts[id]} ${what}${counts[id] === 1 ? '' : 's'})`;
+          : `${LAYERS[id].label} heatmap (${count(counts[id], what)})`;
     }
   }
 }

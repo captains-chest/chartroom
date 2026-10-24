@@ -59,7 +59,7 @@ import {
 } from './plan-ops';
 import type { PlanView } from './plan-view';
 import { signalLimitWarnings } from './signal';
-import { button, field, h, numberInput, s, select, textInput } from './ui';
+import { button, count, field, h, numberInput, s, select, textInput } from './ui';
 import { importUnderlay, loadUnderlay } from './underlay';
 
 export type { Tool } from './editor/tools';
@@ -797,7 +797,7 @@ export class PlanEditor {
     for (const s of spots) plan = addDevice(plan, s.entity_id, s.position).plan;
     this.#note =
       spots.length > 0
-        ? `Placed ${spots.length} device${spots.length === 1 ? '' : 's'} in their rooms. Drag them where they really are.`
+        ? `Placed ${count(spots.length, 'device')} in their rooms. Drag them where they really are.`
         : 'Nothing to place: link rooms to areas first, or every device in them is on the plan.';
     if (spots.length > 0) this.#commit(plan);
     else this.#renderInspector();

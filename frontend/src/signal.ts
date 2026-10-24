@@ -154,24 +154,6 @@ export function signalInput(
   };
 }
 
-const count = (n: number, what: string): string => `${n} ${what}${n === 1 ? '' : 's'}`;
-
-/** The signal legend's note: sources and wall segments used, and any the limits left out. */
-export function signalNote(input: CappedSignalInput): string[] {
-  const sources = input.aps.length / SRC;
-  const { leftOut } = input;
-  return [
-    sources ? count(sources, 'source') : 'No sources',
-    count(input.walls.length / SEG, 'wall segment'),
-    ...(leftOut.sources
-      ? [`${count(leftOut.sources, 'source')} left out (limit ${MAX_SIGNAL_SOURCES})`]
-      : []),
-    ...(leftOut.segments
-      ? [`${count(leftOut.segments, 'wall segment')} left out (limit ${MAX_SIGNAL_SEGMENTS})`]
-      : []),
-  ];
-}
-
 /** The editor's warning when the walls make more segments than the signal map takes. */
 export function signalLimitWarnings(plan: Plan): string[] {
   // Without states every door counts as closed: the most segments the plan can have.

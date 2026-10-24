@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test';
 import type { LayerData, LayerReading } from '../src/heat';
-import { legendContent } from '../src/heat/legend';
+import { legendContent, signalNote } from '../src/heat/legend';
+import { SEG, SRC } from '../src/signal';
 
 const reading = (id: string, value: number): LayerReading => ({
   id,
@@ -28,7 +29,7 @@ describe('legend', () => {
     expect(c.label).toBe('Temperature 16.0 to 28.0 °C. 19.0–25.0 °C, 3 sensors, 1 left out');
   });
 
-  it('shows the signal note (signalNote in signal.ts), without ticks', () => {
+  it('shows the signal note (signalNote), without ticks', () => {
     const data: LayerData = {
       layer: 'signal',
       unit: 'dBm',
@@ -46,5 +47,28 @@ describe('legend', () => {
     expect(c.note).toEqual(['No readings']);
     expect(c.ticks).toEqual([]);
     expect(c.scale).toEqual(['30', '50', '70']);
+  });
+});
+
+describe('signalNote', () => {
+  const input = (sources: number, segments: number, leftOut = { sources: 0, segments: 0 }) => ({
+    aps: new Float32Array(sources * SRC),
+    walls: new Float32Array(segments * SEG),
+    leftOut,
+  });
+
+  it('counts the sources and wall segments the map uses', () => {
+    expect(signalNote(input(3, 1))).toEqual(['3 sources', '1 wall segment']);
+    expect(signalNote(input(1, 0))).toEqual(['1 source', '0 wall segments']);
+    expect(signalNote(input(0, 4))).toEqual(['No sources', '4 wall segments']);
+  });
+
+  it('says how many it left out over the limits', () => {
+    expect(signalNote(input(32, 2048, { sources: 1, segments: 12 }))).toEqual([
+      '32 sources',
+      '2048 wall segments',
+      '1 source left out (limit 32)',
+      '12 wall segments left out (limit 2048)',
+    ]);
   });
 });

@@ -1,10 +1,31 @@
 // The heatmap legend: the layer's ramp and range, ticks at the lowest and highest reading, and a
 // note on what feeds the field. Worked out by a pure function, then put into the legend element.
 import { LAYERS, rampCss, type LayerData } from '../heat';
-import { h } from '../ui';
+import {
+  MAX_SIGNAL_SEGMENTS,
+  MAX_SIGNAL_SOURCES,
+  SEG,
+  SRC,
+  type CappedSignalInput,
+} from '../signal';
+import { count, h } from '../ui';
 import type { LegendContent } from './models';
 
-const count = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? '' : 's'}`;
+/** The signal legend's note: sources and wall segments used, and any the limits left out. */
+export function signalNote(input: CappedSignalInput): string[] {
+  const sources = input.aps.length / SRC;
+  const { leftOut } = input;
+  return [
+    sources ? count(sources, 'source') : 'No sources',
+    count(input.walls.length / SEG, 'wall segment'),
+    ...(leftOut.sources
+      ? [`${count(leftOut.sources, 'source')} left out (limit ${MAX_SIGNAL_SOURCES})`]
+      : []),
+    ...(leftOut.segments
+      ? [`${count(leftOut.segments, 'wall segment')} left out (limit ${MAX_SIGNAL_SEGMENTS})`]
+      : []),
+  ];
+}
 
 /** The legend for `data` over `domain`; `signalNote` is the signal layer's note (signalNote). */
 export function legendContent(

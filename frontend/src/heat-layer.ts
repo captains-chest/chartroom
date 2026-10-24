@@ -9,7 +9,7 @@ import { planBounds } from './geometry';
 import { CanvasRenderer } from './heat/canvas-renderer';
 import { FieldClient } from './heat/field-client';
 import { GlRenderer } from './heat/gl-renderer';
-import { legendContent, renderLegend } from './heat/legend';
+import { legendContent, renderLegend, signalNote } from './heat/legend';
 import type { FieldRenderer, Layout } from './heat/models';
 import type { FieldRequest, RendererKind } from './heat/types';
 import {
@@ -25,7 +25,7 @@ import {
 } from './heat';
 import type { Hass } from './ha-types';
 import type { Plan } from './plan';
-import { barrierSegments, SIGNAL_CELLS, signalInput, signalKey, signalNote } from './signal';
+import { barrierSegments, SIGNAL_CELLS, signalInput, signalKey } from './signal';
 import { h } from './ui';
 import type { View } from './viewport';
 

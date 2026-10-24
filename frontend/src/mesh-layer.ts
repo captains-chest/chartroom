@@ -4,7 +4,7 @@
 import { wsApi } from './api';
 import type { Hass } from './ha-types';
 import type { Plan, Point } from './plan';
-import { h, s } from './ui';
+import { count, h, s } from './ui';
 
 export interface MeshNode {
   id: string;
@@ -105,7 +105,7 @@ export function sourceNote(topology: Topology | null, placed: number, error?: st
   const found = Object.entries(topology.sources).filter(([, v]) => v !== 'absent');
   if (!found.length) return 'Mesh: no ZHA, Z-Wave JS or Zigbee2MQTT network found';
   const parts = found.map(([k, v]) => `${SOURCE_NAMES[k] ?? k}${v === 'ok' ? '' : ` ${v}`}`);
-  return `Mesh: ${placed} link${placed === 1 ? '' : 's'} on this plan · ${parts.join(', ')}`;
+  return `Mesh: ${count(placed, 'link')} on this plan · ${parts.join(', ')}`;
 }
 
 export class MeshLayer {

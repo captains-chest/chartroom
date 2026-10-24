@@ -9,7 +9,7 @@ import { DeviceControls, deviceControlStyles } from './device-controls';
 import { PlanView, planViewStyles } from './plan-view';
 import { isHeatLayer } from './heat';
 import { button, h } from './ui';
-import { loadUnderlayUrl } from './underlay';
+import { loadUnderlay } from './underlay';
 import { ViewerController } from './viewer';
 
 interface PanelInfo {
@@ -323,17 +323,13 @@ export class ChartroomPanel extends HTMLElement {
     const u = this.#plan?.underlay;
     this.#view.setUnderlayUrl(null);
     this.#renderUnderlayControls();
-    if (!u) return;
-    try {
-      const url = await loadUnderlayUrl(this.#viewer.hass, u.url);
-      if (load !== this.#underlayLoad) {
-        URL.revokeObjectURL(url);
-        return;
-      }
-      this.#view.setUnderlayUrl(url);
-    } catch {
-      // The plan still shows without its drawing.
-    }
+    if (u)
+      await loadUnderlay(
+        this.#viewer.hass,
+        u.url,
+        () => load === this.#underlayLoad,
+        (url) => this.#view.setUnderlayUrl(url),
+      );
   }
 
   #setUnderlayPref(patch: Partial<UnderlayPref>): void {

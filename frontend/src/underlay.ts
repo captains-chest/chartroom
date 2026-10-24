@@ -81,9 +81,23 @@ export async function importUnderlay(
   return { underlay: placeUnderlay(plan, url, width, height), blobUrl: URL.createObjectURL(blob) };
 }
 
-export async function loadUnderlayUrl(hass: Hass | undefined, url: string): Promise<string> {
-  if (!hass?.fetchWithAuth) throw new Error('not connected');
-  const res = await hass.fetchWithAuth(url);
-  if (!res.ok) throw new Error(`underlay ${res.status}`);
-  return URL.createObjectURL(await res.blob());
+/**
+ * Fetch a plan's image and `show` it as a blob URL, unless `current()` says a newer load or image
+ * took over meanwhile (the URL is revoked then). Failures are ignored: the plan works without it.
+ */
+export async function loadUnderlay(
+  hass: Hass | undefined,
+  url: string,
+  current: () => boolean,
+  show: (blobUrl: string) => void,
+): Promise<void> {
+  try {
+    const res = await hass?.fetchWithAuth?.(url);
+    if (!res?.ok) return;
+    const blobUrl = URL.createObjectURL(await res.blob());
+    if (current()) show(blobUrl);
+    else URL.revokeObjectURL(blobUrl);
+  } catch {
+    // Offline or gone: the plan shows without its drawing.
+  }
 }

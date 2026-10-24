@@ -8,6 +8,7 @@
 //   between neighbours, clamp at the ends. That is the same "nearest edge" rule over a chain.
 // - 1 sensor: flat. 0 sensors: nothing.
 // Walls are boundaries: field-plan.ts picks, per cell, the sensors this runs over.
+import { polygonArea, signedArea } from './geometry';
 import type { Point } from './plan';
 
 export type FieldMode = 'none' | 'flat' | 'segment' | 'mesh';
@@ -66,16 +67,6 @@ export function convexHull(points: readonly Point[]): number[] {
   return [...build(idx), ...build([...idx].reverse())];
 }
 
-export function polygonArea(points: readonly Point[]): number {
-  let s = 0;
-  for (let i = 0; i < points.length; i++) {
-    const a = points[i]!;
-    const b = points[(i + 1) % points.length]!;
-    s += a[0] * b[1] - b[0] * a[1];
-  }
-  return s / 2;
-}
-
 /**
  * Delaunay triangulation by Bowyer-Watson. Returns counter-clockwise triangles as index triples,
  * or null when the result does not tile the convex hull (the caller falls back to segment mode).
@@ -95,7 +86,7 @@ export function delaunay(points: readonly Point[]): number[] | null {
   if (r === 0) return null;
   const pts: Point[] = points.map((p) => [(p[0] - cx) / r, (p[1] - cy) / r]);
   const hull = convexHull(pts);
-  const hullArea = polygonArea(hull.map((i) => pts[i]!));
+  const hullArea = signedArea(hull.map((i) => pts[i]!));
   for (const big of [50, 500, 5000]) {
     const tris = bowyerWatson(pts, big);
     let area = 0;
@@ -195,7 +186,7 @@ export function buildMesh(sensors: readonly Point[]): FieldMesh {
     let spread = 0;
     for (const a of nodes)
       for (const b of nodes) spread = Math.max(spread, Math.hypot(a[0] - b[0], a[1] - b[1]));
-    const area = Math.abs(polygonArea(convexHull(nodes).map((i) => nodes[i]!)));
+    const area = polygonArea(convexHull(nodes).map((i) => nodes[i]!));
     if (area >= COLLINEAR_RATIO * spread * spread) {
       const tris = delaunay(nodes);
       if (tris && tris.length > 0)

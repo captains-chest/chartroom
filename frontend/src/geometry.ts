@@ -42,6 +42,33 @@ export function closestOnSegment(
   return { point, t, d: dist(point, p) };
 }
 
+/** Signed area of a polygon (shoelace); positive when clockwise in y-down plan space. */
+export function signedArea(polygon: readonly Point[]): number {
+  let sum = 0;
+  for (let i = 0; i < polygon.length; i++)
+    sum += cross(polygon[i]!, polygon[(i + 1) % polygon.length]!);
+  return sum / 2;
+}
+
+/** Area of a simple polygon, either winding. */
+export const polygonArea = (polygon: readonly Point[]): number => Math.abs(signedArea(polygon));
+
+/** Area-weighted centroid of a simple polygon. */
+export function polygonCentroid(polygon: readonly Point[]): Point {
+  let cx = 0;
+  let cy = 0;
+  let a2 = 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const p = polygon[i]!;
+    const q = polygon[(i + 1) % polygon.length]!;
+    const c = cross(p, q);
+    a2 += c;
+    cx += (p[0] + q[0]) * c;
+    cy += (p[1] + q[1]) * c;
+  }
+  return [cx / (3 * a2), cy / (3 * a2)];
+}
+
 export function pointInPolygon([x, y]: Point, polygon: readonly Point[]): boolean {
   let hit = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -158,7 +185,7 @@ export function outlineFromWalls(plan: Plan, exterior = 'exterior'): Point[] {
   const loop = exteriorLoop(plan.walls.filter((w) => w.material === exterior));
   if (loop) {
     const corners = loop.map((step) => step.from);
-    const sign = signed(corners) >= 0 ? 1 : -1;
+    const sign = signedArea(corners) >= 0 ? 1 : -1;
     // Outward offset line for each edge: for a clockwise loop (positive area, y down) the outside
     // is to the right of the direction of travel.
     const lines = loop.map((step) => {
@@ -184,13 +211,6 @@ export function outlineFromWalls(plan: Plan, exterior = 'exterior'): Point[] {
     mmPoint([b.maxX, b.maxY]),
     mmPoint([b.minX, b.maxY]),
   ];
-}
-
-function signed(polygon: readonly Point[]): number {
-  let s = 0;
-  for (let i = 0; i < polygon.length; i++)
-    s += cross(polygon[i]!, polygon[(i + 1) % polygon.length]!);
-  return s / 2;
 }
 
 interface Step {

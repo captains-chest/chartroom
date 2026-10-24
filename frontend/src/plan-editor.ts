@@ -1,7 +1,7 @@
 // The wall and room editor: tools, selection, dragging with snapping, an inspector for the
 // selection, undo/redo and autosave. Loaded on demand by the panel (its own chunk).
 import { autoPlace, deviceChoices, deviceLook } from './devices';
-import { add, dist, frame, mm } from './geometry';
+import { add, dist, frame, mm, polygonArea } from './geometry';
 import type { Hass } from './ha-types';
 import { type Autosaver, autosaver } from './editor/autosaver';
 import {
@@ -37,7 +37,6 @@ import {
   materialsOf,
   type Plan,
   type Point,
-  polygonArea,
   type Room,
   type Source,
   type SourceKind,

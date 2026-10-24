@@ -3,11 +3,13 @@
 import {
   add,
   closestOnSegment,
+  cross,
   dist,
   frame,
   mm,
   mmPoint,
   outlineFromWalls,
+  polygonArea,
   same,
   sub,
   wallRect,
@@ -174,15 +176,13 @@ export function addOpening(
   const base = { id, wall: wallId, offset, width, material: d.material, thickness: d.thickness };
   if (kind === 'door') {
     // Swing towards the side of the click, if there was one.
-    const side = p ? Math.sign(cross2(sub(wall.b, wall.a), sub(p, wall.a))) : 1;
+    const side = p ? Math.sign(cross(sub(wall.b, wall.a), sub(p, wall.a))) : 1;
     const door: Door = { ...base, hinge: 'a', swing: side < 0 ? -1 : 1 };
     return { plan: { ...plan, doors: [...plan.doors, door] }, id };
   }
   const win: Window = base;
   return { plan: { ...plan, windows: [...plan.windows, win] }, id };
 }
-
-const cross2 = (a: Point, b: Point): number => a[0] * b[1] - a[1] * b[0];
 
 /** Slide an opening so its centre sits `centre` metres along its wall. */
 export function moveOpening(plan: Plan, id: string, centre: number): Plan {
@@ -299,10 +299,7 @@ export function twoPointFactor(p: Point, q: Point, metres: number): number {
 
 /** Scale factor that makes a drawn polygon's area equal `squareMetres`. */
 export function areaFactor(polygon: readonly Point[], squareMetres: number): number {
-  let s = 0;
-  for (let i = 0; i < polygon.length; i++)
-    s += cross2(polygon[i]!, polygon[(i + 1) % polygon.length]!);
-  const a = Math.abs(s / 2);
+  const a = polygonArea(polygon);
   if (a <= 0 || !(squareMetres > 0))
     throw new Error('need a room with an area and a positive target');
   return Math.sqrt(squareMetres / a);

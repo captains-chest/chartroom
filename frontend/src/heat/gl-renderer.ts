@@ -6,9 +6,11 @@
 // pass 2, the colour pass: each of the four nearest cells through the 256x1 ramp (or grey where
 //   there is no data), confidence and fade as alpha, mixed bilinearly so colours stop at a wall
 //   instead of blending values across it; the view transform; a cross-fade with the previous field.
-import { FADE_DISTANCE, OUTSIDE_ALPHA, type FieldGrid } from './field';
-import type { FieldPlan } from './field-plan';
-import type { Point } from './plan';
+// The TypeScript functions named next to each GLSL function are the reference: the Canvas2D
+// fallback runs them, and the e2e agreement tests (e2e/heat-debug.ts) check the two match.
+import { FADE_DISTANCE, OUTSIDE_ALPHA, nodeValues, type FieldGrid, type FieldMesh } from '../field';
+import type { FieldPlan } from '../field-plan';
+import type { Point } from '../plan';
 import {
   MAX_SIGNAL_SEGMENTS,
   MAX_SIGNAL_SOURCES,
@@ -17,12 +19,10 @@ import {
   SIGNAL_N,
   SRC,
   type SignalInput,
-} from './signal';
-import type { View } from './viewport';
-
-/** How cells without data look: a grey level (0..1) and its strength relative to the field. */
-export const NO_DATA_GREY = 0.55;
-export const NO_DATA_ALPHA = 0.35;
+} from '../signal';
+import type { View } from '../viewport';
+import { NO_DATA_ALPHA, NO_DATA_GREY } from './constants';
+import type { FieldRenderer, Layout } from './models';
 
 const FIELD_VS = `#version 300 es
 in vec2 aPos;
@@ -38,6 +38,7 @@ uniform int uOutlineCount;
 uniform vec3 uGrid;         // x0, y0, cell
 uniform vec2 uFade;         // outside alpha, distance
 out vec4 outField;
+// TS reference: fadeAt in field.ts.
 float fadeAt(vec2 p) {
   if (uOutlineCount < 3) return 1.0;
   bool inside = false;
@@ -69,6 +70,7 @@ uniform sampler2D uW;    // weights, fade
 uniform sampler2D uVals; // node values
 out vec4 outField;
 float val(float i) { return texelFetch(uVals, ivec2(int(i), 0), 0).x; }
+// TS reference: fillField in field-plan.ts.
 void main() {
   ivec2 c = ivec2(gl_FragCoord.xy);
   vec4 i = texelFetch(uIdx, c, 0);
@@ -84,6 +86,7 @@ uniform int uWallCount;
 uniform int uApCount;
 uniform vec4 uAps[${MAX_SIGNAL_SOURCES}]; // x, y, level at 1 m
 uniform vec2 uModel;        // path-loss exponent, floor
+// TS reference: signalAt in signal.ts (signalField per cell).
 void main() {
   vec2 p = uGrid.xy + gl_FragCoord.xy * uGrid.z;
   float best = uModel.y;
@@ -142,7 +145,7 @@ uniform float uMix;
 uniform vec2 uNoData;   // grey level, alpha
 in vec2 vPlan;
 out vec4 outColour;
-// One cell, premultiplied (the Canvas2D colourise, per cell).
+// One cell, premultiplied. TS reference: colourise in canvas-renderer.ts, per cell.
 vec4 colour(vec4 s) {
   if (s.y < 0.0) { float g = uOpacity * uNoData.y * s.z; return vec4(vec3(uNoData.x) * g, g); }
   float t = clamp((s.x - uDomain.x) / max(1e-6, uDomain.y - uDomain.x), 0.0, 1.0);
@@ -150,7 +153,7 @@ vec4 colour(vec4 s) {
   float a = uOpacity * s.y * s.z;
   return vec4(rgb * a, a);
 }
-// Bilinear over coloured cells, as Canvas2D smooths the coloured image.
+// Bilinear over coloured cells. Reference: CanvasRenderer.draw, Canvas2D smoothing the image.
 vec4 sampleColour(sampler2D f, vec2 cellPos, vec2 size) {
   vec2 q = cellPos - 0.5;
   vec2 fl = floor(q);
@@ -170,7 +173,7 @@ void main() {
   outColour = mix(before, now, uMix);
 }`;
 
-export interface Target {
+interface Target {
   tex: WebGLTexture;
   fbo: WebGLFramebuffer;
   grid: FieldGrid | null;
@@ -195,27 +198,32 @@ function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgr
   return prog;
 }
 
-export class GlRenderer {
-  readonly gl: WebGL2RenderingContext;
-  #weights: WebGLProgram;
-  #colour: WebGLProgram;
-  #quad: WebGLBuffer;
-  #idx: WebGLTexture;
-  #w: WebGLTexture;
-  #vals: WebGLTexture;
-  #outline: WebGLTexture;
-  #ramp: WebGLTexture;
-  #targets: [Target, Target];
+export class GlRenderer implements FieldRenderer {
+  readonly kind = 'webgl2';
+  /** Every pass runs on this thread, so a field is ready as soon as it is set. */
+  readonly busy = false;
+  readonly #canvas: HTMLCanvasElement;
+  readonly #gl: WebGL2RenderingContext;
+  readonly #weights: WebGLProgram;
+  readonly #colour: WebGLProgram;
+  readonly #quad: WebGLBuffer;
+  readonly #idx: WebGLTexture;
+  readonly #w: WebGLTexture;
+  readonly #vals: WebGLTexture;
+  readonly #outline: WebGLTexture;
+  readonly #ramp: WebGLTexture;
+  readonly #targets: [Target, Target];
 
   #other(): 0 | 1 {
     return this.#cur === 0 ? 1 : 0;
   }
   #cur: 0 | 1 = 0;
   #layout: FieldPlan | null = null;
-  #u = new Map<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
+  #mesh: FieldMesh | null = null;
+  readonly #u = new Map<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
 
   /** Throws when WebGL2 or float render targets are missing (the caller falls back to Canvas2D). */
-  constructor(readonly canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement) {
     const gl = canvas.getContext('webgl2', {
       premultipliedAlpha: true,
       antialias: false,
@@ -224,7 +232,8 @@ export class GlRenderer {
     });
     if (!gl) throw new Error('no WebGL2');
     if (!gl.getExtension('EXT_color_buffer_float')) throw new Error('no float render targets');
-    this.gl = gl;
+    this.#canvas = canvas;
+    this.#gl = gl;
     this.#weights = compile(gl, FIELD_VS, WEIGHTS_FS);
     this.#colour = compile(gl, COLOUR_VS, COLOUR_FS);
     this.#quad = gl.createBuffer();
@@ -244,7 +253,7 @@ export class GlRenderer {
   }
 
   #dataTexture(): WebGLTexture {
-    const gl = this.gl;
+    const gl = this.#gl;
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -256,7 +265,7 @@ export class GlRenderer {
   }
 
   #target(): Target {
-    const gl = this.gl;
+    const gl = this.#gl;
     const tex = this.#dataTexture();
     const fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -268,12 +277,12 @@ export class GlRenderer {
   #loc(prog: WebGLProgram, name: string): WebGLUniformLocation | null {
     let m = this.#u.get(prog);
     if (!m) this.#u.set(prog, (m = new Map()));
-    if (!m.has(name)) m.set(name, this.gl.getUniformLocation(prog, name));
+    if (!m.has(name)) m.set(name, this.#gl.getUniformLocation(prog, name));
     return m.get(name)!;
   }
 
   #upload(tex: WebGLTexture, data: Float32Array, width: number, height = 1): void {
-    const gl = this.gl;
+    const gl = this.#gl;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(
       gl.TEXTURE_2D,
@@ -289,16 +298,23 @@ export class GlRenderer {
   }
 
   setRamp(lut: Uint8Array): void {
-    const gl = this.gl;
+    const gl = this.#gl;
     gl.bindTexture(gl.TEXTURE_2D, this.#ramp);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, lut);
+  }
+
+  setLayout(layout: Layout, fade: boolean): void {
+    const { field, signal, grid, outline } = layout;
+    if (signal) this.#setSignal(signal, grid, outline, fade);
+    else if (field) this.#setWeights(field, outline, fade);
+    this.#mesh = layout.mesh;
   }
 
   /**
    * A new sensor layout: upload the per-cell weights (field-plan.ts). With `keepPrevious` the
    * current field becomes the cross-fade source.
    */
-  setLayout(plan: FieldPlan, outline: readonly Point[], keepPrevious: boolean): void {
+  #setWeights(plan: FieldPlan, outline: readonly Point[], keepPrevious: boolean): void {
     const { grid } = plan;
     this.#begin(grid, outline, keepPrevious);
     const cells = grid.nx * grid.ny;
@@ -319,7 +335,7 @@ export class GlRenderer {
 
   /** Switch field targets (keeping the current one for a cross-fade) and upload the outline. */
   #begin(grid: FieldGrid, outline: readonly Point[], keepPrevious: boolean): Target {
-    const gl = this.gl;
+    const gl = this.#gl;
     if (keepPrevious && this.#targets[this.#cur].grid) this.#cur = this.#other();
     else this.#targets[this.#other()].grid = null;
     const t = this.#targets[this.#cur];
@@ -335,7 +351,7 @@ export class GlRenderer {
 
   /** Bind a field target and the uniforms every field pass shares. */
   #fieldPass(prog: WebGLProgram, t: Target, grid: FieldGrid, outlineCount: number): void {
-    const gl = this.gl;
+    const gl = this.#gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
     gl.viewport(0, 0, grid.nx, grid.ny);
     gl.disable(gl.BLEND);
@@ -356,13 +372,13 @@ export class GlRenderer {
    * The signal layer: trace the whole field in one pass from the packed walls and sources
    * (compiled the first time). With `keepPrevious` the current field becomes the cross-fade source.
    */
-  setSignal(
+  #setSignal(
     input: SignalInput,
     grid: FieldGrid,
     outline: readonly Point[],
     keepPrevious: boolean,
   ): void {
-    const gl = this.gl;
+    const gl = this.#gl;
     const prog = (this.#signal ??= compile(gl, FIELD_VS, SIGNAL_FS));
     this.#walls ??= this.#dataTexture();
     const t = this.#begin(grid, outline, keepPrevious);
@@ -389,11 +405,12 @@ export class GlRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  /** Node values changed: recompute the field target. */
-  setValues(nodeVals: ArrayLike<number>): void {
-    const gl = this.gl;
+  /** Reading values changed: recompute the field target. */
+  setValues(values: number[]): void {
+    const gl = this.#gl;
     const L = this.#layout;
-    if (!L) return;
+    if (!L || !this.#mesh) return;
+    const nodeVals = nodeValues(this.#mesh, values);
     const vals = new Float32Array(Math.max(1, L.nodes) * 4);
     for (let i = 0; i < L.nodes; i++) vals[i * 4] = nodeVals[i]!;
     this.#upload(this.#vals, vals, L.nodes);
@@ -408,9 +425,9 @@ export class GlRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  #clipQuad = new Float32Array(8);
+  readonly #clipQuad = new Float32Array(8);
   #drawQuad(prog: WebGLProgram, corners: number[] | null): void {
-    const gl = this.gl;
+    const gl = this.#gl;
     const loc = gl.getAttribLocation(prog, 'aPos');
     gl.bindBuffer(gl.ARRAY_BUFFER, this.#quad);
     if (corners) {
@@ -426,9 +443,9 @@ export class GlRenderer {
 
   /** Pass 2: colour the field into the canvas for the current view. */
   draw(view: View, domain: readonly [number, number], opacity: number, mix: number): void {
-    const gl = this.gl;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+    const gl = this.#gl;
+    const w = this.#canvas.width;
+    const h = this.#canvas.height;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0);
@@ -468,12 +485,19 @@ export class GlRenderer {
     this.#targets[this.#other()].grid = null;
   }
 
-  /** The current field target (for the debug hooks). */
-  get target(): Target {
-    return this.#targets[this.#cur];
+  readField(): Float32Array | null {
+    const gl = this.#gl;
+    const t = this.#targets[this.#cur];
+    if (!t.grid) return null;
+    const cells = t.grid.nx * t.grid.ny;
+    const rgba = new Float32Array(cells * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.readPixels(0, 0, t.grid.nx, t.grid.ny, gl.RGBA, gl.FLOAT, rgba);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return rgba.filter((_, i) => i % 4 < 3);
   }
 
   dispose(): void {
-    this.gl.getExtension('WEBGL_lose_context')?.loseContext();
+    this.#gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
 }

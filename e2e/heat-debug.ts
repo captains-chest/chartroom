@@ -1,15 +1,11 @@
 // Test-only heatmap hooks, injected into the page (page.addInitScript) instead of shipping with
 // the integration: read the field back, and draw the same field with WebGL2 and with the
-// Canvas2D fallback to compare them. They work on HeatLayer.debug(); everything they need is
-// inside installHeatDebug, which Playwright serialises into the page.
+// Canvas2D fallback to compare them. They use HeatLayer's public surface (idle, renderer,
+// setRenderer) and its one probe, readField; everything they need is inside installHeatDebug,
+// which Playwright serialises into the page.
 import type { Page } from '@playwright/test';
-import type { GlRenderer } from '../frontend/src/heat-gl';
-import type {
-  CanvasRenderer,
-  DebugContext,
-  HeatLayer,
-  RendererKind,
-} from '../frontend/src/heat-layer';
+import type { HeatLayer } from '../frontend/src/heat-layer';
+import type { RendererKind } from '../frontend/src/heat/types';
 
 export interface Compare {
   renderer: RendererKind;
@@ -19,7 +15,7 @@ export interface Compare {
   fadeMaxDiff: number;
   fieldP999Diff: number;
   fieldOver: number;
-  worst: { cell: [number, number]; gl: number; cpu: number }[];
+  worst: { cell: number; gl: number; cpu: number }[];
   range: number;
   pixels: number;
   pixelMaxDiff: number;
@@ -29,7 +25,10 @@ export interface Compare {
 export interface HeatDebug {
   /** The current field (value, confidence, fade per cell) from the active renderer. */
   readField(heat: unknown): Promise<{ renderer: RendererKind; field: number[] }>;
-  /** Draw the settled field both ways (same values, same view) and say how far apart they are. */
+  /**
+   * Draw the settled field with WebGL2, switch the layer to Canvas2D and back, and say how far
+   * apart the two fields and pictures are (same readings, same view).
+   */
   compareRenderers(heat: unknown): Promise<Compare | null>;
 }
 
@@ -40,26 +39,28 @@ declare global {
 }
 
 export function installHeatDebug(): void {
-  /** The GL field target read back: value, confidence, fade per cell. */
-  const glField = (r: GlRenderer): Float32Array | null => {
-    const { gl } = r;
-    const t = r.target;
-    if (!t.grid) return null;
-    const { nx, ny } = t.grid;
-    const rgba = new Float32Array(nx * ny * 4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
-    gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, rgba);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const out = new Float32Array(nx * ny * 3);
-    for (let c = 0; c < nx * ny; c++) out.set(rgba.subarray(c * 4, c * 4 + 3), c * 3);
-    return out;
+  // Keep WebGL drawing buffers after compositing, so a settled heatmap can be read back.
+  const proto = HTMLCanvasElement.prototype as unknown as {
+    getContext: (this: HTMLCanvasElement, type: string, attrs?: object) => unknown;
   };
-  /** The GL canvas as straight (not premultiplied) RGBA, top row first. */
-  const glPixels = (r: GlRenderer): Uint8ClampedArray => {
-    const { gl } = r;
-    const w = gl.canvas.width;
-    const h = gl.canvas.height;
+  const getContext = proto.getContext;
+  proto.getContext = function (this: HTMLCanvasElement, type, attrs) {
+    return getContext.call(
+      this,
+      type,
+      type === 'webgl2' ? { ...attrs, preserveDrawingBuffer: true } : attrs,
+    );
+  };
+
+  /** The heat canvas as straight (not premultiplied) RGBA, top row first. */
+  const pixels = (heat: HeatLayer): Uint8ClampedArray => {
+    const canvas = heat.box.querySelector('canvas')!;
+    const w = canvas.width;
+    const h = canvas.height;
+    if (heat.renderer === 'canvas') return canvas.getContext('2d')!.getImageData(0, 0, w, h).data;
+    const gl = canvas.getContext('webgl2')!;
     const px = new Uint8Array(w * h * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
     const out = new Uint8ClampedArray(w * h * 4);
     for (let y = 0; y < h; y++)
@@ -72,65 +73,56 @@ export function installHeatDebug(): void {
       }
     return out;
   };
-  const canvasPixels = (r: CanvasRenderer): Uint8ClampedArray =>
-    r.ctx.getImageData(0, 0, r.canvas.width, r.canvas.height).data;
-  const settled = async (h: unknown): Promise<DebugContext> => {
-    const heat = h as HeatLayer;
+  type Capture = { field: Float32Array | null; px: Uint8ClampedArray };
+  /** The settled field and picture of the active renderer. */
+  const capture = async (heat: HeatLayer): Promise<Capture> => {
     await heat.idle();
-    return heat.debug();
+    return { field: heat.readField(), px: pixels(heat) };
   };
+  const readings = (heat: HeatLayer): string => JSON.stringify(heat.data?.readings);
 
   window.chartroomDebug = {
-    async readField(heat) {
-      const c = await settled(heat);
-      const f = c.gl ? glField(c.gl) : (c.c2d?.field ?? null);
-      return { renderer: c.renderer, field: f ? Array.from(f) : [] };
+    async readField(h) {
+      const heat = h as HeatLayer;
+      await heat.idle();
+      const f = heat.readField();
+      return { renderer: heat.renderer, field: f ? Array.from(f) : [] };
     },
 
-    async compareRenderers(heat) {
-      const c = await settled(heat);
-      const { layout: L, gl, values, domain, view, opacity } = c;
-      if (!L || !gl) return null;
-      c.upload();
-      gl.draw(view, domain, opacity, 1);
-      const glF = glField(gl)!;
-      const glPx = glPixels(gl);
-      const { signal } = L;
-      const res = await c.request(
-        signal
-          ? {
-              type: 'signal',
-              key: L.key,
-              grid: L.grid,
-              outline: c.outline,
-              walls: signal.walls,
-              aps: signal.aps,
-            }
-          : { type: 'values', key: L.key, values },
+    async compareRenderers(h) {
+      const heat = h as HeatLayer;
+      await heat.idle();
+      if (heat.renderer !== 'webgl2') return null;
+      // Both renderers must draw the same readings: a pair taken across a new reading is retaken.
+      let gl: Capture | null = null;
+      let cpu: Capture | null = null;
+      for (let i = 0; i < 3; i++) {
+        const before = readings(heat);
+        gl = await capture(heat);
+        heat.setRenderer('canvas');
+        cpu = await capture(heat);
+        heat.setRenderer('webgl2');
+        await heat.idle();
+        if (readings(heat) === before) break;
+      }
+      const glF = gl?.field;
+      const cpuF = cpu?.field;
+      if (!gl || !cpu || !glF || !cpuF || glF.length !== cpuF.length) return null;
+      // The range the ramp spans, from the legend's scale.
+      const scale = [...heat.legend.querySelectorAll('.heat-scale span')].map((s) =>
+        Number(s.textContent),
       );
-      if (res.type !== 'field') return null;
-      const canvas = document.createElement('canvas');
-      canvas.width = c.canvas.width;
-      canvas.height = c.canvas.height;
-      const c2d = c.canvasRenderer(canvas);
-      c2d.setField(res.field, res.grid);
-      c2d.draw(view, domain, opacity, 1, c.lut);
-      const cpuPx = canvasPixels(c2d);
+      const range = scale[scale.length - 1]! - scale[0]!;
       // Per channel: value, confidence, fade.
       const diff = [0, 0, 0];
-      const tol = 1e-3 * (domain[1] - domain[0]);
+      const tol = 1e-3 * range;
       const valueDiffs = new Float32Array(glF.length / 3);
       const worst: Compare['worst'] = [];
       for (let i = 0; i < glF.length; i++) {
-        const d = Math.abs(glF[i]! - res.field[i]!);
+        const d = Math.abs(glF[i]! - cpuF[i]!);
         if (i % 3 === 0) {
           valueDiffs[i / 3] = d;
-          if (d > tol && worst.length < 8)
-            worst.push({
-              cell: [(i / 3) % L.grid.nx, Math.floor(i / 3 / L.grid.nx)],
-              gl: glF[i]!,
-              cpu: res.field[i]!,
-            });
+          if (d > tol && worst.length < 8) worst.push({ cell: i / 3, gl: glF[i]!, cpu: cpuF[i]! });
         }
         diff[i % 3] = Math.max(diff[i % 3]!, d);
       }
@@ -138,32 +130,32 @@ export function installHeatDebug(): void {
       const fieldP999Diff = valueDiffs[Math.floor((valueDiffs.length - 1) * 0.999)] ?? 0;
       const fieldOver = valueDiffs.filter((d) => d > tol).length;
       // Compare colour where both are clearly visible; alpha everywhere.
-      let pixels = 0;
+      const glPx = gl.px;
+      const cpuPx = cpu.px;
+      let count = 0;
       let max = 0;
       let sum = 0;
       for (let i = 0; i < glPx.length; i += 4 * 7) {
         let d = Math.abs(glPx[i + 3]! - cpuPx[i + 3]!);
         if (glPx[i + 3]! > 64 && cpuPx[i + 3]! > 64)
           for (let k = 0; k < 3; k++) d = Math.max(d, Math.abs(glPx[i + k]! - cpuPx[i + k]!));
-        pixels++;
+        count++;
         max = Math.max(max, d);
         sum += d;
       }
-      // Put the visible canvas back.
-      gl.draw(view, domain, opacity, 1);
       return {
-        renderer: c.renderer,
-        cells: L.grid.nx * L.grid.ny,
+        renderer: heat.renderer,
+        cells: glF.length / 3,
         fieldMaxDiff: diff[0]!,
         confMaxDiff: diff[1]!,
         fadeMaxDiff: diff[2]!,
         fieldP999Diff,
         fieldOver,
         worst,
-        range: domain[1] - domain[0],
-        pixels,
+        range,
+        pixels: count,
         pixelMaxDiff: max,
-        pixelMeanDiff: sum / Math.max(1, pixels),
+        pixelMeanDiff: sum / Math.max(1, count),
       };
     },
   };

@@ -234,15 +234,7 @@ export class HeatLayer {
       renderLegend(this.legend, legendContent(data, target, this.#signalNote));
       this.onReadings?.(data, target);
     }
-    if (data.readings.length === 0) {
-      this.#wantKey = this.#key = key;
-      this.#layout = null;
-      this.box.hidden = true;
-      this.#renderer.dropPrevious();
-      this.#settle();
-      return;
-    }
-    this.box.hidden = false;
+    if (data.readings.length === 0) return this.#blank(key);
     if (key !== this.#wantKey) {
       this.#wantKey = key;
       const box = bounds ?? { minX: 0, minY: 0, maxX: 1, maxY: 1 };
@@ -265,14 +257,30 @@ export class HeatLayer {
           rooms: plan.rooms.map((r) => [...r.polygon]),
         })
         .then((res) => {
-          if (res.type !== 'mesh' || res.key !== this.#wantKey) return;
-          const L: Layout = { key, mesh: res.mesh, field: res.plan, grid, ids, outline };
-          this.#applyLayout(L, crossFade);
+          if (key !== this.#wantKey) return;
+          if (res.type === 'mesh')
+            return this.#applyLayout(
+              { key, mesh: res.mesh, field: res.plan, grid, ids, outline },
+              crossFade,
+            );
+          // Without a mesh there is no field; it is asked for again when the layout changes.
+          console.warn('Chartroom heatmap:', res);
+          this.#blank(key);
         });
     } else this.#start();
   }
 
+  /** Nothing to draw for layout `key`: hide the field and settle. */
+  #blank(key: string): void {
+    this.#wantKey = this.#key = key;
+    this.#layout = null;
+    this.box.hidden = true;
+    this.#renderer.dropPrevious();
+    this.#settle();
+  }
+
   #applyLayout(L: Layout, crossFade: boolean): void {
+    this.box.hidden = false;
     this.#layout = L;
     this.#key = L.key;
     const fade = crossFade && this.ms > 0;

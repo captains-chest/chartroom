@@ -2,47 +2,57 @@
 import { workerUrl } from '../field-worker';
 import type { WorkerRequest, WorkerRequestBody, WorkerResponse } from '../worker-protocol';
 
-type Pending = { resolve: (r: WorkerResponse) => void };
+type Pending = { req: WorkerRequest; resolve: (r: WorkerResponse) => void };
 
-/** Talks to the field worker; runs the same handler in this thread when workers are unavailable. */
+const spawnWorker = (): Worker => new Worker(workerUrl(), { type: 'module' });
+
+/**
+ * Talks to the field worker; runs the same handler in this thread when workers are unavailable.
+ * Every request settles: failures come back as `error` replies, never as rejections.
+ */
 export class FieldClient {
   #worker: Worker | null = null;
-  #local: Promise<(req: WorkerRequest) => WorkerResponse> | null = null;
+  #handler: Promise<(req: WorkerRequest) => WorkerResponse> | null = null;
   #id = 0;
   readonly #pending = new Map<number, Pending>();
 
-  constructor() {
+  constructor(spawn = spawnWorker) {
     try {
-      this.#worker = new Worker(workerUrl(), { type: 'module' });
-      this.#worker.addEventListener('message', (e: MessageEvent<WorkerResponse>) => {
+      const worker = spawn();
+      worker.addEventListener('message', (e: MessageEvent<WorkerResponse>) => {
         const p = this.#pending.get(e.data.id);
         this.#pending.delete(e.data.id);
         p?.resolve(e.data);
       });
-      this.#worker.addEventListener('error', () => this.#toLocal());
+      worker.addEventListener('error', () => this.#toLocal());
+      this.#worker = worker;
     } catch {
-      this.#toLocal();
+      // No module workers here: every request runs in this thread.
     }
   }
 
+  /** The worker failed: its requests in flight, and all later ones, run in this thread. */
   #toLocal(): void {
     this.#worker?.terminate();
     this.#worker = null;
-    this.#local ??= import('../worker-protocol').then((m) => m.createHandler());
-    // Requests in flight are lost with the worker: replay is not worth it, fail them.
-    for (const [id, p] of this.#pending) p.resolve({ type: 'error', id, message: 'worker failed' });
+    for (const p of this.#pending.values()) void this.#local(p.req).then(p.resolve);
     this.#pending.clear();
+  }
+
+  #local(req: WorkerRequest): Promise<WorkerResponse> {
+    this.#handler ??= import('../worker-protocol').then((m) => m.createHandler());
+    return this.#handler
+      .then((handle) => handle(req))
+      .catch((e: unknown) => ({ type: 'error', id: req.id, message: String(e) }));
   }
 
   request(req: WorkerRequestBody): Promise<WorkerResponse> {
     const full = { ...req, id: ++this.#id } as WorkerRequest;
-    if (!this.#worker) {
-      this.#local ??= import('../worker-protocol').then((m) => m.createHandler());
-      return this.#local.then((handle) => handle(full));
-    }
+    const worker = this.#worker;
+    if (!worker) return this.#local(full);
     return new Promise((resolve) => {
-      this.#pending.set(full.id, { resolve });
-      this.#worker?.postMessage(full);
+      this.#pending.set(full.id, { req: full, resolve });
+      worker.postMessage(full);
     });
   }
 

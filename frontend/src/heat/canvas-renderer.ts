@@ -8,6 +8,8 @@ import { NO_DATA_ALPHA, NO_DATA_GREY } from './constants';
 import type { FieldRenderer, Layout } from './models';
 import type { FieldRequest } from './types';
 
+type FieldWork = Extract<WorkerRequestBody, { type: 'signal' | 'values' }>;
+
 interface CanvasField {
   field: Float32Array;
   grid: FieldGrid;
@@ -96,13 +98,20 @@ export class CanvasRenderer implements FieldRenderer {
     this.#compute({ type: 'values', key: L.key, values }, want);
   }
 
-  /** Ask the worker for a field; a reply for a layout since replaced is dropped. */
-  #compute(req: WorkerRequestBody, values = ''): void {
+  /**
+   * Ask the worker for a field; a reply for a layout since replaced is dropped. A failed field
+   * blanks the layer and is not retried until the values or the layout change.
+   */
+  #compute(req: FieldWork, values = ''): void {
     this.#inflight++;
     void this.#request(req).then((res) => {
       this.#inflight--;
-      if (res.type !== 'field' || res.key !== this.#layout?.key) return;
-      this.#setField(res.field, res.grid);
+      if (req.key !== this.#layout?.key) return;
+      if (res.type === 'field') this.#setField(res.field, res.grid);
+      else {
+        console.warn('Chartroom heatmap:', res);
+        this.#cur = this.#prev = null;
+      }
       this.#fieldFor = values;
     });
   }

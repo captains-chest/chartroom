@@ -9,12 +9,19 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 import voluptuous as vol
 
-from .const import DOMAIN, SIGNAL_PLAN_CHANGED, VERSION
+from .const import DOMAIN, PLAN_SCHEMA_VERSION, SIGNAL_PLAN_CHANGED, VERSION
 from .mesh import DATA_MESH_TEST, async_get_topology
 from .store import ChartroomStore
 from .underlay import async_remove_underlay
 
 PLAN_ID = vol.All(str, vol.Length(min=1, max=64), vol.Match(r"^[a-z0-9_-]+$"))
+
+
+def _plan_schema_version(value: Any) -> int:
+    # An exact int: True and 1.0 compare equal to 1 in Python, but are not what the frontend sends.
+    if type(value) is not int or value != PLAN_SCHEMA_VERSION:
+        raise vol.Invalid(f"unsupported schema_version {value!r}")
+    return value
 
 
 @callback
@@ -81,6 +88,7 @@ def ws_get_plan(
             {
                 vol.Required("name"): vol.All(str, vol.Length(min=1, max=100)),
                 vol.Optional("floor_id"): vol.Any(str, None),
+                vol.Optional("schema_version"): _plan_schema_version,
             },
             extra=vol.ALLOW_EXTRA,
         ),
@@ -91,7 +99,10 @@ def ws_get_plan(
 async def ws_save_plan(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Create or replace a plan (admins only)."""
+    """Create or replace a plan (admins only).
+
+    Only the envelope is checked: the plan is stored as sent, and the frontend owns its schema.
+    """
     if (store := _store(hass, connection, msg["id"])) is None:
         return
     saved = await store.async_save_plan(msg["plan_id"], msg["plan"])

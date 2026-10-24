@@ -1,7 +1,10 @@
 // The plan schema's version, built-in materials, defaults and per-floor limits.
 import type { Material } from './models';
 
-/** Bump when a stored plan needs migrating; readers reject versions they don't know. */
+/**
+ * Bump when a stored plan needs migrating; readers reject versions they don't know. The integration
+ * rejects saves of any other version: bump PLAN_SCHEMA_VERSION in const.py with it.
+ */
 export const PLAN_SCHEMA_VERSION = 1;
 
 /** Built-in materials. A plan may add its own or override these by id. */

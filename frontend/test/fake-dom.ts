@@ -80,6 +80,9 @@ class FakeElement {
     this.parent.children = this.parent.children.filter((c) => c !== this);
     this.parent = null;
   }
+  querySelector(): FakeElement | null {
+    return null;
+  }
   querySelectorAll(): FakeElement[] {
     return [];
   }

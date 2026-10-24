@@ -45,6 +45,11 @@ The first release.
 - The frontend is served from a versioned path, and an open panel or card shows **Chartroom was
   updated** with a Reload button when the integration is newer than the page.
 
+### Install
+
+- Installs as a custom repository from the Marketplace (Home Assistant 2026.11 and newer), from
+  HACS (2026.10), or by hand. Ships its own light and dark brand icon.
+
 ### Requirements
 
 - Home Assistant 2026.10 or newer. No Python requirements and no runtime JavaScript

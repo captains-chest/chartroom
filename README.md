@@ -11,17 +11,17 @@ Zigbee and Z-Wave mesh links — in a sidebar panel and as a dashboard card.
 > an estimated signal-strength map from your access points and radios through your walls, and the
 > ZHA, Z-Wave JS and Zigbee2MQTT mesh drawn between your devices. Phase 5 adds a history slider
 > that plays the plan back from Home Assistant's recorder, and a phone layout for the panel. See
-> [docs/render-design.md](docs/render-design.md) for how the heatmaps are rendered and how fast
+> [docs/render-design.md](https://github.com/captains-chest/chartroom/blob/main/docs/render-design.md) for how the heatmaps are rendered and how fast
 > they are.
 
-![Chartroom panel with the temperature heatmap](docs/images/heatmap-temperature.png)
+![Chartroom panel with the temperature heatmap](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/heatmap-temperature.png)
 
 ## Drawing your plan
 
 Open **Chartroom** in the sidebar, pick a floor and press **Edit** (or **Create plan** on a floor
 without one). Admins only; changes save automatically.
 
-![Chartroom editor](docs/images/editor.png)
+![Chartroom editor](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/editor.png)
 
 - **Wall**: click to start, click to add corners, double-click or Esc to finish. Endpoints snap to
   other walls and stay joined when you drag them. Each wall has a material and a thickness.
@@ -45,13 +45,13 @@ without one). Admins only; changes save automatically.
 - **Materials**: the loss per centimetre for each wall material, used by the signal heatmap.
 - The outer outline is worked out from the walls; there is no outline tool.
 - A floor with more than 512 walls, 32 access points and radios or 256 devices shows a warning: the heatmaps
-  may be slow on phones and tablets (see [docs/render-design.md](docs/render-design.md)).
+  may be slow on phones and tablets (see [docs/render-design.md](https://github.com/captains-chest/chartroom/blob/main/docs/render-design.md)).
 
-![Placing sources in the editor](docs/images/editor-sources.png)
+![Placing sources in the editor](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/editor-sources.png)
 
-![Placing devices in the editor](docs/images/editor-devices.png)
+![Placing devices in the editor](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/editor-devices.png)
 
-![The panel with an underlay](docs/images/panel-underlay.png)
+![The panel with an underlay](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/panel-underlay.png)
 
 ## Heatmaps
 
@@ -84,7 +84,7 @@ button again to hide it. Your choice is remembered on this device.
 - Sensor value labels step aside for room names, and hide on small cards rather than overlap them.
   An underlay drawing sits beneath the field.
 
-![Humidity heatmap](docs/images/heatmap-humidity.png)
+![Humidity heatmap](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/heatmap-humidity.png)
 
 ### Signal
 
@@ -103,7 +103,7 @@ the access points and radios placed with **Source**:
 - It is an estimate, not a measurement: there is no calibration to real RSSI yet.
 - Drawn by a WebGL2 shader, or by the Web Worker on a 2D canvas, with the same results.
 
-![Signal heatmap](docs/images/heatmap-signal.png)
+![Signal heatmap](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/heatmap-signal.png)
 
 ### Mesh links
 
@@ -117,7 +117,7 @@ every minute while the layer is on (Zigbee2MQTT's network map at most every 10 m
 makes the routers scan). The toggle works with any heatmap or none, and is remembered on this
 device.
 
-![Mesh links over the signal heatmap](docs/images/mesh-links.png)
+![Mesh links over the signal heatmap](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/mesh-links.png)
 
 ## History
 
@@ -138,7 +138,7 @@ the current states.
 - What you can go back to depends on your recorder settings (`purge_keep_days`, 10 days by
   default); long-term statistics are kept beyond that.
 
-![History: the plan at an earlier time](docs/images/panel-history.png)
+![History: the plan at an earlier time](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/panel-history.png)
 
 ## On a phone
 
@@ -154,8 +154,8 @@ plan the whole screen:
 - The sheet leaves room for the phone's home indicator (`safe-area-inset-bottom`).
 
 <p>
-  <img src="docs/images/phone.png" alt="The panel on a phone" width="260">
-  <img src="docs/images/phone-history.png" alt="The history bar on a phone" width="260">
+  <img src="https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/phone.png" alt="The panel on a phone" width="260">
+  <img src="https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/phone-history.png" alt="The history bar on a phone" width="260">
 </p>
 
 ## Devices
@@ -184,15 +184,34 @@ Markers follow Home Assistant live, in the panel and in the card:
   have to sit in a `foreignObject` inside the zoomable SVG, which renders unreliably in WebKit
   (Safari and the iOS companion app), so Chartroom does not use it.
 
-![Chartroom panel with device markers](docs/images/panel-devices.png)
+![Chartroom panel with device markers](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/panel-devices.png)
 
-![Chartroom card](docs/images/card.png)
+![Chartroom card](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/card.png)
 
-## Install (HACS)
+## Install
 
-1. In HACS, add this repository as a custom repository (category **Integration**).
-2. Install **Chartroom** and restart Home Assistant.
+Chartroom needs Home Assistant 2026.10 or newer. Until it is in the default catalog, add it as a
+custom repository: `https://github.com/captains-chest/chartroom`, type **Integration**.
+
+**Home Assistant 2026.11 and newer (Marketplace).** HACS is built in as the
+[Marketplace](https://www.hacs.xyz/docs/marketplace/) from 2026.11.
+
+1. Go to **Settings → Marketplace** and accept the community-content warning the first time.
+2. Add the repository under **Custom repositories** (type **Integration**). Custom repositories
+   need a GitHub connection; the Marketplace asks you to connect one.
+3. Download **Chartroom**, and restart Home Assistant if it asks you to.
+4. Go to **Settings → Devices & services → Add integration → Chartroom**.
+
+**Home Assistant 2026.10 (HACS).**
+
+1. In HACS, open the ⋮ menu → **Custom repositories**, add the repository with type
+   **Integration**.
+2. Download **Chartroom** and restart Home Assistant.
 3. Go to **Settings → Devices & services → Add integration → Chartroom**.
+
+**By hand.** Copy `custom_components/chartroom` from this repository (or a release) into the
+`custom_components` folder of your Home Assistant configuration, restart Home Assistant, and add
+the integration as above. Updates are then up to you.
 
 After an update (and the restart), a panel or card left open in a browser shows **Chartroom was
 updated** with a **Reload** button: the page still runs the old frontend until it reloads. The
@@ -218,9 +237,9 @@ to explore a plan. When a plan is edited, open cards update straight away. With 
 the card gets the same History slider as the panel (loaded on first use); while you scrub, marker
 colours fade from one state to the next.
 
-![Card with a humidity heatmap](docs/images/card-heatmap.png)
+![Card with a humidity heatmap](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/card-heatmap.png)
 
-![Card with the History slider open](docs/images/card-history.png)
+![Card with the History slider open](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/card-history.png)
 
 Requires Home Assistant 2026.10 or newer. Chartroom has no Python requirements and no runtime
 JavaScript dependencies; everything it needs ships in this repository.
@@ -239,9 +258,9 @@ Websocket commands: `chartroom/info` (returns `{version}`, used for the update p
 
 ## Example data
 
-[![Example plan: two bedrooms, kitchen-living, bath and hall, about 62 m²](docs/images/example-plan.svg)](docs/images/example-plan.svg)
+[![Example plan: two bedrooms, kitchen-living, bath and hall, about 62 m²](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/example-plan.svg)](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/example-plan.svg)
 
-[`frontend/test/fixtures/example-plan.json`](frontend/test/fixtures/example-plan.json) is a real
+[`frontend/test/fixtures/example-plan.json`](https://github.com/captains-chest/chartroom/blob/main/frontend/test/fixtures/example-plan.json) is a real
 one-floor flat of about 62 m², traced by hand into the plan model (`frontend/src/plan.ts`): walls in
 metres with material and thickness, rooms, doors with their swing, windows, and sample
 temperature/humidity sensors. Only the geometry and generic room types were kept; the source
@@ -300,4 +319,4 @@ Made by CaptainDuckay. Questions: hello@captains-chest.com.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/captains-chest/chartroom/blob/main/LICENSE)

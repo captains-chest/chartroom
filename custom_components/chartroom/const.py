@@ -6,8 +6,13 @@ DOMAIN: Final = "chartroom"
 NAME: Final = "Chartroom"
 VERSION: Final = "0.1.0"
 
+# STORAGE_VERSION versions the Store file around the plans; PLAN_SCHEMA_VERSION versions each
+# plan inside it (frontend/src/plan.ts). They change independently.
 STORAGE_KEY: Final = f"{DOMAIN}.plans"
 STORAGE_VERSION: Final = 1
+# The plan schema_version this build accepts on save. The plan schema and its migrations live in
+# the frontend (normalizePlan); a plan without the field predates it and counts as this version.
+PLAN_SCHEMA_VERSION: Final = 1
 
 PANEL_URL_PATH: Final = "chartroom"
 PANEL_ELEMENT: Final = "chartroom-panel"

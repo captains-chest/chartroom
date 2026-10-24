@@ -6,9 +6,15 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, flush_store
 
-from custom_components.chartroom.const import DOMAIN, STORAGE_KEY, VERSION
+from custom_components.chartroom.const import (
+    DOMAIN,
+    PLAN_SCHEMA_VERSION,
+    STORAGE_KEY,
+    VERSION,
+)
 
 EXAMPLE_PLAN = Path(__file__).parents[1] / "frontend/test/fixtures/example-plan.json"
 
@@ -148,3 +154,40 @@ async def test_info_reports_the_version(hass: HomeAssistant, hass_ws_client) -> 
     msg = await ws.receive_json()
     assert msg["success"]
     assert msg["result"] == {"version": VERSION}
+
+
+@pytest.mark.parametrize(
+    ("schema_version", "accepted"),
+    [
+        (PLAN_SCHEMA_VERSION, True),
+        (2, False),
+        (0, False),
+        ("1", False),
+        (1.0, False),
+        (True, False),
+    ],
+)
+async def test_save_checks_schema_version(
+    hass: HomeAssistant, hass_ws_client, schema_version: Any, accepted: bool
+) -> None:
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+    plan = {"schema_version": schema_version, "name": "Up"}
+    await ws.send_json_auto_id({"type": "chartroom/plans/save", "plan_id": "up", "plan": plan})
+    msg = await ws.receive_json()
+    assert msg["success"] is accepted
+    if not accepted:
+        assert msg["error"]["code"] == "invalid_format"
+
+
+async def test_save_accepts_plan_without_schema_version(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    """Plans from before the field count as the current version, as normalizePlan reads them."""
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+    plan = {"name": "Legacy", "walls": []}
+    await ws.send_json_auto_id({"type": "chartroom/plans/save", "plan_id": "legacy", "plan": plan})
+    msg = await ws.receive_json()
+    assert msg["success"]
+    assert msg["result"] == {"id": "legacy", **plan}

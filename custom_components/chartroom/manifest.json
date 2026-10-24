@@ -2,7 +2,6 @@
   "domain": "chartroom",
   "name": "Chartroom",
   "after_dependencies": ["mqtt", "zha", "zwave_js"],
-  "categories": ["sensors.temperature_humidity", "hubs_protocols.wireless_protocols"],
   "codeowners": ["@captainDuckay"],
   "config_flow": true,
   "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],

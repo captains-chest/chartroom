@@ -31,7 +31,7 @@ export class ChartroomCard extends HTMLElement {
   #config?: ChartroomCardConfig;
   #hass?: Hass;
   #view = new PlanView(true);
-  #controls = new DeviceControls(this.#view, this, () => this.#hass);
+  #controls = new DeviceControls(this.#view, this, () => this.#shown());
   #title: HTMLElement;
   #stage: HTMLElement;
   #message: HTMLElement;
@@ -126,7 +126,7 @@ export class ChartroomCard extends HTMLElement {
 
   set hass(hass: Hass) {
     this.#hass = hass;
-    this.#view.setHass(this.#time ? this.#time.view(hass) : hass);
+    this.#view.setHass(this.#shown());
     this.#renderLayers();
     if (!this.#loaded && hass.connection) void this.#loadPlan();
     this.#update.watch(hass.connection);
@@ -216,13 +216,18 @@ export class ChartroomCard extends HTMLElement {
     const time = new TimeBar({
       hass: () => this.#hass,
       plan: () => this.#view.plan,
-      changed: () => this.#view.setHass(time.view(this.#hass)),
+      changed: () => this.#view.setHass(this.#shown()),
       live: () => this.#closeTime(),
     });
     this.#time = time;
     this.#stage.after(time.el);
     this.#markTime();
     await time.load();
+  }
+
+  /** What the plan shows: live, or the recorded states at the slider's time. */
+  #shown(): Hass | undefined {
+    return this.#time ? this.#time.view(this.#hass) : this.#hass;
   }
 
   #closeTime(): void {
@@ -250,7 +255,7 @@ export class ChartroomCard extends HTMLElement {
   }
 
   #renderLayers(): void {
-    const counts = layerCounts(this.#view.plan, this.#hass);
+    const counts = layerCounts(this.#view.plan, this.#shown());
     this.#layers.update(this.#layer, counts);
     const show = this.#layer && counts[this.#layer] > 0 ? this.#layer : null;
     if (show !== this.#view.layer) void this.#view.setLayer(show);

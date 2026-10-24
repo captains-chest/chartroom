@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { api, deletePlan, savePlan } from './ha';
+import { DASHBOARD, api, deletePlan, savePlan } from './ha';
 
 // The history slider on a throwaway copy of the example plan with the kitchen window sensor as a
 // device. The test records a kitchen reading and a window state, moves on, then scrubs back to
@@ -135,5 +135,59 @@ test('the history slider shows readings and devices as they were, then returns t
     await setTemp(wasTemp);
     await setWindow(wasWindow);
     await deletePlan(token(), PLAN);
+  }
+});
+
+test('the card opens details instead of toggling a device while it shows the past', async ({
+  page,
+}) => {
+  const plan = 'e2e-history-card';
+  const light = 'light.living_room_ceiling_light';
+  await savePlan(token(), plan, {
+    ...FIXTURE,
+    name: 'E2E history card',
+    floor_id: null,
+    devices: [{ id: 'light', entity_id: light, position: [6.4, 1.2] }],
+  });
+  const was = await state(light);
+  try {
+    await expect(async () => {
+      await page.goto(`/${DASHBOARD}/main`);
+      await page.waitForFunction(() => customElements.get('chartroom-card') !== undefined, null, {
+        timeout: 10_000,
+      });
+    }).toPass({ timeout: 60_000, intervals: [1_000, 2_000, 5_000] });
+    await page.evaluate((plan_id) => {
+      const card = document.createElement('chartroom-card') as HTMLElement & {
+        setConfig(c: unknown): void;
+        hass: unknown;
+      };
+      card.setConfig({ type: 'custom:chartroom-card', plan_id, history: true });
+      card.hass = (document.querySelector('home-assistant') as unknown as { hass: unknown }).hass;
+      card.setAttribute(
+        'style',
+        'position:fixed;inset:0 auto auto 0;width:480px;height:420px;z-index:9',
+      );
+      card.addEventListener('hass-more-info', (e) => {
+        card.dataset['info'] = (e as CustomEvent<{ entityId: string }>).detail.entityId;
+      });
+      document.body.append(card);
+    }, plan);
+    const card = page.locator('body > chartroom-card');
+    const marker = card.locator(`g.device[data-entity="${light}"]`);
+    await expect(marker).toBeVisible();
+    await card.getByRole('button', { name: 'History' }).click();
+    await expect(card).toHaveAttribute('history', '');
+    await expect(card.getByRole('slider', { name: 'Time' })).toBeEnabled();
+    await marker.click();
+    await expect(card).toHaveAttribute('data-info', light);
+    await page.waitForTimeout(1000);
+    expect(await state(light)).toBe(was);
+  } finally {
+    if ((await state(light)) !== was)
+      await api(token(), `/api/services/light/turn_${was === 'on' ? 'on' : 'off'}`, {
+        entity_id: light,
+      });
+    await deletePlan(token(), plan);
   }
 });

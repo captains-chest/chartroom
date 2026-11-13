@@ -124,6 +124,8 @@ export class PlanEditor {
   readonly #view: PlanView;
   readonly #history: History<Plan>;
   #s: ToolState = initialState;
+  /** Set by close(), so an import still uploading its image doesn't commit afterwards. */
+  #closed = false;
   readonly #saver: Autosaver<Plan>;
   readonly #saveState: HTMLElement;
   readonly #hint: HTMLElement;
@@ -209,6 +211,7 @@ export class PlanEditor {
 
   /** Flush pending saves and detach from the view. */
   async close(): Promise<void> {
+    this.#closed = true;
     await this.#saver.flush();
     this.#view.setDelegate(null);
     this.#view.drawOverlay();
@@ -760,6 +763,7 @@ export class PlanEditor {
       return;
     }
     const r = await readPlanFile(await file.text(), this.#host.planId, this.plan.floor_id ?? null);
+    if (this.#closed) return;
     if (!r.ok) {
       this.#report(true, [`${file.name} was not imported:`, ...r.problems]);
       return;
@@ -780,7 +784,12 @@ export class PlanEditor {
         return;
       }
     }
-    this.#s = { ...this.#s, selection: null };
+    if (this.#closed) {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      return;
+    }
+    // Drop the old plan's selection, drafts and measurement, keeping the tool.
+    this.#s = { ...initialState, tool: this.#s.tool };
     this.#commit(plan);
     if (blobUrl) this.#setUnderlayUrl(blobUrl);
     else void this.#loadUnderlay();

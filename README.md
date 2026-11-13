@@ -48,6 +48,11 @@ under **Settings → Areas, labels & zones** and assign your areas to them.
   goes), then drag markers to where the devices really are. The inspector changes a marker's
   entity or deletes it. On a plan for a floor, the list only offers that floor's areas.
 - **Undo** / **Redo**: Ctrl+Z and Ctrl+Shift+Z.
+- **Plan file**: **Export** downloads the plan as `.json` (the plan as stored); **Export with
+  underlay** embeds the underlay image in it as a data URL. **Import** reads such a file (or a
+  plan made by a script) and replaces this floor's plan with it, after checking its structure
+  and validating it; problems are listed and nothing is saved. Undo brings the old plan back. An
+  imported underlay comes along only when its image is embedded (or it is already this plan's).
 - **Materials**: the loss per centimetre for each wall material, used by the signal heatmap.
 - The outer outline is worked out from the walls; there is no outline tool.
 - A floor with more than 512 walls or 256 devices shows a warning: the heatmaps may be slow on
@@ -320,7 +325,7 @@ for the phone layout) and `history`, which runs after the desktop tests because 
 readings far from the others' on the shared instance.
 
 The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
-(with what it shares) 20 KB gzip and everything together 50 KB gzip. The heatmap renderer, editor,
+(with what it shares) 20 KB gzip and everything together 53 KB gzip. The heatmap renderer, editor,
 mesh layer and history bar are separate chunks loaded when first used. The build squeezes the CSS,
 GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
 byte for byte.

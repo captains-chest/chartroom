@@ -45,11 +45,12 @@ import {
   updateSource,
   updateWall,
 } from './plan/ops';
+import { dataUrl, MAX_FILE_BYTES, planFileJson, planFileName, readPlanFile } from './plan-file';
 import type { PlanView } from './plan-view';
 import { signalLimitWarnings } from './signal';
 import { count } from './text';
 import { button, field, h, numberInput, s, select, textInput } from './ui';
-import { importUnderlay, loadUnderlay } from './underlay';
+import { importUnderlay, loadUnderlay, uploadUnderlay } from './underlay';
 
 export type { Tool } from './editor/types';
 
@@ -135,6 +136,8 @@ export class PlanEditor {
   #sourceKind: SourceKind = 'sensor';
   #deviceKey = '';
   #note = '';
+  /** What the last plan import or export said: problems (`error`) or notes. */
+  #fileReport: { error: boolean; lines: string[] } | null = null;
   readonly #onDragOver = (e: DragEvent): void => {
     if (!e.dataTransfer?.types.includes(ENTITY_MIME)) return;
     e.preventDefault();
@@ -234,7 +237,10 @@ export class PlanEditor {
     const prev = this.#s;
     const next = (this.#s = r.state);
     // The auto-place note is stale after any change.
-    if (r.commit || next.tool !== prev.tool) this.#note = '';
+    if (r.commit || next.tool !== prev.tool) {
+      this.#note = '';
+      this.#fileReport = null;
+    }
     if (r.commit && this.#history.commit(r.commit)) this.#afterChange();
     else if (next !== prev) this.#render();
     return !r.pass;
@@ -420,7 +426,7 @@ export class PlanEditor {
     if (tool === 'device' && !sel) parts.push(this.#devicesPanel());
     if (measured) parts.push(this.#measurePanel(measured));
     if (sel) parts.push(this.#itemPanel(sel));
-    else if (tool !== 'device') parts.push(this.#planPanel());
+    else if (tool !== 'device') parts.push(this.#planPanel(), this.#filePanel());
     if (tool === 'device' || sel?.kind === 'device') this.#deviceKey = this.#deviceListKey();
     if (!sel && tool !== 'source' && tool !== 'device')
       parts.push(this.#underlayPanel(), this.#materialsPanel());
@@ -686,6 +692,100 @@ export class PlanEditor {
         `${plan.walls.length} walls · ${plan.rooms.length} rooms · ${plan.doors.length} doors · ${plan.windows.length} windows · ${plan.sources.length} sources · ${plan.devices?.length ?? 0} devices · ${area.toFixed(1)} m²`,
       ),
     );
+  }
+
+  /** Export the plan as a .json file, or import one over it. */
+  #filePanel(): HTMLElement {
+    const input = h('input', { type: 'file', accept: 'application/json,.json', name: 'plan-file' });
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (file) void this.#importPlan(file);
+    });
+    const report = this.#fileReport;
+    return this.#section(
+      'Plan file',
+      'plan-file',
+      h(
+        'div',
+        { class: 'row' },
+        button('Export', () => void this.#exportPlan(false), { 'data-action': 'export-plan' }),
+        this.plan.underlay
+          ? button('Export with underlay', () => void this.#exportPlan(true), {
+              'data-action': 'export-plan-underlay',
+              title: 'Embed the underlay image in the file',
+            })
+          : null,
+      ),
+      field('Import (replaces this plan)', input),
+      report
+        ? h(
+            'div',
+            {
+              class: report.error ? 'file-report error' : 'file-report',
+              role: report.error ? 'alert' : 'status',
+            },
+            ...report.lines.map((line) => h('p', {}, line)),
+          )
+        : null,
+    );
+  }
+
+  #report(error: boolean, lines: string[]): void {
+    this.#fileReport = { error, lines };
+    this.#renderInspector();
+  }
+
+  async #exportPlan(withUnderlay: boolean): Promise<void> {
+    let image: string | null = null;
+    if (withUnderlay) {
+      try {
+        if (!this.#underlayUrl) throw new Error('the underlay image is not loaded');
+        image = await dataUrl(await (await fetch(this.#underlayUrl)).blob());
+      } catch (err) {
+        this.#report(true, [`Export failed: ${(err as Error).message ?? err}`]);
+        return;
+      }
+    }
+    const url = URL.createObjectURL(
+      new Blob([planFileJson(this.plan, image)], { type: 'application/json' }),
+    );
+    h('a', { href: url, download: planFileName(this.#host.planId) }).click();
+    setTimeout(() => URL.revokeObjectURL(url));
+  }
+
+  /** Replace the plan with a file's, after validating it; Undo brings the old one back. */
+  async #importPlan(file: File): Promise<void> {
+    if (file.size > MAX_FILE_BYTES) {
+      this.#report(true, [`${file.name}: the file is larger than 16 MB`]);
+      return;
+    }
+    const r = await readPlanFile(await file.text(), this.#host.planId, this.plan.floor_id ?? null);
+    if (!r.ok) {
+      this.#report(true, [`${file.name} was not imported:`, ...r.problems]);
+      return;
+    }
+    let plan = r.plan;
+    let blobUrl: string | null = null;
+    if (r.image && plan.underlay) {
+      const state = this.#saveState;
+      const before = { text: state.textContent ?? '', error: state.classList.contains('error') };
+      this.#setSaveState('Uploading image…');
+      try {
+        const url = await uploadUnderlay(this.#host.hass(), this.#host.planId, r.image);
+        plan = { ...plan, underlay: { ...plan.underlay, url } };
+        blobUrl = URL.createObjectURL(r.image);
+      } catch (err) {
+        this.#setSaveState(before.text, before.error);
+        this.#report(true, [`${file.name} was not imported: ${(err as Error).message ?? err}`]);
+        return;
+      }
+    }
+    this.#s = { ...this.#s, selection: null };
+    this.#commit(plan);
+    if (blobUrl) this.#setUnderlayUrl(blobUrl);
+    else void this.#loadUnderlay();
+    this.#report(false, [`Imported ${file.name}.`, ...r.notes]);
+    this.#view.fit();
   }
 
   #warningsPanel(): HTMLElement | null {
@@ -1075,6 +1175,9 @@ const editorStyles = `
     background: color-mix(in srgb, var(--warning-color, #ffa600) 15%, transparent);
     border-left: 3px solid var(--warning-color, #ffa600); }
   .inspector .warnings p { margin: 4px 0; }
+  .inspector .file-report { font-size: 0.85rem; }
+  .inspector .file-report p { margin: 4px 0; }
+  .inspector .file-report.error { color: var(--error-color, #db4437); }
   .combo input { width: 100%; box-sizing: border-box; }
   svg.editing[data-tool=underlay] { cursor: move; }
   .handle { fill: var(--card-background-color, #fff); stroke: var(--primary-color, #03a9f4); stroke-width: 2px;

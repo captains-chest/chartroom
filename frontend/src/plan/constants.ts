@@ -7,6 +7,12 @@ import type { Material } from './models';
  */
 export const PLAN_SCHEMA_VERSION = 1;
 
+/**
+ * A plan's storage id, as the integration accepts it (PLAN_ID_RE in const.py): it is also its
+ * underlay's file name. JavaScript's `$` without the `m` flag does not match before a newline.
+ */
+export const PLAN_ID_PATTERN = /^[a-z0-9_-]{1,64}$/;
+
 /** Built-in materials. A plan may add its own or override these by id. */
 export const DEFAULT_MATERIALS: readonly Material[] = [
   { id: 'exterior', name: 'Exterior masonry / concrete', db_per_cm: 0.5 },

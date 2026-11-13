@@ -61,4 +61,4 @@ The first release.
 ### Requirements
 
 - Home Assistant 2026.10 or newer. No Python requirements and no runtime JavaScript
-  dependencies. Frontend: 14.8 KB gzip for the card, 49.99 KB gzip in total.
+  dependencies. Frontend: 14.8 KB gzip for the card, 50.34 KB gzip in total.

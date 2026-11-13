@@ -59,8 +59,12 @@ export interface Room {
   name: string;
   /** Inner faces of the walls, in order (either winding). */
   polygon: Point[];
-  /** The Home Assistant area this room shows, if any. */
-  area_id?: string | null;
+  /**
+   * The Home Assistant areas this room shows, if any: more than one where areas share an open-plan
+   * space (kitchen and living room). Plans saved before this had a single `area_id`, which
+   * `normalizePlan` folds into this list.
+   */
+  area_ids?: string[];
 }
 
 /** Something that feeds a layer: a temperature/humidity sensor, an access point, a radio. */

@@ -229,8 +229,8 @@ export function spotsInRoom(
 const round = (v: number): number => Math.round(v * 1000) / 1000;
 
 /**
- * Where auto-placement puts each entity not on the plan yet: in the room linked to its area.
- * Entities whose area has no room are left out.
+ * Where auto-placement puts each entity not on the plan yet: in the room linked to its area (a room
+ * can link several). Entities whose area has no room are left out.
  */
 export function autoPlace(
   plan: Plan,
@@ -250,7 +250,7 @@ export function autoPlace(
   for (const [area, list] of byArea) {
     // The largest room linked to the area takes its devices.
     const room = plan.rooms
-      .filter((r) => r.area_id === area && r.polygon.length >= 3)
+      .filter((r) => r.area_ids?.includes(area) && r.polygon.length >= 3)
       .sort((a, b) => polygonArea(b.polygon) - polygonArea(a.polygon))[0];
     if (!room) continue;
     const spots = spotsInRoom(room.polygon, list.length, taken, labelPoint(room));

@@ -14,6 +14,7 @@ import {
   sub,
 } from '../geometry';
 import { DEFAULT_TX_DBM } from './constants';
+import { uniqueIds } from './functions';
 import type { Door, Material, Opening, Plan, Room, Source, Wall } from './models';
 import type { OpeningKind, Point, SourceKind, Window } from './types';
 
@@ -252,7 +253,11 @@ export function updateRoom(plan: Plan, id: string, patch: Partial<Omit<Room, 'id
     ...plan,
     rooms: updateById(plan.rooms, id, (r) => {
       const next: Room = { ...r, ...patch };
-      if (patch.area_id === null || patch.area_id === '') delete next.area_id;
+      if ('area_ids' in patch) {
+        const ids = uniqueIds(patch.area_ids ?? []);
+        if (ids.length > 0) next.area_ids = ids;
+        else delete next.area_ids;
+      }
       return next;
     }),
   };

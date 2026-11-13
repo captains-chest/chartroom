@@ -159,10 +159,14 @@ describe('rooms', () => {
       [4, 3],
     ]);
     expect(id).toBe('room_1');
-    plan = updateRoom(plan, 'room_1', { name: 'Kitchen', area_id: 'kitchen' });
-    expect(plan.rooms[0]).toMatchObject({ name: 'Kitchen', area_id: 'kitchen' });
-    plan = updateRoom(plan, 'room_1', { area_id: null });
-    expect(plan.rooms[0]).not.toHaveProperty('area_id');
+    plan = updateRoom(plan, 'room_1', { name: 'Kitchen', area_ids: ['kitchen'] });
+    expect(plan.rooms[0]).toMatchObject({ name: 'Kitchen', area_ids: ['kitchen'] });
+    plan = updateRoom(plan, 'room_1', { area_ids: ['kitchen', 'living_room', 'kitchen', ''] });
+    expect(plan.rooms[0]!.area_ids).toEqual(['kitchen', 'living_room']);
+    plan = updateRoom(plan, 'room_1', { name: 'Open plan' });
+    expect(plan.rooms[0]!.area_ids).toEqual(['kitchen', 'living_room']);
+    plan = updateRoom(plan, 'room_1', { area_ids: [] });
+    expect(plan.rooms[0]).not.toHaveProperty('area_ids');
     plan = moveRoomVertex(plan, 'room_1', 2, [0, 3]);
     expect(plan.rooms[0]!.polygon[2]).toEqual([0, 3]);
     expect(addRoom(plan, [[0, 0]]).id).toBeNull();
@@ -257,5 +261,35 @@ describe('normalizePlan', () => {
     expect(plan).toMatchObject({ id: 'p', name: 'P', floor_id: null, rooms: [], extra: 1 });
     expect(() => normalizePlan({ schema_version: 9, name: 'x' })).toThrow(/schema_version/);
     expect(() => normalizePlan(null)).toThrow();
+  });
+
+  it("folds a room's single area_id from older plans into area_ids", () => {
+    const polygon = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+    ];
+    const plan = normalizePlan({
+      name: 'Old',
+      rooms: [
+        { id: 'a', name: 'A', polygon, area_id: 'kitchen' },
+        { id: 'b', name: 'B', polygon, area_id: null },
+        { id: 'c', name: 'C', polygon },
+        { id: 'd', name: 'D', polygon, area_ids: ['living_room'], area_id: 'kitchen' },
+        { id: 'e', name: 'E', polygon, area_ids: ['hall', 'hall', ''], area_id: 'hall' },
+        { id: 'f', name: 'F', polygon, area_ids: [] },
+      ],
+    });
+    expect(plan.rooms.map((r) => r.area_ids)).toEqual([
+      ['kitchen'],
+      undefined,
+      undefined,
+      ['living_room', 'kitchen'],
+      ['hall'],
+      undefined,
+    ]);
+    for (const r of plan.rooms) expect(r).not.toHaveProperty('area_id');
+    expect(plan.rooms[0]).toEqual({ id: 'a', name: 'A', polygon, area_ids: ['kitchen'] });
+    expect(validatePlan(plan)).toEqual([]);
   });
 });

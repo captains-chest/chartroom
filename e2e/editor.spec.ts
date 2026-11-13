@@ -14,7 +14,7 @@ type Pt = [number, number];
 interface PlanLike {
   name: string;
   walls: { id: string; a: Pt; b: Pt; thickness: number; material: string }[];
-  rooms: { id: string; name: string; area_id?: string | null; polygon: Pt[] }[];
+  rooms: { id: string; name: string; area_ids?: string[]; polygon: Pt[] }[];
   doors: { id: string; wall: string }[];
   windows: { id: string; wall: string }[];
   underlay?: { url: string; scale: number; width_px: number; origin: Pt } | null;
@@ -150,6 +150,11 @@ test.describe('plan editor', () => {
     await expect(inspector.locator('[data-area]')).toHaveAttribute('data-area', '2.00');
     await inspector.locator('select[name=area]').selectOption('kitchen');
     await expect(inspector.locator('input[name=name]')).toHaveValue('Kitchen');
+    // An open-plan room links a second area and takes both names; unlinking it gives the name back.
+    await inspector.locator('select[name=area]').selectOption('living_room');
+    await expect(inspector.locator('input[name=name]')).toHaveValue('Kitchen & Living room');
+    await inspector.locator('[data-area-id=living_room] [data-action=unlink-area]').click();
+    await expect(inspector.locator('input[name=name]')).toHaveValue('Kitchen');
     await page.keyboard.press('Escape');
     await shot(page, 'editor.png');
 
@@ -162,7 +167,7 @@ test.describe('plan editor', () => {
     });
     expect(stored.doors.filter((d) => d.wall === drawn.id)).toHaveLength(1);
     expect(stored.windows.filter((d) => d.wall === drawn.id)).toHaveLength(1);
-    expect(stored.rooms.at(-1)).toMatchObject({ name: 'Kitchen', area_id: 'kitchen' });
+    expect(stored.rooms.at(-1)).toMatchObject({ name: 'Kitchen', area_ids: ['kitchen'] });
 
     // Leaving the editor keeps the edits on screen; a reload shows them from storage.
     await panel.locator('button.edit').click();

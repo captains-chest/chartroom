@@ -161,8 +161,8 @@ function roomsPlan(): Plan {
   return {
     ...emptyPlan('Test', 'ground'),
     rooms: [
-      { id: 'kitchen', name: 'Kitchen', polygon: square(0, 0, 3), area_id: 'kitchen' },
-      { id: 'hall', name: 'Hall', polygon: square(3, 0, 2), area_id: 'hall' },
+      { id: 'kitchen', name: 'Kitchen', polygon: square(0, 0, 3), area_ids: ['kitchen'] },
+      { id: 'hall', name: 'Hall', polygon: square(3, 0, 2), area_ids: ['hall'] },
       { id: 'store', name: 'Store', polygon: square(5, 0, 1) },
     ],
   };
@@ -179,13 +179,48 @@ describe('autoPlace', () => {
     ]);
     for (const s of spots) {
       const area = hass.entities![s.entity_id]!.area_id ?? 'kitchen';
-      const room = plan.rooms.find((r) => r.area_id === area)!;
+      const room = plan.rooms.find((r) => r.area_ids?.includes(area))!;
       expect(pointInPolygon(s.position, room.polygon)).toBe(true);
     }
     const [a, b] = spots.filter((s) => s.entity_id !== 'binary_sensor.front_door');
     expect(
       Math.hypot(a!.position[0] - b!.position[0], a!.position[1] - b!.position[1]),
     ).toBeGreaterThan(0.3);
+  });
+
+  it('puts the devices of every area a room links into that room', () => {
+    // One open-plan room for the kitchen and the hall.
+    const plan: Plan = {
+      ...emptyPlan('Open plan', 'ground'),
+      rooms: [
+        { id: 'open', name: 'Open', polygon: square(0, 0, 5), area_ids: ['kitchen', 'hall'] },
+      ],
+    };
+    const spots = autoPlace(plan, deviceChoices(hass, 'ground'));
+    expect(spots.map((s) => s.entity_id).sort()).toEqual([
+      'binary_sensor.front_door',
+      'light.kitchen',
+      'switch.kettle',
+    ]);
+    for (const s of spots) expect(pointInPolygon(s.position, plan.rooms[0]!.polygon)).toBe(true);
+    // Apart from each other, across both areas.
+    for (const [i, a] of spots.entries())
+      for (const b of spots.slice(i + 1))
+        expect(
+          Math.hypot(a.position[0] - b.position[0], a.position[1] - b.position[1]),
+        ).toBeGreaterThan(0.3);
+  });
+
+  it('places by the area a plan saved before multi-area rooms stored', () => {
+    const plan = normalizePlan({
+      ...emptyPlan('Old', 'ground'),
+      rooms: [{ id: 'kitchen', name: 'Kitchen', polygon: square(0, 0, 3), area_id: 'kitchen' }],
+    });
+    expect(
+      autoPlace(plan, deviceChoices(hass, 'ground'))
+        .map((s) => s.entity_id)
+        .sort(),
+    ).toEqual(['light.kitchen', 'switch.kettle']);
   });
 
   it('skips devices already on the plan and areas without a room', () => {

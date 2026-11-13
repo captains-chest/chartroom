@@ -8,6 +8,9 @@ import type { Plan, Underlay } from './plan/models';
 export const MAX_SIDE = 2048;
 export const MAX_BYTES = 10 * 1024 * 1024;
 
+/** The image types the integration stores. */
+export const UNDERLAY_TYPES = /^image\/(png|jpeg|webp|svg\+xml)$/;
+
 export const underlayPath = (planId: string): string =>
   `/api/chartroom/underlay/${encodeURIComponent(planId)}`;
 
@@ -67,9 +70,19 @@ export async function importUnderlay(
   plan: Plan,
 ): Promise<{ underlay: Underlay; blobUrl: string }> {
   if (!hass?.fetchWithAuth) throw new Error('not connected');
-  if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type))
-    throw new Error('use a PNG, JPEG, WebP or SVG');
+  if (!UNDERLAY_TYPES.test(file.type)) throw new Error('use a PNG, JPEG, WebP or SVG');
   const { blob, width, height } = await prepare(file);
+  const url = await uploadUnderlay(hass, planId, blob);
+  return { underlay: placeUnderlay(plan, url, width, height), blobUrl: URL.createObjectURL(blob) };
+}
+
+/** Store `blob` as the plan's image; the URL the plan points at it with. */
+export async function uploadUnderlay(
+  hass: Hass | undefined,
+  planId: string,
+  blob: Blob,
+): Promise<string> {
+  if (!hass?.fetchWithAuth) throw new Error('not connected');
   if (blob.size > MAX_BYTES) throw new Error('image is larger than 10 MB');
   const res = await hass.fetchWithAuth(underlayPath(planId), {
     method: 'POST',
@@ -77,8 +90,7 @@ export async function importUnderlay(
     body: blob,
   });
   if (!res.ok) throw new Error(`upload failed (${res.status})`);
-  const { url } = (await res.json()) as { url: string };
-  return { underlay: placeUnderlay(plan, url, width, height), blobUrl: URL.createObjectURL(blob) };
+  return ((await res.json()) as { url: string }).url;
 }
 
 /**

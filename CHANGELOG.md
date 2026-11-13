@@ -18,6 +18,9 @@ The first release.
   calibrated against a known length or area.
 - A room can link more than one Home Assistant area, for open-plan spaces such as a kitchen and
   living room with no wall between them. Plans saved with one area per room load unchanged.
+- Export a plan as a `.json` file, optionally with its underlay image embedded, and import one
+  over the current floor's plan. Imports are checked and validated before anything is saved, and
+  Undo brings the old plan back.
 
 ### Devices
 

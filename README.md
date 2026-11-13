@@ -32,6 +32,8 @@ under **Settings → Areas, labels & zones** and assign your areas to them.
 - **Door** / **Window**: click on a wall. Width, swing and an optional open/closed entity are set
   in the inspector.
 - **Room**: click the corners, double-click to close, then link the room to a Home Assistant area.
+  An open-plan room can link several areas (say _Kitchen_ and _Living room_): its devices are
+  auto-placed in it, and a room with its default name takes the areas' names.
 - **Source**: place a temperature/humidity sensor, a Wi-Fi access point or a radio (Zigbee,
   Z-Wave, Thread…). Sensors are picked from the Home Assistant temperature and humidity sensors in
   the plan's floor's areas; access points and radios take any entity and a level at 1 m. Drag to

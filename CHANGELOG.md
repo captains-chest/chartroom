@@ -16,6 +16,8 @@ The first release.
   to create floors for one plan each.
 - An optional underlay image per plan (uploaded by an admin, downscaled in the browser),
   calibrated against a known length or area.
+- A room can link more than one Home Assistant area, for open-plan spaces such as a kitchen and
+  living room with no wall between them. Plans saved with one area per room load unchanged.
 
 ### Devices
 

@@ -1,6 +1,6 @@
 // Reading, checking and summarising a plan. Editing operations are in ops.ts.
 import { DEFAULT_MATERIALS, LIMITS, PLAN_SCHEMA_VERSION } from './constants';
-import type { Material, Plan, Source, Wall } from './models';
+import type { Material, Plan, Room, Source, Wall } from './models';
 import type { Point } from './types';
 
 /** A new, empty plan. */
@@ -35,12 +35,27 @@ export function normalizePlan(raw: unknown): Plan {
     floor_id: r.floor_id ?? null,
     outline: r.outline ?? [],
     walls: r.walls ?? [],
-    rooms: r.rooms ?? [],
+    rooms: (r.rooms ?? []).map(normalizeRoom),
     doors: r.doors ?? [],
     windows: r.windows ?? [],
     sources: r.sources ?? [],
     devices: r.devices ?? [],
   };
+}
+
+/** The ids in order, each once, without empty ones. */
+export const uniqueIds = (ids: readonly unknown[]): string[] => [
+  ...new Set(ids.filter((id): id is string => !!id && typeof id === 'string')),
+];
+
+/**
+ * A stored room as the panel uses it: a single `area_id` from plans saved before rooms could link
+ * several areas becomes `area_ids`, and an empty list is dropped.
+ */
+function normalizeRoom(raw: Room & { area_id?: unknown }): Room {
+  const { area_id, area_ids, ...room } = raw;
+  const ids = uniqueIds([...(Array.isArray(area_ids) ? area_ids : []), area_id]);
+  return ids.length > 0 ? { ...room, area_ids: ids } : room;
 }
 
 /** Length of a wall's centreline. */

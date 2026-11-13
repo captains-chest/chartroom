@@ -268,7 +268,9 @@
           4.223
         ]
       ],
-      "area_id": "bedroom"
+      "area_ids": [
+        "bedroom"
+      ]
     },
     {
       "id": "kitchen_living",
@@ -299,7 +301,10 @@
           6.481
         ]
       ],
-      "area_id": "living_room"
+      "area_ids": [
+        "living_room",
+        "kitchen"
+      ]
     },
     {
       "id": "bath",
@@ -322,7 +327,9 @@
           6.406
         ]
       ],
-      "area_id": "bath"
+      "area_ids": [
+        "bath"
+      ]
     },
     {
       "id": "hall",
@@ -353,7 +360,9 @@
           7.337
         ]
       ],
-      "area_id": "hall"
+      "area_ids": [
+        "hall"
+      ]
     },
     {
       "id": "bedroom_2",
@@ -376,7 +385,9 @@
           8.084
         ]
       ],
-      "area_id": "office"
+      "area_ids": [
+        "office"
+      ]
     }
   ],
   "doors": [

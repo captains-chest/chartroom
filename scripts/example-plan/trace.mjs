@@ -251,9 +251,8 @@ const rooms = ROOMS.map((r) => ({
   id: r.id,
   name: r.name,
   polygon: r.px.map(m),
-  // A room shows one area; where two areas share a room (kitchen folds into kitchen-living) the
-  // first listed wins and the other keeps its sensors on the plan.
-  area_id: SAMPLE.find((s) => s.room === r.id)?.area ?? null,
+  // Every area sampled in the room: kitchen-living is one open-plan room with two areas.
+  area_ids: SAMPLE.filter((s) => s.room === r.id).map((s) => s.area),
 }));
 
 const sources = SAMPLE.flatMap((s, i) => {

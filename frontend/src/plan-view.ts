@@ -176,7 +176,7 @@ export class PlanView {
     }
     for (const el of this.#body.querySelectorAll('.room')) {
       const room = plan?.rooms.find((r) => r.id === (el as SVGElement).dataset['id']);
-      if (room?.area_id) el.classList.add('linked');
+      if (room?.area_ids) el.classList.add('linked');
     }
     this.#selectedDevice = selected?.kind === 'device' ? selected.id : null;
     this.markers.render(plan?.devices ?? [], this.#hass, this.#selectedDevice);

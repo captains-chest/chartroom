@@ -5,6 +5,7 @@ import { add, dist, frame, roundToMm, polygonArea } from './geometry';
 import type { Hass } from './ha-types';
 import { autosaver } from './editor/autosaver';
 import { findItem, kindOps, titleOf } from './editor/kinds';
+import { areaName, roomNameForAreas } from './editor/rooms';
 import type {
   Autosaver,
   Items,
@@ -550,9 +551,43 @@ export class PlanEditor {
     ];
   }
 
+  /** The room's linked Home Assistant areas, each with an unlink button, and a picker to add one. */
+  #roomAreasField(room: Room): HTMLElement {
+    const hass = this.#host.hass();
+    const linked = room.area_ids ?? [];
+    const names = (ids: readonly string[]): string[] => ids.map((a) => areaName(hass, a));
+    const setAreas = (ids: string[]): void => {
+      const name = roomNameForAreas(room.name, names(linked), names(ids));
+      this.#commit(updateRoom(this.plan, room.id, { area_ids: ids, name }));
+    };
+    const free = areaChoices(hass, this.plan.floor_id ?? null).filter(
+      (a) => !linked.includes(a.area_id),
+    );
+    const rows = linked.map((id) =>
+      h(
+        'div',
+        { class: 'row', 'data-area-id': id },
+        areaName(hass, id),
+        button('×', () => setAreas(linked.filter((a) => a !== id)), {
+          'data-action': 'unlink-area',
+          'aria-label': `Unlink ${areaName(hass, id)}`,
+        }),
+      ),
+    );
+    const add = select(
+      [
+        { value: '', label: linked.length > 0 ? 'Add an area…' : '— none —' },
+        ...free.map((a) => ({ value: a.area_id, label: a.name })),
+      ],
+      '',
+      (v) => v && setAreas([...linked, v]),
+      { name: 'area', 'aria-label': 'Link an area' },
+    );
+    return h('div', { class: 'field' }, h('span', {}, 'Home Assistant areas'), ...rows, add);
+  }
+
   #roomPanel(room: Room): Fields {
     const { id } = room;
-    const areas = areaChoices(this.#host.hass(), this.plan.floor_id ?? null);
     const area = polygonArea(room.polygon);
     let target = area;
     return [
@@ -564,23 +599,7 @@ export class PlanEditor {
           { name: 'name' },
         ),
       ),
-      field(
-        'Home Assistant area',
-        select(
-          [
-            { value: '', label: '— none —' },
-            ...areas.map((a) => ({ value: a.area_id, label: a.name })),
-          ],
-          room.area_id ?? '',
-          (v) => {
-            const linked = areas.find((a) => a.area_id === v);
-            // Adopt the area's name while the room still has its default one.
-            const rename = linked && /^Room \d+$/.test(room.name) ? { name: linked.name } : {};
-            this.#commit(updateRoom(this.plan, id, { area_id: v || null, ...rename }));
-          },
-          { name: 'area' },
-        ),
-      ),
+      this.#roomAreasField(room),
       h('p', { class: 'meta', 'data-area': area.toFixed(2) }, `${area.toFixed(2)} m² drawn`),
       h(
         'div',
@@ -717,7 +736,7 @@ export class PlanEditor {
       set({ entity_id: entity, area_id: entity ? entityArea(hass, entity) : null });
     };
     const choices = sourceChoices(hass, src.kind, floor);
-    const areaName = src.area_id ? (hass?.areas?.[src.area_id]?.name ?? src.area_id) : null;
+    const inArea = src.area_id ? areaName(hass, src.area_id) : null;
     let entityControl: HTMLElement;
     if (src.kind === 'sensor') {
       const opts = choices.map((c) => ({ value: c.entity_id, label: c.name }));
@@ -768,7 +787,7 @@ export class PlanEditor {
       h(
         'p',
         { class: 'meta', 'data-area': src.area_id ?? '' },
-        `${areaName ? `In ${areaName}` : 'No area'} · ${src.position[0].toFixed(2)}, ${src.position[1].toFixed(2)} m`,
+        `${inArea ? `In ${inArea}` : 'No area'} · ${src.position[0].toFixed(2)}, ${src.position[1].toFixed(2)} m`,
       ),
     ];
   }
@@ -803,7 +822,7 @@ export class PlanEditor {
     const hass = this.#host.hass();
     const placed = new Set((this.plan.devices ?? []).map((d) => d.entity_id));
     const free = this.#deviceChoices().filter((c) => !placed.has(c.entity_id));
-    const areaName = (a: string | null): string => (a ? (hass?.areas?.[a]?.name ?? a) : 'No area');
+    const areaOf = (a: string | null): string => (a ? areaName(hass, a) : 'No area');
     const list = h('ul', { class: 'entities', 'aria-label': 'Entities not on the plan' });
     for (const c of free) {
       const item = h(
@@ -817,7 +836,7 @@ export class PlanEditor {
           title: `${c.entity_id} — drag onto the plan, or click and then click the plan`,
         },
         h('span', { class: 'name' }, c.name),
-        h('span', { class: 'meta' }, areaName(c.area_id)),
+        h('span', { class: 'meta' }, areaOf(c.area_id)),
       );
       const arm = (): void => {
         const { armed } = this.#s;

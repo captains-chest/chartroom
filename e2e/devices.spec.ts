@@ -118,7 +118,16 @@ test.describe('devices', () => {
   });
 
   test('devices are auto-placed by area, dragged from the list and saved', async ({ page }) => {
-    await savePlan(token(), DEVICES_PLAN, { ...FIXTURE, name: 'E2E devices', floor_id: null });
+    // Link the open-plan room to Living room only, so the Kitchen area has no room.
+    const rooms = FIXTURE.rooms.map((r) =>
+      r.id === 'kitchen_living' ? { ...r, area_ids: ['living_room'] } : r,
+    );
+    await savePlan(token(), DEVICES_PLAN, {
+      ...FIXTURE,
+      rooms,
+      name: 'E2E devices',
+      floor_id: null,
+    });
     const panel = await openPlan(page);
     await panel.locator('button.edit').click();
     await panel.locator('[data-tool=device]').click();

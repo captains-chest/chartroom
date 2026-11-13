@@ -152,7 +152,7 @@ test.describe('plan editor', () => {
     await expect(inspector.locator('input[name=name]')).toHaveValue('Kitchen');
     // An open-plan room links a second area and takes both names; unlinking it gives the name back.
     await inspector.locator('select[name=area]').selectOption('living_room');
-    await expect(inspector.locator('input[name=name]')).toHaveValue('Kitchen & Living room');
+    await expect(inspector.locator('input[name=name]')).toHaveValue('Kitchen & Living Room');
     await inspector.locator('[data-area-id=living_room] [data-action=unlink-area]').click();
     await expect(inspector.locator('input[name=name]')).toHaveValue('Kitchen');
     await page.keyboard.press('Escape');

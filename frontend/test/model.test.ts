@@ -37,27 +37,33 @@ describe('groupAreasByFloor', () => {
 
 describe('roomNameForAreas', () => {
   it("takes the linked areas' names while the room has its default name", () => {
-    expect(roomNameForAreas('Room 3', [], ['Kitchen'])).toBe('Kitchen');
-    expect(roomNameForAreas('Room 3', [], ['Kitchen', 'Living room'])).toBe(
+    expect(roomNameForAreas('Room 3', [], ['Kitchen'], 'Room 3')).toBe('Kitchen');
+    expect(roomNameForAreas('Room 3', [], ['Kitchen', 'Living room'], 'Room 3')).toBe(
       'Kitchen & Living room',
     );
   });
 
   it('follows the areas while the name is still the one it took from them', () => {
-    expect(roomNameForAreas('Kitchen', ['Kitchen'], ['Kitchen', 'Living room'])).toBe(
+    expect(roomNameForAreas('Kitchen', ['Kitchen'], ['Kitchen', 'Living room'], 'Room 3')).toBe(
       'Kitchen & Living room',
     );
-    expect(roomNameForAreas('Kitchen & Living room', ['Kitchen', 'Living room'], ['Kitchen'])).toBe(
-      'Kitchen',
-    );
+    expect(
+      roomNameForAreas('Kitchen & Living room', ['Kitchen', 'Living room'], ['Kitchen'], 'Room 3'),
+    ).toBe('Kitchen');
   });
 
-  it("keeps a name of the user's own, and any name when the last area goes", () => {
-    expect(roomNameForAreas('Open plan', ['Kitchen'], ['Kitchen', 'Living room'])).toBe(
+  it("keeps a name of the user's own, even when the last area goes", () => {
+    expect(roomNameForAreas('Open plan', ['Kitchen'], ['Kitchen', 'Living room'], 'Room 3')).toBe(
       'Open plan',
     );
-    expect(roomNameForAreas('Kitchen', ['Kitchen'], [])).toBe('Kitchen');
-    expect(roomNameForAreas('Room 3', [], [])).toBe('Room 3');
+    expect(roomNameForAreas('Open plan', ['Kitchen'], [], 'Room 3')).toBe('Open plan');
+    expect(roomNameForAreas('Room 3', [], [], 'Room 3')).toBe('Room 3');
+  });
+
+  it('goes back to the default name when the last area goes, so a new area renames it', () => {
+    const unlinked = roomNameForAreas('Kitchen', ['Kitchen'], [], 'Room 3');
+    expect(unlinked).toBe('Room 3');
+    expect(roomNameForAreas(unlinked, [], ['Living room'], 'Room 3')).toBe('Living room');
   });
 });
 

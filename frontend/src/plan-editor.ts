@@ -557,7 +557,8 @@ export class PlanEditor {
     const linked = room.area_ids ?? [];
     const names = (ids: readonly string[]): string[] => ids.map((a) => areaName(hass, a));
     const setAreas = (ids: string[]): void => {
-      const name = roomNameForAreas(room.name, names(linked), names(ids));
+      const fallback = `Room ${this.plan.rooms.indexOf(room) + 1}`;
+      const name = roomNameForAreas(room.name, names(linked), names(ids), fallback);
       this.#commit(updateRoom(this.plan, room.id, { area_ids: ids, name }));
     };
     const free = areaChoices(hass, this.plan.floor_id ?? null).filter(

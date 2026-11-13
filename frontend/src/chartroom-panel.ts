@@ -3,7 +3,7 @@ import type { Hass, PlanSummary } from './ha-types';
 import { pingWorker } from './field-worker';
 import { emptyPlan } from './plan/functions';
 import type { Plan } from './plan/models';
-import { type FloorTab, floorTabs, planIdForFloor } from './model';
+import { type FloorTab, floorTabs, HOME_TAB, newPlanId } from './model';
 import type { PlanEditor } from './plan-editor';
 import { updateNoticeStyles } from './version';
 import { DeviceControls, deviceControlStyles } from './device-controls';
@@ -21,6 +21,8 @@ const TAB_KEY = 'chartroom:tab';
 const UNDERLAY_KEY = 'chartroom:underlay';
 const LAYER_KEY = 'chartroom:layer';
 const MESH_KEY = 'chartroom:mesh';
+/** Home Assistant's floors and areas settings. Home Assistant routes same-origin links itself. */
+const AREAS_PATH = '/config/areas/dashboard';
 
 interface UnderlayPref {
   visible: boolean;
@@ -299,7 +301,12 @@ export class ChartroomPanel extends HTMLElement {
       this.#view.setPlan(null);
       void this.#loadUnderlay();
       this.#editButton.hidden = true;
-      this.#showEmpty(`No plan for ${tab.label} yet.`, tab);
+      this.#showEmpty(
+        tab.key === HOME_TAB.key
+          ? 'No floors in Home Assistant yet, and no saved plans.'
+          : `No plan for ${tab.label} yet.`,
+        tab,
+      );
       return;
     }
     if (tab.plan_id === this.#planId && this.#plan) return;
@@ -357,19 +364,28 @@ export class ChartroomPanel extends HTMLElement {
     this.#viewer.layers.el.hidden = text !== null;
     if (text === null) return;
     const children: (HTMLElement | string)[] = [h('p', {}, text)];
-    if (tab?.floor_id && this.#isAdmin) {
+    if (tab && !tab.plan_id && this.#isAdmin) {
       children.push(
         button('Create plan', () => void this.#createPlan(tab), { class: 'create primary' }),
         h('p', { class: 'hint' }, 'Draw the walls yourself, or import a drawing to trace over.'),
       );
+      if (tab.key === HOME_TAB.key) {
+        children.push(
+          h(
+            'p',
+            { class: 'hint' },
+            'Without floors, this plan covers every area. ',
+            h('a', { href: AREAS_PATH }, 'Add floors'),
+            ' to draw one plan per floor.',
+          ),
+        );
+      }
     }
     this.#empty.replaceChildren(...children);
   }
 
   async #createPlan(tab: FloorTab): Promise<void> {
-    if (!tab.floor_id) return;
-    const id = planIdForFloor(tab.floor_id);
-    await this.#api().savePlan(id, emptyPlan(tab.label, tab.floor_id));
+    await this.#api().savePlan(newPlanId(tab), emptyPlan(tab.label, tab.floor_id));
     this.#planId = null;
     await this.#refreshPlans();
     await this.#selectTab(tab.key);
@@ -476,6 +492,7 @@ const panelStyles = `
   .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
     justify-content: center; gap: 8px; color: var(--secondary-text-color, #727272); text-align: center; padding: 16px; }
   .empty .hint { font-size: 0.85rem; margin: 0; }
+  .empty a { color: var(--primary-color, #03a9f4); }
   .inspector-slot { width: 300px; overflow-y: auto; border-left: 1px solid var(--divider-color, #ddd);
     background: var(--card-background-color, #fff); }
   :host([narrow]) main { flex-direction: column; }

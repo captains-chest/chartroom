@@ -12,6 +12,8 @@ The first release.
   (`custom:chartroom-card`) registered by the integration, with no separate resource to add.
 - An editor for walls, rooms, doors, windows and sensor/signal sources, with undo, snapping and
   floor tabs. Plans are stored in Home Assistant and update open panels and cards live.
+- A home without Home Assistant floors gets one **Home** plan covering every area, with a link
+  to create floors for one plan each.
 - An optional underlay image per plan (uploaded by an admin, downscaled in the browser),
   calibrated against a known length or area.
 
@@ -57,4 +59,4 @@ The first release.
 ### Requirements
 
 - Home Assistant 2026.10 or newer. No Python requirements and no runtime JavaScript
-  dependencies. Frontend: 14.7 KB gzip for the card, 49.85 KB gzip in total.
+  dependencies. Frontend: 14.8 KB gzip for the card, 49.99 KB gzip in total.

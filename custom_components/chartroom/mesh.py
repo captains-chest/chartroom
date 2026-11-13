@@ -203,12 +203,15 @@ def parse_z2m(networkmap: dict[str, Any]) -> Topology:
         if not ieee:
             continue
         nid = f"z2m:{ieee}"
+        role = _role(n.get("type"))
+        # Home Assistant registers the coordinator as Zigbee2MQTT's Bridge device, not by its ieee.
+        prefix = "zigbee2mqtt_bridge_" if role == "coordinator" else "zigbee2mqtt_"
         nodes[nid] = MeshNode(
             id=nid,
             source="zigbee2mqtt",
             name=str(n.get("friendlyName") or nid),
-            role=_role(n.get("type")),
-            identifiers=(("mqtt", f"zigbee2mqtt_{ieee}"),),
+            role=role,
+            identifiers=(("mqtt", f"{prefix}{ieee}"),),
         )
     links = _Links("zigbee2mqtt")
     for link in value.get("links") or ():

@@ -87,7 +87,11 @@ def test_parse_z2m() -> None:
     }
     assert got[("z2m:0x00124b0000000001", "z2m:0x00158d0000000002")]["lqi"] == 150
     assert got[("z2m:0x00158d0000000002", "z2m:0x00158d0000000003")]["lqi"] == 70
-    assert nodes[0].identifiers == (("mqtt", "zigbee2mqtt_0x00124b0000000001"),)
+    identifiers = {n.id: n.identifiers for n in nodes}
+    assert identifiers["z2m:0x00124b0000000001"] == (
+        ("mqtt", "zigbee2mqtt_bridge_0x00124b0000000001"),
+    )
+    assert identifiers["z2m:0x00158d0000000002"] == (("mqtt", "zigbee2mqtt_0x00158d0000000002"),)
 
 
 def test_parsers_tolerate_junk() -> None:
@@ -178,6 +182,36 @@ async def test_mesh_resolves_registry(hass: HomeAssistant, hass_ws_client) -> No
     assert motion["entities"] == ["binary_sensor.bedroom"]
     assert "_identifiers" not in motion
     assert by_id["z2m:0x00124b0000000001"]["device_id"] is None
+
+
+async def test_mesh_resolves_z2m_coordinator_to_bridge(hass: HomeAssistant, hass_ws_client) -> None:
+    """The Zigbee2MQTT coordinator is Home Assistant's Bridge device, under its own identifier."""
+    await _setup(hass)
+    other = MockConfigEntry(domain="mqtt")
+    other.add_to_hass(hass)
+    bridge = dr.async_get(hass).async_get_or_create(
+        config_entry_id=other.entry_id,
+        identifiers={("mqtt", "zigbee2mqtt_bridge_0x00124b0000000001")},
+    )
+    er.async_get(hass).async_get_or_create(
+        "binary_sensor",
+        "mqtt",
+        "bridge-connection",
+        device_id=bridge.id,
+        suggested_object_id="zigbee2mqtt_bridge_connection_state",
+    )
+
+    async def z2m(hass: HomeAssistant) -> mesh.Topology:
+        return mesh.parse_z2m(_load("z2m_networkmap.json"))
+
+    ws = await hass_ws_client(hass)
+    with patch.object(mesh, "_z2m", z2m):
+        await ws.send_json_auto_id({"type": "chartroom/mesh/get"})
+        msg = await ws.receive_json()
+    by_id = {n["id"]: n for n in msg["result"]["nodes"]}
+    coordinator = by_id["z2m:0x00124b0000000001"]
+    assert coordinator["device_id"] == bridge.id
+    assert coordinator["entities"] == ["binary_sensor.zigbee2mqtt_bridge_connection_state"]
 
 
 async def test_mesh_test_source(

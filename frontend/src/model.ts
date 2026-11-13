@@ -49,9 +49,20 @@ export interface FloorTab {
   plan_id: string | null;
 }
 
+/** Storage id of the plan for a home without floors: one plan covering every area. */
+export const HOME_PLAN_ID = 'home';
+
+/** The one tab of a home with no floors and no plans yet, so a first plan can still be made. */
+export const HOME_TAB: FloorTab = {
+  key: `plan:${HOME_PLAN_ID}`,
+  label: 'Home',
+  floor_id: null,
+  plan_id: null,
+};
+
 /**
  * Tabs for the floor switcher: one per Home Assistant floor (by level) with the plan drawn for it,
- * then one per plan that belongs to no known floor.
+ * then one per plan that belongs to no known floor. With no floors and no plans, the home tab.
  */
 export function floorTabs(hass: Hass | undefined, plans: readonly PlanSummary[]): FloorTab[] {
   const floors = Object.values(hass?.floors ?? {})
@@ -69,8 +80,13 @@ export function floorTabs(hass: Hass | undefined, plans: readonly PlanSummary[])
     if (p.floor_id && known.has(p.floor_id)) continue;
     tabs.push({ key: `plan:${p.id}`, label: p.name, floor_id: null, plan_id: p.id });
   }
-  return tabs;
+  // Only once the floor registry has loaded, so a home with floors never flashes the home tab.
+  return tabs.length === 0 && hass?.floors ? [{ ...HOME_TAB }] : tabs;
 }
+
+/** Storage id for a new plan on a tab without one: the floor's, or the home plan's. */
+export const newPlanId = (tab: FloorTab): string =>
+  tab.floor_id ? planIdForFloor(tab.floor_id) : HOME_PLAN_ID;
 
 /** Storage id for a new floor's plan: `floor_<floor_id>`, limited to safe characters. */
 export const planIdForFloor = (floorId: string): string =>

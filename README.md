@@ -21,6 +21,10 @@ Zigbee and Z-Wave mesh links — in a sidebar panel and as a dashboard card.
 Open **Chartroom** in the sidebar, pick a floor and press **Edit** (or **Create plan** on a floor
 without one). Admins only; changes save automatically.
 
+Chartroom draws one plan per Home Assistant floor. Floors are optional: with none, the panel
+offers a single **Home** plan covering every area. To draw each floor on its own, create floors
+under **Settings → Areas, labels & zones** and assign your areas to them.
+
 ![Chartroom editor](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/editor.png)
 
 - **Wall**: click to start, click to add corners, double-click or Esc to finish. Endpoints snap to

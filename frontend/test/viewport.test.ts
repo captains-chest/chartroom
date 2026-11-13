@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { floorTabs, planIdForFloor, areaChoices } from '../src/model';
+import {
+  areaChoices,
+  floorTabs,
+  HOME_PLAN_ID,
+  HOME_TAB,
+  newPlanId,
+  planIdForFloor,
+} from '../src/model';
 import { fitView, MIN_WIDTH, panBy, toPlan, viewBoxOf, withAspect, zoomAt } from '../src/viewport';
 
 describe('viewport', () => {
@@ -56,6 +63,30 @@ describe('floorTabs', () => {
       { key: 'plan:old', label: 'Old', floor_id: null, plan_id: 'old' },
     ]);
     expect(floorTabs(undefined, [])).toEqual([]);
+  });
+
+  it('offers the home tab when Home Assistant has no floors and there are no plans', () => {
+    const noFloors = { floors: {}, areas: hass.areas };
+    expect(floorTabs(noFloors, [])).toEqual([HOME_TAB]);
+    expect(HOME_TAB).toEqual({ key: 'plan:home', label: 'Home', floor_id: null, plan_id: null });
+    // The home plan, once saved, keeps the same tab key so the panel stays on it.
+    expect(floorTabs(noFloors, [{ id: HOME_PLAN_ID, name: 'Home', floor_id: null }])).toEqual([
+      { key: 'plan:home', label: 'Home', floor_id: null, plan_id: 'home' },
+    ]);
+    // Any other plan, or a floor, replaces it.
+    expect(floorTabs(noFloors, [{ id: 'example', name: 'Example', floor_id: null }])).toEqual([
+      { key: 'plan:example', label: 'Example', floor_id: null, plan_id: 'example' },
+    ]);
+    expect(floorTabs(hass, []).map((t) => t.key)).toEqual(['floor:ground', 'floor:first']);
+    // Not before the floor registry has loaded.
+    expect(floorTabs({ areas: hass.areas }, [])).toEqual([]);
+  });
+
+  it('names a new plan after its floor, or the home plan without one', () => {
+    expect(
+      newPlanId({ key: 'floor:Ground', label: 'Ground', floor_id: 'Ground', plan_id: null }),
+    ).toBe('floor_ground');
+    expect(newPlanId(HOME_TAB)).toBe(HOME_PLAN_ID);
   });
 
   it('makes storage-safe plan ids and orders area choices by floor', () => {

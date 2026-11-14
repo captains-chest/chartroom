@@ -8,10 +8,13 @@ import type { Plan, Underlay } from '../src/plan/models';
 import {
   dataUrl,
   imageBlob,
+  imageTypeOfName,
+  looksLike,
   planFileJson,
   planFileName,
   readPlanFile,
   shapeProblems,
+  underlayFileName,
   type PlanFileResult,
 } from '../src/plan-file';
 import { uploadUnderlay } from '../src/underlay';
@@ -33,8 +36,13 @@ const underlay = (url: string): Underlay => ({
 /** A tiny PNG's bytes (only the signature matters here). */
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 255]);
 
-const read = (text: string, floorId: string | null = 'ground'): Promise<PlanFileResult> =>
-  readPlanFile(text, PLAN_ID, floorId);
+const read = (
+  text: string,
+  floorId: string | null = 'ground',
+  files: File[] = [],
+): Promise<PlanFileResult> => readPlanFile(text, PLAN_ID, floorId, files);
+const pngFile = (name = 'chartroom-floor_ground.png', bytes: Uint8Array<ArrayBuffer> = PNG): File =>
+  new File([bytes], name, { type: 'image/png' });
 const ok = async (r: Promise<PlanFileResult>): Promise<Extract<PlanFileResult, { ok: true }>> => {
   const res = await r;
   if (!res.ok) throw new Error(`rejected: ${res.problems.join('; ')}`);
@@ -204,6 +212,109 @@ describe('plan import rejects', () => {
     expect(await problems(read(JSON.stringify({ ...plan, underlay_image: 7 })))).toEqual([
       'underlay_image is not a base64 PNG, JPEG, WebP or SVG data URL',
     ]);
+  });
+});
+
+describe('underlay as a separate file', () => {
+  const plan = { ...fixture, underlay: underlay(`${underlayPath(PLAN_ID)}?v=abc123`) };
+  const name = underlayFileName(PLAN_ID, 'image/png')!;
+  const text = planFileJson(plan, { file: name });
+
+  it('exports the placement in the plan and names the image file', async () => {
+    expect(name).toBe('chartroom-floor_ground.png');
+    expect(underlayFileName(PLAN_ID, 'image/jpeg')).toBe('chartroom-floor_ground.jpg');
+    expect(underlayFileName(PLAN_ID, 'image/svg+xml')).toBe('chartroom-floor_ground.svg');
+    expect(underlayFileName(PLAN_ID, 'text/html')).toBeNull();
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    expect(parsed).toMatchObject({ underlay: plan.underlay, underlay_file: name });
+    expect(parsed).not.toHaveProperty('underlay_image');
+    expect(JSON.parse(planFileJson(fixture, { file: name }))).not.toHaveProperty('underlay_file');
+  });
+
+  it('round-trips the placement and the image bytes', async () => {
+    const r = await ok(read(text, 'ground', [pngFile()]));
+    expect(r.plan).toEqual({ ...plan, floor_id: 'ground' });
+    expect(r.image!.type).toBe('image/png');
+    expect(new Uint8Array(await r.image!.arrayBuffer())).toEqual(PNG);
+    expect(r.notes).toEqual([]);
+  });
+
+  it('takes the type from the name, not what the browser guessed', async () => {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2]);
+    const file = new File([jpeg], 'plan.JPEG', { type: '' });
+    const r = await ok(read(planFileJson(plan, { file: 'plan.JPEG' }), 'ground', [file]));
+    expect(r.image!.type).toBe('image/jpeg');
+  });
+
+  it('notes picked files the plan does not name, and an image with nothing to place it', async () => {
+    const r = await ok(read(text, 'ground', [pngFile(), pngFile('other.png')]));
+    expect(r.notes).toEqual(['Left out other.png: the plan does not name it.']);
+    const bare = await ok(
+      read(withKeys({ underlay_file: name }), 'ground', [pngFile(), pngFile('x.png')]),
+    );
+    expect(bare.image).toBeNull();
+    expect(bare.notes).toEqual([
+      'Left out x.png: the plan does not name it.',
+      `Left out ${name}: the plan has no underlay to place it.`,
+    ]);
+    const embedded = await ok(read(planFileJson(fixture), 'ground', [pngFile()]));
+    expect(embedded.notes).toEqual([`Left out ${name}: the plan does not name it.`]);
+  });
+
+  it('rejects a missing image', async () => {
+    expect(await problems(read(text))).toEqual([
+      `the underlay image ${name} is missing: select it together with the .json file`,
+    ]);
+  });
+
+  it('rejects an image whose name does not match', async () => {
+    expect(
+      await problems(read(text, 'ground', [pngFile('chartroom-floor_ground (1).png')])),
+    ).toEqual([
+      `the underlay image ${name} is not among the selected files (chartroom-floor_ground (1).png)`,
+    ]);
+  });
+
+  it('rejects an image whose bytes are not its type, or that is too large', async () => {
+    const html = new TextEncoder().encode('<script>alert(1)</script>');
+    expect(await problems(read(text, 'ground', [pngFile(name, html)]))).toEqual([
+      `${name} is not a PNG image`,
+    ]);
+    expect(await problems(read(text, 'ground', [pngFile(name, new Uint8Array())]))).toEqual([
+      `${name} is not a PNG image`,
+    ]);
+    const big = new Uint8Array(10 * 1024 * 1024 + 1);
+    big.set(PNG);
+    expect(await problems(read(text, 'ground', [pngFile(name, big)]))).toEqual([
+      `${name} is larger than 10 MB`,
+    ]);
+  });
+
+  it('rejects a name that is not an image file name, or both ways at once', async () => {
+    for (const bad of ['plan.html', 'noext', '../x.png', 'a\\b.png', 7, 'x'.repeat(260) + '.png'])
+      expect(
+        await problems(
+          read(JSON.stringify({ ...plan, underlay_file: bad }), 'ground', [pngFile()]),
+        ),
+        String(bad),
+      ).toEqual(['underlay_file is not a PNG, JPEG, WebP or SVG file name']);
+    const image = await dataUrl(new Blob([PNG], { type: 'image/png' }));
+    expect(
+      await problems(read(JSON.stringify({ ...plan, underlay_image: image, underlay_file: name }))),
+    ).toEqual(['the file has both underlay_image and underlay_file: use one']);
+  });
+
+  it('checks bytes as the integration does', async () => {
+    const enc = (t: string): Uint8Array => new TextEncoder().encode(t);
+    expect(looksLike('image/png', PNG)).toBe(true);
+    expect(looksLike('image/jpeg', PNG)).toBe(false);
+    expect(looksLike('image/webp', enc('RIFF\0\0\0\0WEBPVP8 '))).toBe(true);
+    expect(looksLike('image/webp', enc('RIFF\0\0\0\0WAVE'))).toBe(false);
+    expect(looksLike('image/svg+xml', enc('\uFEFF\n <?xml version="1.0"?><SVG>'))).toBe(true);
+    expect(looksLike('image/svg+xml', enc('<html><body>'))).toBe(false);
+    expect(looksLike('text/html', enc('<svg>'))).toBe(false);
+    expect(imageTypeOfName('a.Webp')).toBe('image/webp');
+    expect(imageTypeOfName('a.gif')).toBeNull();
   });
 });
 

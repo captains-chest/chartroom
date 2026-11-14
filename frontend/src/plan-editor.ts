@@ -45,7 +45,14 @@ import {
   updateSource,
   updateWall,
 } from './plan/ops';
-import { dataUrl, MAX_FILE_BYTES, planFileJson, planFileName, readPlanFile } from './plan-file';
+import {
+  dataUrl,
+  MAX_FILE_BYTES,
+  planFileJson,
+  planFileName,
+  readPlanFile,
+  underlayFileName,
+} from './plan-file';
 import type { PlanView } from './plan-view';
 import { signalLimitWarnings } from './signal';
 import { count } from './text';
@@ -708,12 +715,18 @@ export class PlanEditor {
     );
   }
 
-  /** Export the plan as a .json file, or import one over it. */
+  /** Export the plan as a .json file, or import one (with its underlay image file) over it. */
   #filePanel(): HTMLElement {
-    const input = h('input', { type: 'file', accept: 'application/json,.json', name: 'plan-file' });
+    const input = h('input', {
+      type: 'file',
+      accept: 'application/json,.json,image/png,image/jpeg,image/webp,image/svg+xml',
+      multiple: true,
+      name: 'plan-file',
+    });
     input.addEventListener('change', () => {
-      const file = input.files?.[0];
-      if (file) void this.#importPlan(file);
+      const files = [...(input.files ?? [])];
+      input.value = '';
+      if (files.length > 0) void this.#importPlan(files);
     });
     const report = this.#fileReport;
     return this.#section(
@@ -722,15 +735,21 @@ export class PlanEditor {
       h(
         'div',
         { class: 'row' },
-        button('Export', () => void this.#exportPlan(false), { 'data-action': 'export-plan' }),
+        button('Export', () => void this.#exportPlan('none'), { 'data-action': 'export-plan' }),
         this.plan.underlay
-          ? button('Export with underlay', () => void this.#exportPlan(true), {
+          ? button('Export with underlay', () => void this.#exportPlan('embed'), {
               'data-action': 'export-plan-underlay',
-              title: 'Embed the underlay image in the file',
+              title: 'Embed the underlay image in the .json file',
+            })
+          : null,
+        this.plan.underlay
+          ? button('Export with underlay file', () => void this.#exportPlan('file'), {
+              'data-action': 'export-plan-underlay-file',
+              title: 'Save the underlay image as its own file next to the .json',
             })
           : null,
       ),
-      field('Import (replaces this plan)', input),
+      field('Import (replaces this plan; pick the .json and its image file)', input),
       report
         ? h(
             'div',
@@ -749,31 +768,46 @@ export class PlanEditor {
     this.#renderInspector();
   }
 
-  async #exportPlan(withUnderlay: boolean): Promise<void> {
-    let image: string | null = null;
-    if (withUnderlay) {
-      try {
+  /** Download the plan, with its underlay image embedded or as a second file, or without it. */
+  async #exportPlan(underlay: 'none' | 'embed' | 'file'): Promise<void> {
+    let image: Blob | null = null;
+    let imageName: string | null = null;
+    try {
+      if (underlay !== 'none') {
         if (!this.#underlayUrl) throw new Error('the underlay image is not loaded');
-        image = await dataUrl(await (await fetch(this.#underlayUrl)).blob());
-      } catch (err) {
-        this.#report(true, [`Export failed: ${(err as Error).message ?? err}`]);
-        return;
+        image = await (await fetch(this.#underlayUrl)).blob();
+        if (underlay === 'file') {
+          imageName = underlayFileName(this.#host.planId, image.type);
+          if (!imageName) throw new Error(`the underlay image is ${image.type || 'of no type'}`);
+        }
       }
+      const embedded = image && !imageName ? await dataUrl(image) : null;
+      const json = planFileJson(this.plan, imageName ? { file: imageName } : embedded);
+      download(new Blob([json], { type: 'application/json' }), planFileName(this.#host.planId));
+      if (image && imageName) download(image, imageName);
+    } catch (err) {
+      this.#report(true, [`Export failed: ${(err as Error).message ?? err}`]);
     }
-    const url = URL.createObjectURL(
-      new Blob([planFileJson(this.plan, image)], { type: 'application/json' }),
-    );
-    h('a', { href: url, download: planFileName(this.#host.planId) }).click();
-    setTimeout(() => URL.revokeObjectURL(url));
   }
 
   /** Replace the plan with a file's, after validating it; Undo brings the old one back. */
-  async #importPlan(file: File): Promise<void> {
+  async #importPlan(files: File[]): Promise<void> {
+    const plans = files.filter((f) => /\.json$/i.test(f.name) || f.type === 'application/json');
+    if (plans.length !== 1) {
+      this.#report(true, [`Select one .json plan file (with its underlay image, if it has one).`]);
+      return;
+    }
+    const file = plans[0]!;
     if (file.size > MAX_FILE_BYTES) {
       this.#report(true, [`${file.name}: the file is larger than 16 MB`]);
       return;
     }
-    const r = await readPlanFile(await file.text(), this.#host.planId, this.plan.floor_id ?? null);
+    const r = await readPlanFile(
+      await file.text(),
+      this.#host.planId,
+      this.plan.floor_id ?? null,
+      files.filter((f) => f !== file),
+    );
     if (this.#closed) return;
     if (!r.ok) {
       this.#report(true, [`${file.name} was not imported:`, ...r.problems]);
@@ -1197,3 +1231,10 @@ const editorStyles = `
   .measure-label { fill: var(--primary-text-color, #222); text-anchor: middle; pointer-events: none;
     paint-order: stroke; stroke: var(--primary-background-color, #fff); stroke-width: 3px; vector-effect: non-scaling-stroke; }
 `;
+
+/** Save `blob` as a download named `name`. */
+function download(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  h('a', { href: url, download: name }).click();
+  setTimeout(() => URL.revokeObjectURL(url));
+}

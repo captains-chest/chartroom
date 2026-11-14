@@ -462,7 +462,8 @@ test.describe('leaving the editor', () => {
     await startEditing(panel);
     await editWall(panel);
     const state = panel.locator('.save-state');
-    await expect(state).toHaveText('Save failed: Blocked by the test', { timeout: 10_000 });
+    // Failed saves are retried (#49), so the status goes on to say when it tries again.
+    await expect(state).toHaveText(/^Save failed: Blocked by the test/, { timeout: 10_000 });
 
     // Closing the tab asks before leaving; staying keeps the editor and the change.
     const dialog = page.waitForEvent('dialog');

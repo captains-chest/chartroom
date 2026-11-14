@@ -386,3 +386,92 @@ test.describe('sources', () => {
     );
   });
 });
+
+test.describe('leaving the editor', () => {
+  const PLAN_ID = 'e2e-leave';
+  const WALL = 'int_bedroom_2_west';
+  test.beforeEach(async () => {
+    await savePlan(token(), PLAN_ID, { ...FIXTURE, name: 'E2E leave', floor_id: null });
+  });
+  test.afterEach(async () => {
+    await deletePlan(token(), PLAN_ID);
+  });
+
+  const storedMaterial = async (): Promise<string | undefined> =>
+    (await getPlan<PlanLike>(token(), PLAN_ID)).walls.find((w) => w.id === WALL)?.material;
+
+  /** Select the wall and change its material (it is a light partition in the fixture). */
+  async function editWall(panel: Locator): Promise<void> {
+    const inspector = panel.locator('.inspector');
+    // A real click, which also gives the page the user activation a leave warning needs.
+    await panel.locator(`svg.plan [data-kind=wall][data-id=${WALL}]`).first().click();
+    await expect(inspector).toHaveAttribute('data-selection', `wall:${WALL}`);
+    await inspector.locator('select[name=material]').selectOption('exterior');
+  }
+
+  test('an edit reloaded away before the autosave delay is still stored', async ({ page }) => {
+    const panel = await openPlan(page, PLAN_ID);
+    await startEditing(panel);
+    await editWall(panel);
+    // Still waiting for the 600 ms delay: only saving on leave can store it now.
+    await expect(panel.locator('.save-state')).toHaveText('Unsaved changes');
+    // The save is in flight as the page goes, so the browser may ask before leaving: leave.
+    page.on('dialog', (d) => void (d.type() === 'beforeunload' ? d.accept() : d.dismiss()));
+    await page.reload();
+
+    await expect.poll(storedMaterial, { timeout: 10_000 }).toBe('exterior');
+    await panel.locator(`[role=tab][data-plan="${PLAN_ID}"]`).click();
+    await expect
+      .poll(async () => (await livePlan(panel)).walls.find((w) => w.id === WALL)?.material)
+      .toBe('exterior');
+  });
+
+  test('leaving while a save fails asks first', async ({ page }) => {
+    // Answer the editor's saves with an error while `failing`; everything else goes to HA.
+    let failing = true;
+    await page.routeWebSocket('**/api/websocket', (ws) => {
+      const server = ws.connectToServer();
+      ws.onMessage((message) => {
+        let msg: { id?: number; type?: string } = {};
+        try {
+          msg = JSON.parse(String(message)) as typeof msg;
+        } catch {
+          // not JSON: pass it on
+        }
+        if (failing && msg.type === 'chartroom/plans/save')
+          ws.send(
+            JSON.stringify({
+              id: msg.id,
+              type: 'result',
+              success: false,
+              error: { code: 'unknown_error', message: 'Blocked by the test' },
+            }),
+          );
+        else server.send(message);
+      });
+    });
+
+    const panel = await openPlan(page, PLAN_ID);
+    await startEditing(panel);
+    await editWall(panel);
+    const state = panel.locator('.save-state');
+    await expect(state).toHaveText('Save failed: Blocked by the test', { timeout: 10_000 });
+
+    // Closing the tab asks before leaving; staying keeps the editor and the change.
+    const dialog = page.waitForEvent('dialog');
+    await page.close({ runBeforeUnload: true });
+    const asked = await dialog;
+    expect(asked.type()).toBe('beforeunload');
+    await asked.dismiss();
+    expect(page.isClosed()).toBe(false);
+    await expect(panel.locator('.toolbar')).toBeVisible();
+    await expect(state).toHaveText(/^Save failed/);
+    expect(await storedMaterial()).toBe('partition');
+
+    // Once saving works again, Done stores the change.
+    failing = false;
+    await panel.locator('button.edit').click();
+    await expect(panel.locator('.toolbar')).toHaveCount(0);
+    await expect.poll(storedMaterial, { timeout: 10_000 }).toBe('exterior');
+  });
+});

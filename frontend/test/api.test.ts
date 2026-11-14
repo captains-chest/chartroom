@@ -30,7 +30,7 @@ describe('websocket api', () => {
 
   it('gets a plan normalised, keeping its storage id', async () => {
     const { c, sent } = connection({ 'chartroom/plans/get': { id: 'home', name: 'Home' } });
-    const plan = await wsApi(c).getPlan('home');
+    const { plan } = await wsApi(c).getPlan('home');
     expect(sent).toEqual([{ type: 'chartroom/plans/get', plan_id: 'home' }]);
     expect(plan).toMatchObject({ id: 'home', name: 'Home', floor_id: null, walls: [], rooms: [] });
   });
@@ -47,7 +47,8 @@ describe('websocket api', () => {
     const own = underlay('/api/chartroom/underlay/home?v=0123456789ab');
     const get = (u: unknown) =>
       wsApi(connection({ 'chartroom/plans/get': { name: 'Home', underlay: u } }).c).getPlan('home');
-    expect((await get(own)).underlay).toEqual(own);
+    expect(await get(own)).toMatchObject({ plan: { underlay: own }, underlayIgnored: false });
+    expect(await get(null)).toMatchObject({ plan: { underlay: null }, underlayIgnored: false });
     for (const u of [
       underlay('https://example.com/x.png'),
       underlay('/api/states'),
@@ -58,8 +59,9 @@ describe('websocket api', () => {
       0,
       '',
     ]) {
-      const plan = await get(u);
+      const { plan, underlayIgnored } = await get(u);
       expect(plan.underlay, JSON.stringify(u)).toBeNull();
+      expect(underlayIgnored, JSON.stringify(u)).toBe(true);
       expect(plan.name).toBe('Home');
     }
   });

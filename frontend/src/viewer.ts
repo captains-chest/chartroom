@@ -1,12 +1,11 @@
 // What the panel and the card share around the plan view: the layer buttons, the History slider
 // (loaded on first use), the hass the plan shows, loading a plan, and releasing the view's layers
 // while the element is off the page.
-import { wsApi, type ChartroomApi } from './api';
+import { wsApi, type ChartroomApi, type LoadedPlan } from './api';
 import type { Hass, HassConnection } from './ha-types';
 import { layerCounts } from './heat/functions';
 import type { HeatLayerId } from './heat/types';
 import { LayerToggles } from './layer-toggles';
-import type { Plan } from './plan/models';
 import type { PlanView } from './plan-view';
 import type { TimeBar } from './time-bar';
 import { button, h } from './ui';
@@ -100,15 +99,15 @@ export class ViewerController {
   }
 
   /** Fetch a plan and show it; null when a later load started meanwhile. */
-  async load(planId: string, current = this.begin()): Promise<Plan | null> {
+  async load(planId: string, current = this.begin()): Promise<LoadedPlan | null> {
     const api = this.api;
     if (!api) throw new Error('not connected');
-    const plan = await api.getPlan(planId);
+    const loaded = await api.getPlan(planId);
     if (!current()) return null;
-    this.view.setPlan(plan);
+    this.view.setPlan(loaded.plan);
     if (planId !== this.#planId) void this.#time?.load();
     this.#planId = planId;
-    return plan;
+    return loaded;
   }
 
   async toggleTime(): Promise<void> {

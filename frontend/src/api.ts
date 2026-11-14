@@ -12,12 +12,18 @@ export interface PlanEvent {
   deleted: boolean;
 }
 
+/** A loaded plan, and whether its stored underlay was dropped for not being the plan's own image. */
+export interface LoadedPlan {
+  plan: Plan;
+  underlayIgnored: boolean;
+}
+
 export type Unsubscribe = () => Promise<void> | void;
 
 export interface ChartroomApi {
   listPlans(): Promise<PlanSummary[]>;
   /** The stored plan, normalised, with an underlay only if it is the plan's own image. */
-  getPlan(planId: string): Promise<Plan>;
+  getPlan(planId: string): Promise<LoadedPlan>;
   savePlan(planId: string, plan: Plan): Promise<void>;
   subscribePlans(cb: (e: PlanEvent) => void): Promise<Unsubscribe>;
   mesh(): Promise<Topology>;

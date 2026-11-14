@@ -90,9 +90,36 @@ describe('viewer controller', () => {
     await expect(viewer.load('home')).rejects.toThrow('not connected');
 
     viewer.hass = liveHass(recorder().c);
-    const plan = await viewer.load('home');
-    expect(plan?.name).toBe('Home');
-    expect(view.plan).toBe(plan);
+    const loaded = await viewer.load('home');
+    expect(loaded).toMatchObject({ plan: { name: 'Home' }, underlayIgnored: false });
+    expect(view.plan).toBe(loaded?.plan);
+  });
+
+  it('says when it dropped an underlay that pointed outside Chartroom', async () => {
+    const { api, viewer, view } = setup();
+    viewer.hass = liveHass(recorder().c);
+    const underlay = (url: string) => ({
+      url,
+      width_px: 100,
+      height_px: 50,
+      scale: 0.05,
+      origin: [0, 0] as [number, number],
+      opacity: 0.5,
+    });
+    api.plans.set('home', { ...sensorPlan(), underlay: underlay('https://example.com/x.png') });
+    api.plans.set('other', {
+      ...sensorPlan('Other'),
+      underlay: underlay('/api/chartroom/underlay/other'),
+    });
+    expect(await viewer.load('home')).toMatchObject({
+      plan: { name: 'Home', underlay: null },
+      underlayIgnored: true,
+    });
+    expect(view.plan?.underlay).toBeNull();
+    expect(await viewer.load('other')).toMatchObject({
+      plan: { underlay: { url: '/api/chartroom/underlay/other' } },
+      underlayIgnored: false,
+    });
   });
 
   it('drops a load that a later one overtook', async () => {
@@ -105,7 +132,7 @@ describe('viewer controller', () => {
     const second = viewer.load('other', current);
     open();
     expect(await first).toBeNull();
-    expect((await second)?.name).toBe('Other');
+    expect((await second)?.plan.name).toBe('Other');
     expect(view.plan?.name).toBe('Other');
     expect(current()).toBe(true);
   });

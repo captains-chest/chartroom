@@ -1,8 +1,9 @@
 // An in-memory ChartroomApi for tests: plans in a map, and plan events on demand.
-import type { ChartroomApi, PlanEvent } from '../src/api';
+import type { ChartroomApi, LoadedPlan, PlanEvent } from '../src/api';
 import type { PlanSummary } from '../src/ha-types';
 import type { Topology } from '../src/mesh-layer';
 import type { Plan } from '../src/plan/models';
+import { ownUnderlayOnly } from '../src/underlay-url';
 
 export class FakeApi implements ChartroomApi {
   readonly plans = new Map<string, Plan>();
@@ -16,12 +17,12 @@ export class FakeApi implements ChartroomApi {
     return [...this.plans].map(([id, p]) => ({ id, name: p.name, floor_id: p.floor_id ?? null }));
   }
 
-  async getPlan(planId: string): Promise<Plan> {
+  async getPlan(planId: string): Promise<LoadedPlan> {
     const gate = this.gate;
     if (gate) await gate;
     const plan = this.plans.get(planId);
     if (!plan) throw new Error(`no plan ${planId}`);
-    return structuredClone(plan);
+    return ownUnderlayOnly(planId, structuredClone(plan));
   }
 
   async savePlan(planId: string, plan: Plan): Promise<void> {

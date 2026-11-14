@@ -17,8 +17,9 @@ The first release.
 - An optional underlay image per plan (uploaded by an admin, downscaled in the browser),
   calibrated against a known length or area. A plan's underlay can only be its own uploaded
   image: the integration refuses any other URL on save, and the panel never fetches one, so a
-  plan can't send a user's token anywhere else. Undo brings back a replaced image, whether it was
-  replaced in the underlay panel or by a plan import.
+  plan can't send a user's token anywhere else. A plan stored earlier with another URL loads
+  without its underlay, and admins see a short note asking them to import the image again. Undo
+  brings back a replaced image, whether it was replaced in the underlay panel or by a plan import.
 - A room can link more than one Home Assistant area, for open-plan spaces such as a kitchen and
   living room with no wall between them. Plans saved with one area per room load unchanged.
 - Export a plan as a `.json` file, optionally with its underlay image embedded or saved as its own
@@ -68,4 +69,4 @@ The first release.
 ### Requirements
 
 - Home Assistant 2026.10 or newer. No Python requirements and no runtime JavaScript
-  dependencies. Frontend: 14.8 KB gzip for the card, 53.88 KB gzip in total.
+  dependencies. Frontend: 14.78 KB gzip for the card, 54.15 KB gzip in total.

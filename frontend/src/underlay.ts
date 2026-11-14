@@ -120,12 +120,38 @@ export async function loadUnderlay(
 }
 
 /**
+ * The panel's own underlay loads into the read-only view. Once the editor opens it owns the view's
+ * image, so `release()` drops a panel load still in flight (its blob URL is revoked, not shown).
+ */
+export class PanelUnderlay {
+  #load = 0;
+  readonly #show: (blobUrl: string | null) => void;
+
+  constructor(show: (blobUrl: string | null) => void) {
+    this.#show = show;
+  }
+
+  /** Show plan `planId`'s image at `url` (none for null), dropping any earlier load. */
+  async load(hass: Hass | undefined, planId: string | null, url: string | null): Promise<void> {
+    const load = ++this.#load;
+    this.#show(null);
+    if (url && planId) await loadUnderlay(hass, planId, url, () => load === this.#load, this.#show);
+  }
+
+  /** Hand the view's image over to the editor: a panel load still in flight is dropped. */
+  release(): void {
+    this.#load++;
+  }
+}
+
+/**
  * The editor's underlay image, kept in step with the plan's underlay URL: Undo and Redo switch
  * between stored versions of the image, so a URL change means fetching that version.
  */
 export class UnderlayImage {
   /** The image URL on screen or loading, or null. */
   #url: string | null;
+  #closed = false;
   readonly #hass: () => Hass | undefined;
   readonly #planId: string;
   readonly #show: (blobUrl: string | null) => void;
@@ -165,6 +191,17 @@ export class UnderlayImage {
     if (url === null || url === this.#url) return;
     this.#url = url;
     this.#show(null);
-    void loadUnderlay(this.#hass(), this.#planId, url, () => this.#url === url, this.#show);
+    void loadUnderlay(
+      this.#hass(),
+      this.#planId,
+      url,
+      () => !this.#closed && this.#url === url,
+      this.#show,
+    );
+  }
+
+  /** The editor closed: a load still running is dropped, and the panel owns the image again. */
+  close(): void {
+    this.#closed = true;
   }
 }

@@ -18,6 +18,11 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["."]
 testpaths = ["tests"]
+# Deprecated calls Chartroom makes fail the test that makes them. The module is a regex matched
+# against the module the warning is attributed to (the caller, for warnings raised with
+# stacklevel=2 as Home Assistant and the standard library do), so warnings from inside other
+# libraries still only show in the summary.
+filterwarnings = ["error::DeprecationWarning:custom_components\\.chartroom"]
 
 [tool.ruff]
 target-version = "py314"

@@ -330,7 +330,7 @@ class _Z2MState:
 def _has_z2m_devices(hass: HomeAssistant) -> bool:
     return any(
         domain == "mqtt" and str(ident).startswith("zigbee2mqtt_")
-        for device in dr.async_get(hass).devices.values()
+        for device in dr.async_get(hass).devices
         for domain, ident in device.identifiers
     )
 

@@ -326,20 +326,28 @@ def _z2m_node(ieee: str) -> mesh.MeshNode:
     )
 
 
-async def test_resolve_avoids_deprecated_device_lookup(hass: HomeAssistant) -> None:
-    """Nodes resolve without `async_get_device`, which Home Assistant removes in 2027.8.0."""
+async def test_resolve_finds_device_by_identifier(hass: HomeAssistant) -> None:
+    """Nodes resolve to the device registered under their identifier, or to none."""
     entry = MockConfigEntry(domain="mqtt")
     entry.add_to_hass(hass)
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, identifiers={("mqtt", "zigbee2mqtt_0x01")}
     )
-    with patch.object(
-        dr.DeviceRegistry,
-        "async_get_device",
-        side_effect=AssertionError("deprecated device_registry.async_get_device"),
-    ):
-        nodes = mesh._resolve(hass, [_z2m_node("0x01"), _z2m_node("0x02")])
+    nodes = mesh._resolve(hass, [_z2m_node("0x01"), _z2m_node("0x02")])
     assert [n["device_id"] for n in nodes] == [device.id, None]
+
+
+async def test_has_z2m_devices(hass: HomeAssistant) -> None:
+    """Only an MQTT device with a Zigbee2MQTT identifier counts."""
+    entry = MockConfigEntry(domain="mqtt")
+    entry.add_to_hass(hass)
+    dev_reg = dr.async_get(hass)
+    dev_reg.async_get_or_create(config_entry_id=entry.entry_id, identifiers={("mqtt", "tasmota_1")})
+    assert not mesh._has_z2m_devices(hass)
+    dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("mqtt", "zigbee2mqtt_0x01")}
+    )
+    assert mesh._has_z2m_devices(hass)
 
 
 async def test_resolve_prefers_device_of_identifier_domain(hass: HomeAssistant) -> None:

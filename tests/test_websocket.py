@@ -87,6 +87,36 @@ async def test_rejects_bad_plan_id(hass: HomeAssistant, hass_ws_client, plan_id:
     msg = await ws.receive_json()
     assert not msg["success"]
     assert msg["error"]["code"] == "invalid_format"
+    assert msg["error"]["message"] == (
+        f"does not match the expected pattern at 'plan_id'. Got {plan_id!r}"
+    )
+    assert hass.data[DOMAIN].plans() == {}
+
+
+@pytest.mark.parametrize(
+    ("plan", "message"),
+    [
+        ({"name": ""}, "length of value must be at least 1 at 'plan.name'. Got ''"),
+        (
+            {"name": "x" * 101},
+            f"length of value must be at most 100 at 'plan.name'. Got '{'x' * 101}'",
+        ),
+        ({"name": 5}, "expected str at 'plan.name'. Got 5"),
+        ({}, "required key not provided at 'plan.name'. Got None"),
+        ({"name": "Up", "floor_id": 3}, "expected str or None at 'plan.floor_id'. Got 3"),
+        ("Up", "expected a mapping at 'plan'. Got 'Up'"),
+    ],
+)
+async def test_save_rejects_a_bad_envelope(
+    hass: HomeAssistant, hass_ws_client, plan: Any, message: str
+) -> None:
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json_auto_id({"type": "chartroom/plans/save", "plan_id": "up", "plan": plan})
+    msg = await ws.receive_json()
+    assert not msg["success"]
+    assert msg["error"] == {"code": "invalid_format", "message": message}
+    assert hass.data[DOMAIN].get_plan("up") is None
 
 
 async def test_save_requires_admin(hass: HomeAssistant, hass_ws_client, hass_admin_user) -> None:
@@ -179,6 +209,10 @@ async def test_save_checks_schema_version(
     assert msg["success"] is accepted
     if not accepted:
         assert msg["error"]["code"] == "invalid_format"
+        assert msg["error"]["message"] == (
+            f"unsupported schema_version {schema_version!r} at 'plan.schema_version'."
+            f" Got {schema_version!r}"
+        )
 
 
 async def test_save_accepts_plan_without_schema_version(

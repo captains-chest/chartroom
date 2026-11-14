@@ -6,12 +6,47 @@ from typing import Any, TypedDict
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
+import voluptuous as vol
+from voluptuous.humanize import humanize_error
 
-from .const import STORAGE_KEY, STORAGE_VERSION, UNDERLAY_URL_RE
+from .const import PLAN_ID_RE, PLAN_SCHEMA_VERSION, STORAGE_KEY, STORAGE_VERSION, UNDERLAY_URL_RE
+
+PLAN_ID = vol.All(str, vol.Match(PLAN_ID_RE))
+
+
+def _plan_schema_version(value: Any) -> int:
+    # An exact int: True and 1.0 compare equal to 1 in Python, but are not what the frontend sends.
+    if type(value) is not int or value != PLAN_SCHEMA_VERSION:
+        raise vol.Invalid(f"unsupported schema_version {value!r}")
+    return value
+
+
+# The plan envelope a save accepts. Only these fields are checked (and, in underlay_problem, the
+# underlay URL): the rest is stored as sent, and the frontend owns its schema. The
+# chartroom/plans/save command uses the same validators, so it rejects a plan the same way first.
+PLAN_SCHEMA = vol.Schema(
+    {
+        vol.Required("name"): vol.All(str, vol.Length(min=1, max=100)),
+        vol.Optional("floor_id"): vol.Any(str, None),
+        vol.Optional("schema_version"): _plan_schema_version,
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+_SAVE_SCHEMA = vol.Schema({vol.Required("plan_id"): PLAN_ID, vol.Required("plan"): PLAN_SCHEMA})
 
 
 class InvalidPlanError(ValueError):
     """A plan the store refuses to save; the message says why."""
+
+
+def plan_problem(plan_id: Any, plan: Any) -> str | None:
+    """Why this plan can't be saved under this id, or None."""
+    data = {"plan_id": plan_id, "plan": plan}
+    try:
+        _SAVE_SCHEMA(data)
+    except vol.Invalid as err:
+        return humanize_error(data, err)
+    return underlay_problem(plan_id, plan.get("underlay"))
 
 
 def underlay_problem(plan_id: str, underlay: Any) -> str | None:
@@ -70,10 +105,11 @@ class ChartroomStore:
     async def async_save_plan(self, plan_id: str, plan: dict[str, Any]) -> dict[str, Any]:
         """Create or replace a plan and persist it.
 
-        Every write goes through here, so this is where a plan's underlay URL is checked: raises
-        InvalidPlanError (and changes nothing) if it isn't the plan's own image.
+        Every write goes through here, so this is where a plan is checked: raises InvalidPlanError
+        (and changes nothing) if plan_id isn't a valid id, the plan's envelope (name, floor_id,
+        schema_version) doesn't match PLAN_SCHEMA, or its underlay isn't the plan's own image.
         """
-        if problem := underlay_problem(plan_id, plan.get("underlay")):
+        if problem := plan_problem(plan_id, plan):
             raise InvalidPlanError(problem)
         self._plans[plan_id] = plan
         await self._store.async_save({"plans": self._plans})

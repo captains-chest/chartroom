@@ -9,25 +9,10 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 import voluptuous as vol
 
-from .const import (
-    DOMAIN,
-    PLAN_ID_RE,
-    PLAN_SCHEMA_VERSION,
-    SIGNAL_PLAN_CHANGED,
-    VERSION,
-)
+from .const import DOMAIN, SIGNAL_PLAN_CHANGED, VERSION
 from .mesh import DATA_MESH_TEST, async_get_topology
-from .store import ChartroomStore, InvalidPlanError
+from .store import PLAN_ID, PLAN_SCHEMA, ChartroomStore, InvalidPlanError
 from .underlay import async_remove_underlay
-
-PLAN_ID = vol.All(str, vol.Match(PLAN_ID_RE))
-
-
-def _plan_schema_version(value: Any) -> int:
-    # An exact int: True and 1.0 compare equal to 1 in Python, but are not what the frontend sends.
-    if type(value) is not int or value != PLAN_SCHEMA_VERSION:
-        raise vol.Invalid(f"unsupported schema_version {value!r}")
-    return value
 
 
 @callback
@@ -90,14 +75,7 @@ def ws_get_plan(
     {
         vol.Required("type"): "chartroom/plans/save",
         vol.Required("plan_id"): PLAN_ID,
-        vol.Required("plan"): vol.Schema(
-            {
-                vol.Required("name"): vol.All(str, vol.Length(min=1, max=100)),
-                vol.Optional("floor_id"): vol.Any(str, None),
-                vol.Optional("schema_version"): _plan_schema_version,
-            },
-            extra=vol.ALLOW_EXTRA,
-        ),
+        vol.Required("plan"): PLAN_SCHEMA,
     }
 )
 @websocket_api.require_admin
@@ -107,8 +85,8 @@ async def ws_save_plan(
 ) -> None:
     """Create or replace a plan (admins only).
 
-    Only the envelope and (in the store) the underlay URL are checked: the plan is stored as sent,
-    and the frontend owns its schema.
+    The command's schema rejects a bad id or envelope with Home Assistant's own message; the store
+    runs the same checks (and the underlay URL check) again, for every write path.
     """
     if (store := _store(hass, connection, msg["id"])) is None:
         return

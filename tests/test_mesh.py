@@ -7,8 +7,9 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er, frame
 from homeassistant.setup import async_setup_component
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.chartroom import mesh
@@ -314,3 +315,50 @@ async def test_mesh_test_source_is_resolved(hass: HomeAssistant, hass_ws_client)
             "entities": ["switch.plug"],
         }
     ]
+
+
+def _z2m_node(ieee: str) -> mesh.MeshNode:
+    return mesh.MeshNode(
+        id=f"z2m:{ieee}",
+        source="zigbee2mqtt",
+        name=ieee,
+        role="router",
+        identifiers=(("mqtt", f"zigbee2mqtt_{ieee}"),),
+    )
+
+
+async def test_resolve_avoids_deprecated_device_lookup(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Nodes resolve without `async_get_device`, which Home Assistant removes in 2027.8.0."""
+    entry = MockConfigEntry(domain="mqtt")
+    entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("mqtt", "zigbee2mqtt_0x01")}
+    )
+    with (
+        # Home Assistant reports each call site once per run; start clean so a report shows.
+        patch.object(frame, "_REPORTED_INTEGRATIONS", set()),
+        patch.object(
+            dr.DeviceRegistry,
+            "async_get_device",
+            side_effect=AssertionError("deprecated device_registry.async_get_device"),
+        ),
+    ):
+        nodes = mesh._resolve(hass, [_z2m_node("0x01"), _z2m_node("0x02")])
+    assert [n["device_id"] for n in nodes] == [device.id, None]
+    assert "async_get_device`" not in caplog.text
+
+
+async def test_resolve_prefers_device_of_identifier_domain(hass: HomeAssistant) -> None:
+    """When entries share an identifier, the one from the identifier's integration wins."""
+    other = MockConfigEntry(domain="other")
+    other.add_to_hass(hass)
+    mqtt = MockConfigEntry(domain="mqtt")
+    mqtt.add_to_hass(hass)
+    ident = {("mqtt", "zigbee2mqtt_0x01")}
+    dev_reg = dr.async_get(hass)
+    dev_reg.async_get_or_create(config_entry_id=other.entry_id, identifiers=ident)
+    device = dev_reg.async_get_or_create(config_entry_id=mqtt.entry_id, identifiers=ident)
+    [node] = mesh._resolve(hass, [_z2m_node("0x01")])
+    assert node["device_id"] == device.id

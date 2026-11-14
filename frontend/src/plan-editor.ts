@@ -50,7 +50,7 @@ import type { PlanView } from './plan-view';
 import { signalLimitWarnings } from './signal';
 import { count } from './text';
 import { button, field, h, numberInput, s, select, textInput } from './ui';
-import { importUnderlay, loadUnderlay, uploadUnderlay } from './underlay';
+import { importUnderlay, UnderlayImage, uploadUnderlay } from './underlay';
 
 export type { Tool } from './editor/types';
 
@@ -132,7 +132,10 @@ export class PlanEditor {
   readonly #undoButton: HTMLButtonElement;
   readonly #redoButton: HTMLButtonElement;
   readonly #toolButtons = new Map<Tool, HTMLButtonElement>();
+  /** The underlay image on screen, as a blob URL. */
   #underlayUrl: string | null = null;
+  /** Fetches the image version the plan points at, after an import, Undo or Redo. */
+  readonly #underlay: UnderlayImage;
   #lastClick = { t: 0, x: 0, y: 0 };
   /** What the Source tool places next. */
   #sourceKind: SourceKind = 'sensor';
@@ -164,6 +167,12 @@ export class PlanEditor {
     );
     // The panel may already have loaded the picture.
     this.#underlayUrl = host.view.underlayUrl;
+    this.#underlay = new UnderlayImage(
+      () => host.hass(),
+      host.planId,
+      (url) => this.#setUnderlayUrl(url),
+      this.#underlayUrl ? (host.plan.underlay?.url ?? null) : null,
+    );
     for (const t of TOOLS) {
       const label = titleOf(t.tool);
       const b = button(label, () => this.#setTool(t.tool), {
@@ -202,22 +211,23 @@ export class PlanEditor {
     this.#view.el.addEventListener('dragover', this.#onDragOver);
     this.#view.el.addEventListener('drop', this.#onDrop);
     this.#setTool('select');
-    void this.#loadUnderlay();
+    this.#underlay.sync(this.plan.underlay?.url ?? null);
   }
 
   get plan(): Plan {
     return this.#history.present;
   }
 
-  /** Flush pending saves and detach from the view. */
-  async close(): Promise<void> {
+  /** Flush pending saves and detach from the view; whether the plan as edited is stored. */
+  async close(): Promise<boolean> {
     this.#closed = true;
-    await this.#saver.flush();
+    const saved = await this.#saver.flush();
     this.#view.setDelegate(null);
     this.#view.drawOverlay();
     this.#view.setEditing(null);
     this.#view.el.removeEventListener('dragover', this.#onDragOver);
     this.#view.el.removeEventListener('drop', this.#onDrop);
+    return saved;
   }
 
   hassChanged(): void {
@@ -281,6 +291,8 @@ export class PlanEditor {
   }
 
   #afterChange(): void {
+    // Undo and Redo may go back to another image: each stored image keeps its own URL.
+    this.#underlay.sync(this.plan.underlay?.url ?? null);
     this.#render();
     this.#saver.schedule(this.plan);
   }
@@ -769,7 +781,7 @@ export class PlanEditor {
       return;
     }
     let plan = r.plan;
-    let blobUrl: string | null = null;
+    let image: { url: string; blob: Blob } | null = null;
     if (r.image && plan.underlay) {
       const state = this.#saveState;
       const before = { text: state.textContent ?? '', error: state.classList.contains('error') };
@@ -777,22 +789,18 @@ export class PlanEditor {
       try {
         const url = await uploadUnderlay(this.#host.hass(), this.#host.planId, r.image);
         plan = { ...plan, underlay: { ...plan.underlay, url } };
-        blobUrl = URL.createObjectURL(r.image);
+        image = { url, blob: r.image };
       } catch (err) {
         this.#setSaveState(before.text, before.error);
         this.#report(true, [`${file.name} was not imported: ${(err as Error).message ?? err}`]);
         return;
       }
     }
-    if (this.#closed) {
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-      return;
-    }
+    if (this.#closed) return;
     // Drop the old plan's selection, drafts and measurement, keeping the tool.
     this.#s = { ...initialState, tool: this.#s.tool };
+    if (image) this.#underlay.set(image.url, image.blob);
     this.#commit(plan);
-    if (blobUrl) this.#setUnderlayUrl(blobUrl);
-    else void this.#loadUnderlay();
     this.#report(false, [`Imported ${file.name}.`, ...r.notes]);
     this.#view.fit();
   }
@@ -1115,8 +1123,9 @@ export class PlanEditor {
     const hass = this.#host.hass();
     this.#setSaveState('Uploading image…');
     try {
-      const { underlay, blobUrl } = await importUnderlay(hass, this.#host.planId, file, this.plan);
-      this.#setUnderlayUrl(blobUrl);
+      const { underlay, blob } = await importUnderlay(hass, this.#host.planId, file, this.plan);
+      if (this.#closed) return;
+      this.#underlay.set(underlay.url, blob);
       this.#commit({ ...this.plan, underlay });
       this.#view.fit();
     } catch (err) {
@@ -1124,20 +1133,7 @@ export class PlanEditor {
     }
   }
 
-  async #loadUnderlay(): Promise<void> {
-    const u = this.plan.underlay;
-    // An image imported meanwhile wins.
-    if (u && !this.#underlayUrl)
-      await loadUnderlay(
-        this.#host.hass(),
-        this.#host.planId,
-        u.url,
-        () => !this.#underlayUrl,
-        (url) => this.#setUnderlayUrl(url),
-      );
-  }
-
-  #setUnderlayUrl(url: string): void {
+  #setUnderlayUrl(url: string | null): void {
     // The view revokes the old blob URL when it gets the new one.
     this.#underlayUrl = url;
     this.#render();

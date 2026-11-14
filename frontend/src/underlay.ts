@@ -66,15 +66,18 @@ export async function importUnderlay(
   planId: string,
   file: File,
   plan: Plan,
-): Promise<{ underlay: Underlay; blobUrl: string }> {
+): Promise<{ underlay: Underlay; blob: Blob }> {
   if (!hass?.fetchWithAuth) throw new Error('not connected');
   if (!UNDERLAY_TYPES.test(file.type)) throw new Error('use a PNG, JPEG, WebP or SVG');
   const { blob, width, height } = await prepare(file);
   const url = await uploadUnderlay(hass, planId, blob);
-  return { underlay: placeUnderlay(plan, url, width, height), blobUrl: URL.createObjectURL(blob) };
+  return { underlay: placeUnderlay(plan, url, width, height), blob };
 }
 
-/** Store `blob` as the plan's image; the URL the plan points at it with. */
+/**
+ * Store `blob` as a new version of the plan's image; the URL the plan points at it with. The
+ * previous versions stay until the editor closes, so Undo can go back to them.
+ */
 export async function uploadUnderlay(
   hass: Hass | undefined,
   planId: string,
@@ -113,5 +116,55 @@ export async function loadUnderlay(
     else URL.revokeObjectURL(blobUrl);
   } catch {
     // Offline or gone: the plan shows without its drawing.
+  }
+}
+
+/**
+ * The editor's underlay image, kept in step with the plan's underlay URL: Undo and Redo switch
+ * between stored versions of the image, so a URL change means fetching that version.
+ */
+export class UnderlayImage {
+  /** The image URL on screen or loading, or null. */
+  #url: string | null;
+  readonly #hass: () => Hass | undefined;
+  readonly #planId: string;
+  readonly #show: (blobUrl: string | null) => void;
+
+  /**
+   * `show` gets a blob URL for the image, or null while another one loads. `shown` is the URL
+   * of an image already on screen. Only plan `planId`'s own image is ever fetched.
+   */
+  constructor(
+    hass: () => Hass | undefined,
+    planId: string,
+    show: (blobUrl: string | null) => void,
+    shown: string | null = null,
+  ) {
+    this.#hass = hass;
+    this.#planId = planId;
+    this.#show = show;
+    this.#url = shown;
+  }
+
+  /** The image URL on screen or loading. */
+  get url(): string | null {
+    return this.#url;
+  }
+
+  /** Show the image just stored at `url`, without fetching it back. */
+  set(url: string, blob: Blob): void {
+    this.#url = url;
+    this.#show(URL.createObjectURL(blob));
+  }
+
+  /**
+   * Show the image at the plan's underlay `url`, fetching it unless it is already shown. No
+   * underlay (null) keeps the last image, so undoing its removal needs no fetch.
+   */
+  sync(url: string | null): void {
+    if (url === null || url === this.#url) return;
+    this.#url = url;
+    this.#show(null);
+    void loadUnderlay(this.#hass(), this.#planId, url, () => this.#url === url, this.#show);
   }
 }

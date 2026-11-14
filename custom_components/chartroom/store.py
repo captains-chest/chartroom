@@ -38,6 +38,11 @@ class ChartroomStore:
         ]
 
     @callback
+    def plans(self) -> dict[str, dict[str, Any]]:
+        """Every stored plan by id (a copy of the mapping; the plans themselves are shared)."""
+        return dict(self._plans)
+
+    @callback
     def get_plan(self, plan_id: str) -> dict[str, Any] | None:
         """Return one plan, or None."""
         plan = self._plans.get(plan_id)

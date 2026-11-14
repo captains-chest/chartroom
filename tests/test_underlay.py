@@ -1,5 +1,6 @@
 """Underlay image view: /api/chartroom/underlay/<plan_id>."""
 
+import hashlib
 from pathlib import Path
 import shutil
 
@@ -8,7 +9,12 @@ from homeassistant.setup import async_setup_component
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.chartroom.const import DOMAIN, UNDERLAY_MAX_BYTES
+from custom_components.chartroom.const import (
+    DOMAIN,
+    STORAGE_KEY,
+    STORAGE_VERSION,
+    UNDERLAY_MAX_BYTES,
+)
 from custom_components.chartroom.underlay import underlay_dir
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
@@ -58,17 +64,110 @@ async def test_upload_replace_and_serve(hass: HomeAssistant, hass_client) -> Non
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
     assert await resp.read() == PNG
 
-    # A new image of another type replaces the old file.
+    # A new image, of another type too, is a new version; the old one stays for Undo.
     resp = await client.post(URL, data=SVG, headers={"Content-Type": "image/svg+xml"})
     assert resp.status == 200
+    svg_url = (await resp.json())["url"]
+    assert svg_url != body["url"]
     folder: Path = underlay_dir(hass)
-    assert await hass.async_add_executor_job(_names, folder) == ["ground.svg"]
+    assert len(await hass.async_add_executor_job(_names, folder)) == 2
+    # Without a version: the newest.
     resp = await client.get(URL)
     assert resp.headers["Content-Type"] == "image/svg+xml"
+    resp = await client.get(svg_url)
+    assert await resp.read() == SVG
 
-    resp = await client.post(URL, data=JPEG, headers={"Content-Type": "image/jpeg"})
+
+async def test_undo_finds_the_replaced_image(hass: HomeAssistant, hass_client) -> None:
+    """Each upload keeps its own URL, so a plan pointing at the old one still gets the old image."""
+    await _setup(hass)
+    client = await hass_client()
+    first = await (await client.post(URL, data=PNG, headers={"Content-Type": "image/png"})).json()
+    second = await (
+        await client.post(URL, data=JPEG, headers={"Content-Type": "image/jpeg"})
+    ).json()
+
+    resp = await client.get(first["url"])
     assert resp.status == 200
-    assert await hass.async_add_executor_job(_names, folder) == ["ground.jpg"]
+    assert resp.headers["Content-Type"] == "image/png"
+    assert await resp.read() == PNG
+    resp = await client.get(second["url"])
+    assert await resp.read() == JPEG
+
+    # An unknown version is not found; a malformed one is rejected.
+    assert (await client.get(f"{URL}?v=000000000000")).status == 404
+    assert (await client.get(f"{URL}?v=../../x")).status == 400
+
+
+async def test_prune_keeps_the_saved_plans_image(
+    hass: HomeAssistant, hass_client, hass_ws_client, hass_read_only_access_token
+) -> None:
+    await _setup(hass)
+    client = await hass_client()
+    ws = await hass_ws_client(hass)
+    folder: Path = underlay_dir(hass)
+    first = await (await client.post(URL, data=PNG, headers={"Content-Type": "image/png"})).json()
+    second = await (
+        await client.post(URL, data=SVG, headers={"Content-Type": "image/svg+xml"})
+    ).json()
+
+    async def save(underlay: dict | None) -> None:
+        plan = {"name": "Ground", "underlay": underlay}
+        await ws.send_json_auto_id(
+            {"type": "chartroom/plans/save", "plan_id": "ground", "plan": plan}
+        )
+        assert (await ws.receive_json())["success"]
+
+    async def prune() -> dict:
+        await ws.send_json_auto_id({"type": "chartroom/underlay/prune", "plan_id": "ground"})
+        return await ws.receive_json()
+
+    # Undone back to the first image: the second goes.
+    await save({"url": first["url"]})
+    assert (await prune())["result"] == {"removed": 1}
+    assert (await client.get(first["url"])).status == 200
+    assert (await client.get(second["url"])).status == 404
+    assert len(await hass.async_add_executor_job(_names, folder)) == 1
+
+    # A URL without a version keeps the newest image.
+    await client.post(URL, data=JPEG, headers={"Content-Type": "image/jpeg"})
+    await save({"url": URL})
+    assert (await prune())["result"] == {"removed": 1}
+    assert (await client.get(URL)).headers["Content-Type"] == "image/jpeg"
+
+    # The underlay removed: nothing is kept.
+    await save(None)
+    assert (await prune())["result"] == {"removed": 1}
+    assert await hass.async_add_executor_job(_names, folder) == []
+
+    # Admins only.
+    reader = await hass_ws_client(hass, hass_read_only_access_token)
+    await reader.send_json_auto_id({"type": "chartroom/underlay/prune", "plan_id": "ground"})
+    assert (await reader.receive_json())["error"]["code"] == "unauthorized"
+
+
+async def test_startup_prunes_and_names_old_files_by_version(
+    hass: HomeAssistant, hass_storage: dict
+) -> None:
+    """Images a closed tab never pruned go at startup; a file from before versions is kept."""
+    folder: Path = underlay_dir(hass)
+    version = hashlib.sha256(PNG).hexdigest()[:12]
+
+    def seed() -> None:
+        folder.mkdir(parents=True)
+        (folder / "ground.png").write_bytes(PNG)
+        (folder / "ground.0123456789ab.jpg").write_bytes(JPEG)
+        (folder / "gone.0123456789ab.jpg").write_bytes(JPEG)
+
+    await hass.async_add_executor_job(seed)
+    plan = {"name": "Ground", "underlay": {"url": f"{URL}?v={version}"}}
+    hass_storage[STORAGE_KEY] = {
+        "version": STORAGE_VERSION,
+        "key": STORAGE_KEY,
+        "data": {"plans": {"ground": plan}},
+    }
+    await _setup(hass)
+    assert await hass.async_add_executor_job(_names, folder) == [f"ground.{version}.png"]
 
 
 async def test_rejects_bad_uploads(hass: HomeAssistant, hass_client) -> None:
@@ -123,6 +222,11 @@ async def test_deleting_the_plan_removes_its_underlay(
     assert (await ws.receive_json())["success"]
     assert (await client.post(URL, data=PNG, headers={"Content-Type": "image/png"})).status == 200
 
+    assert (
+        await client.post(URL, data=SVG, headers={"Content-Type": "image/svg+xml"})
+    ).status == 200
+
     await ws.send_json_auto_id({"type": "chartroom/plans/delete", "plan_id": "ground"})
     assert (await ws.receive_json())["success"]
     assert (await client.get(URL)).status == 404
+    assert await hass.async_add_executor_job(_names, underlay_dir(hass)) == []

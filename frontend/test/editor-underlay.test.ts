@@ -181,6 +181,35 @@ describe('editor image upload while leaving', () => {
     expect(leaveAsks()).toBe(false);
   });
 
+  it('takes no edits or imports once the final save at Done is under way', async () => {
+    // Hold the final save, so the editor is closing but not yet closed.
+    const stored = deferred<void>();
+    upload = deferred<Response>();
+    saved = [];
+    hass = { fetchWithAuth: vi.fn(() => upload.promise) } as unknown as Hass;
+    const ed = editor(emptyPlan('Home'), false, hass, async (plan) => {
+      saved.push(plan);
+      await stored.promise;
+    });
+    open.push(ed);
+    pick(ed, 'underlay', [png()]);
+    await vi.waitFor(() => expect(hass.fetchWithAuth).toHaveBeenCalledTimes(1));
+    const closing = ed.close();
+    answer(true);
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    const before = ed.plan;
+    expect(before.underlay?.url).toBe(STORED);
+    // An undo and a new image during the final save change nothing and upload nothing.
+    ed.undo();
+    pick(ed, 'underlay', [png()]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(ed.plan).toBe(before);
+    expect(hass.fetchWithAuth).toHaveBeenCalledTimes(1);
+    stored.resolve();
+    expect(await closing).toBeNull();
+    expect(saved).toHaveLength(1);
+  });
+
   it("waits at Done for a plan file's image still uploading", async () => {
     const ed = make();
     const plan: Plan = {

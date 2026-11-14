@@ -329,11 +329,13 @@ export class ChartroomPanel extends HTMLElement {
   async #loadUnderlay(): Promise<void> {
     const load = ++this.#underlayLoad;
     const u = this.#plan?.underlay;
+    const planId = this.#planId;
     this.#view.setUnderlayUrl(null);
     this.#renderUnderlayControls();
-    if (u)
+    if (u && planId)
       await loadUnderlay(
         this.#viewer.hass,
+        planId,
         u.url,
         () => load === this.#underlayLoad,
         (url) => this.#view.setUnderlayUrl(url),

@@ -12,10 +12,10 @@ import {
   planFileName,
   readPlanFile,
   shapeProblems,
-  underlayPlanId,
   type PlanFileResult,
 } from '../src/plan-file';
-import { underlayPath, uploadUnderlay } from '../src/underlay';
+import { uploadUnderlay } from '../src/underlay';
+import { underlayPath, underlayPlanId } from '../src/underlay-url';
 
 const fixture = normalizePlan(
   JSON.parse(readFileSync(new URL('./fixtures/example-plan.json', import.meta.url), 'utf8')),

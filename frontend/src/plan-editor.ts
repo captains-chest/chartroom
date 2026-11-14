@@ -1130,6 +1130,7 @@ export class PlanEditor {
     if (u && !this.#underlayUrl)
       await loadUnderlay(
         this.#host.hass(),
+        this.#host.planId,
         u.url,
         () => !this.#underlayUrl,
         (url) => this.#setUnderlayUrl(url),

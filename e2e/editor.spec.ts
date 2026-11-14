@@ -415,7 +415,9 @@ test.describe('leaving the editor', () => {
     await page.clock.install();
     const panel = await openPlan(page, PLAN_ID);
     await startEditing(panel);
-    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+    // Far enough ahead that it is still in the future when pauseAt runs on a slow runner; the
+    // autosave timer doesn't exist yet, so fast-forwarding to it can't fire a save.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 2000));
     await editWall(panel);
     // Still waiting for the 600 ms delay, which can't elapse: only saving on leave can store it.
     await expect(panel.locator('.save-state')).toHaveText('Unsaved changes');

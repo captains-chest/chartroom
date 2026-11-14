@@ -55,9 +55,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Load plans, serve the frontend, add the panel and the card."""
     store = ChartroomStore(hass)
     await store.async_load()
-    hass.data[DOMAIN] = store
-    # Drop underlay images kept for an editor's Undo that a closed tab never pruned.
+    # Drop underlay images kept for an editor's Undo. Saves and uploads wait for the store, so
+    # publish it only after this, or one could point at an image the prune is deleting.
     await async_prune_underlays(hass, store.plans())
+    hass.data[DOMAIN] = store
 
     # Static routes cannot be removed from aiohttp, so register them once per run.
     if not hass.data.get(DATA_STATIC):

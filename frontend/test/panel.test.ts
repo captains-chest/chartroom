@@ -143,8 +143,8 @@ describe('saving when the panel or the page goes (#38)', () => {
   });
 });
 
-describe('a plan import and closing the editor (#19)', () => {
-  it('drops an import whose image finishes uploading after the editor closed', async () => {
+describe('a plan import and closing the editor (#19, #50)', () => {
+  it('waits at Done for an image still uploading, then keeps the import', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const t = await PanelHarness.mount({ home: home() });
     await t.openEditor();
@@ -153,18 +153,19 @@ describe('a plan import and closing the editor (#19)', () => {
     const [upload] = t.fetch.to(underlayPath('home'), 'POST');
     expect(upload).toBeDefined();
 
-    await t.closeEditor();
+    await t.toggleEditor();
+    expect(t.editing).toBe(true);
     upload!.respond(jsonResponse({ url: `${underlayPath('home')}?v=def456` }));
     await settle();
     await vi.runAllTimersAsync();
     await settle();
 
-    expect(t.api.plans.get('home')!.name).toBe('Home');
-    expect(t.panel.plan!.name).toBe('Home');
-    expect(t.panel.view.underlayUrl).toBeNull();
+    expect(t.editing).toBe(false);
+    expect(t.api.plans.get('home')!.name).toBe('Imported');
+    expect(t.panel.plan!.name).toBe('Imported');
   });
 
-  it('drops an import whose file is read after the editor closed', async () => {
+  it('waits at Done for a file still being read, then keeps the import', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const t = await PanelHarness.mount({ home: home() });
     await t.openEditor();
@@ -180,15 +181,18 @@ describe('a plan import and closing the editor (#19)', () => {
     t.pickPlanFiles([new SlowFile([await planFileText('Imported')], 'imported.json')]);
     await settle();
 
-    await t.closeEditor();
+    await t.toggleEditor();
+    expect(t.editing).toBe(true);
     read();
+    await settle();
+    const [upload] = t.fetch.to(underlayPath('home'), 'POST');
+    upload?.respond(jsonResponse({ url: `${underlayPath('home')}?v=def456` }));
     await settle();
     await vi.runAllTimersAsync();
     await settle();
 
-    // Not even its image is uploaded.
-    expect(t.fetch.to(underlayPath('home'), 'POST')).toEqual([]);
-    expect(t.api.plans.get('home')!.name).toBe('Home');
-    expect(t.panel.plan!.name).toBe('Home');
+    expect(t.editing).toBe(false);
+    expect(t.api.plans.get('home')!.name).toBe('Imported');
+    expect(t.panel.plan!.name).toBe('Imported');
   });
 });

@@ -17,23 +17,35 @@ export function autosaver<T>(
 ): Autosaver<T> {
   let latest = saved;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let saving: Promise<void> | null = null;
+  // Flushes run one after another, so callers (the timer, Done, leaving the page) never write at
+  // the same time; each saves whatever is latest once the one before it is done.
+  let queue: Promise<void> = Promise.resolve();
+  let queued = 0;
+  let saving = false;
   const dispose = (): void => clearTimeout(timer);
-  const flush = async (): Promise<void> => {
-    dispose();
-    if (saving) await saving;
-    const value = latest;
-    if (value === saved) return status('Saved');
-    status('Saving…');
-    saving = save(value).then(
-      () => {
+  const once = async (): Promise<void> => {
+    try {
+      const value = latest;
+      if (value === saved) return status('Saved');
+      status('Saving…');
+      saving = true;
+      try {
+        await save(value);
         saved = value;
         status(latest === value ? 'Saved' : 'Unsaved changes');
-      },
-      (err: unknown) => status(`Save failed: ${(err as Error).message ?? err}`, true),
-    );
-    await saving;
-    saving = null;
+      } catch (err) {
+        status(`Save failed: ${(err as Error).message ?? err}`, true);
+      } finally {
+        saving = false;
+      }
+    } finally {
+      queued--;
+    }
+  };
+  const flush = (): Promise<void> => {
+    dispose();
+    // Start at once when nothing else is queued, so the save is sent before the page goes.
+    return (queue = queued++ === 0 ? once() : queue.then(once));
   };
   return {
     schedule(value) {
@@ -45,7 +57,8 @@ export function autosaver<T>(
     flush,
     dispose,
     get unsaved() {
-      return latest !== saved;
+      // A write in flight can still land over the latest value, e.g. after undoing back to it.
+      return saving || latest !== saved;
     },
   };
 }

@@ -160,6 +160,45 @@ describe('flushOnLeave', () => {
     expect(saves).toEqual(['b', 'b']);
   });
 
+  it('never writes twice at once when several leave events overlap', async () => {
+    const { p, hide } = page();
+    const { s, saves, settle } = saver();
+    flushOnLeave(s, p);
+    s.schedule('b');
+    hide();
+    s.schedule('c');
+    hide();
+    p.dispatchEvent(new Event('pagehide'));
+    expect(saves).toEqual(['b']);
+    settle();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(saves).toEqual(['b', 'c']);
+    settle();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(saves).toEqual(['b', 'c']);
+    expect(s.unsaved).toBe(false);
+  });
+
+  it('asks before leaving while a save is in flight, even back at the stored value', async () => {
+    const { p, beforeUnload } = page();
+    const { s, settle } = saver();
+    flushOnLeave(s, p);
+    s.schedule('b');
+    const stored = s.flush();
+    settle();
+    await stored;
+    s.schedule('c');
+    void s.flush();
+    // Undo back to the stored 'b' while 'c' is still being written.
+    s.schedule('b');
+    expect(beforeUnload()).toBe(true);
+    settle();
+    await vi.advanceTimersByTimeAsync(0);
+    settle();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(beforeUnload()).toBe(false);
+  });
+
   it('stops listening when stopped', () => {
     const { p, hide, beforeUnload } = page();
     const { s, saves } = saver();

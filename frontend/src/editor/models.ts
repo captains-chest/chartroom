@@ -85,8 +85,8 @@ export interface SnapOptions {
 export interface Autosaver<T> {
   /** `value` changed: save it once no other change follows within the delay. */
   schedule(value: T): void;
-  /** Save now if anything changed since the last save; whether the latest value is stored. */
-  flush(): Promise<boolean>;
+  /** Save now if anything changed since the last save. */
+  flush(): Promise<void>;
   /** Drop a pending save (`flush` first to keep it). */
   dispose(): void;
 }

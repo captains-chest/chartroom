@@ -3,7 +3,8 @@
 Each upload is kept as its own version, `<plan_id>.<version>.<ext>`, the version being the start
 of the image's SHA-256, and the plan points at it with `?v=<version>`. Replacing the image so
 leaves the previous one in place for the editor's Undo. Versions the stored plan no longer
-points at are pruned when the editor closes, at startup, and all of them when the plan is deleted.
+points at are pruned at startup, before any upload or save can race it, and all of them when the
+plan is deleted.
 """
 
 from __future__ import annotations
@@ -108,12 +109,17 @@ def _write(folder: Path, plan_id: str, ext: str, data: bytes) -> str:
 NEWEST = "newest"
 
 
-def _name_by_version(folder: Path, plan_id: str) -> None:
-    """Rename a file from before versions after its content, which its plan's `?v=` already is."""
+def _name_by_version(folder: Path, plan_id: str, keep: str | None) -> None:
+    """Rename a file from before versions to a version, so it keeps being served.
+
+    It answered to whatever `?v=` its plan points at, and after an Undo of a replaced image that
+    is not its content's version, so it takes the plan's version when there is one.
+    """
     legacy = _files(folder, plan_id).get(None)
     if legacy is None:
         return
-    target = legacy.with_name(f"{plan_id}.{image_version(legacy.read_bytes())}{legacy.suffix}")
+    version = keep if keep not in (None, NEWEST) else image_version(legacy.read_bytes())
+    target = legacy.with_name(f"{plan_id}.{version}{legacy.suffix}")
     if target.exists():
         legacy.unlink()
     else:
@@ -122,7 +128,7 @@ def _name_by_version(folder: Path, plan_id: str) -> None:
 
 def _prune(folder: Path, plan_id: str, keep: str | None) -> int:
     """Delete the plan's image versions other than `keep` (all with None); return how many."""
-    _name_by_version(folder, plan_id)
+    _name_by_version(folder, plan_id, keep)
     files = _files(folder, plan_id)
     if keep == NEWEST:
         newest = _find(folder, plan_id, None)

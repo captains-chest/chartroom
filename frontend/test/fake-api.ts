@@ -29,13 +29,6 @@ export class FakeApi implements ChartroomApi {
     this.emit({ plan_id: planId, deleted: false });
   }
 
-  /** Plans whose underlay images were pruned, in order. */
-  readonly pruned: string[] = [];
-
-  async pruneUnderlay(planId: string): Promise<void> {
-    this.pruned.push(planId);
-  }
-
   async subscribePlans(cb: (e: PlanEvent) => void): Promise<() => void> {
     this.#listeners.add(cb);
     return () => void this.#listeners.delete(cb);

@@ -218,16 +218,15 @@ export class PlanEditor {
     return this.#history.present;
   }
 
-  /** Flush pending saves and detach from the view; whether the plan as edited is stored. */
-  async close(): Promise<boolean> {
+  /** Flush pending saves and detach from the view. */
+  async close(): Promise<void> {
     this.#closed = true;
-    const saved = await this.#saver.flush();
+    await this.#saver.flush();
     this.#view.setDelegate(null);
     this.#view.drawOverlay();
     this.#view.setEditing(null);
     this.#view.el.removeEventListener('dragover', this.#onDragOver);
     this.#view.el.removeEventListener('drop', this.#onDrop);
-    return saved;
   }
 
   hassChanged(): void {

@@ -6,7 +6,7 @@ import { gzipSync } from 'node:zlib';
 
 const DIST = 'custom_components/chartroom/frontend';
 const BUDGET = {
-  total: 53 * 1024, // every .js file the integration serves (50 KB before multi-area rooms and plan import/export)
+  total: 54 * 1024, // every .js file the integration serves (50 KB before multi-area rooms and plan import/export, 53 KB before the separate underlay file)
   'chartroom-card.js': 20 * 1024, // the card entry plus the chunks it imports loads on every dashboard
 };
 

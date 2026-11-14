@@ -50,10 +50,15 @@ under **Settings → Areas, labels & zones** and assign your areas to them.
 - **Undo** / **Redo**: Ctrl+Z and Ctrl+Shift+Z. Undo brings back a replaced underlay image too:
   the previous images are kept until Home Assistant restarts.
 - **Plan file**: **Export** downloads the plan as `.json` (the plan as stored); **Export with
-  underlay** embeds the underlay image in it as a data URL. **Import** reads such a file (or a
-  plan made by a script) and replaces this floor's plan with it, after checking its structure
-  and validating it; problems are listed and nothing is saved. Undo brings the old plan back. An
-  imported underlay comes along only when its image is embedded (or it is already this plan's).
+  underlay** embeds the underlay image in it as a data URL. **Export with underlay file** downloads
+  the image as its own file (`chartroom-<plan>.png`, or `.jpg`, `.webp`, `.svg`) next to the
+  `.json`, which keeps the underlay's placement and names the image in `underlay_file`; the
+  browser may ask to allow the second download. **Import** reads such a file (or a plan made by a
+  script) and replaces this floor's plan with it, after checking its structure and validating it;
+  problems are listed and nothing is saved. Undo brings the old plan back. For a plan exported with
+  an underlay file, select the `.json` and the image together, under the name the `.json` gives
+  it. An imported underlay comes along only with its image (embedded or picked alongside), or when
+  it is already this plan's.
 - **Materials**: the loss per centimetre for each wall material, used by the signal heatmap.
 - The outer outline is worked out from the walls; there is no outline tool.
 - A floor with more than 512 walls or 256 devices shows a warning: the heatmaps may be slow on
@@ -326,7 +331,7 @@ for the phone layout) and `history`, which runs after the desktop tests because 
 readings far from the others' on the shared instance.
 
 The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
-(with what it shares) 20 KB gzip and everything together 53 KB gzip. The heatmap renderer, editor,
+(with what it shares) 20 KB gzip and everything together 54 KB gzip. The heatmap renderer, editor,
 mesh layer and history bar are separate chunks loaded when first used. The build squeezes the CSS,
 GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
 byte for byte.

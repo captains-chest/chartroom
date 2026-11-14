@@ -92,6 +92,8 @@ test.describe('plan files', () => {
       windows: [],
       rooms: [],
       sources: [],
+      // As the panel holds it after loading, so Undo saves back exactly this.
+      devices: [],
     });
   });
   test.afterEach(async () => {
@@ -115,6 +117,7 @@ test.describe('plan files', () => {
     expect(exported).toEqual(without(source, 'id'));
 
     // Imported over the target, it keeps the target's id and floor and takes everything else.
+    const before = await getPlan(token(), TARGET);
     const target = await openEditor(page, TARGET);
     const targetSection = await startEditing(target);
     await importFile(targetSection, file.name, file.text);
@@ -128,9 +131,9 @@ test.describe('plan files', () => {
     expect(stored['floor_id']).toBe(TARGET_FLOOR);
     expect(without(stored, 'id', 'floor_id')).toEqual(without(exported, 'floor_id'));
 
-    // Undo brings the target's own plan back.
+    // Undo brings the target's own plan back, all of it.
     await target.locator('[data-action=undo]').click();
-    await savedAs(target, TARGET, 'E2E plan file target');
+    expect(await savedAs(target, TARGET, 'E2E plan file target')).toEqual(before);
   });
 
   test('a plan is exported with its underlay and imported with the image', async ({ page }) => {

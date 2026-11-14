@@ -4,7 +4,8 @@ Each upload is kept as its own version, `<plan_id>.<version>.<ext>`, the version
 of the image's SHA-256, and the plan points at it with `?v=<version>`. Replacing the image so
 leaves the previous one in place for the editor's Undo. Versions the stored plan no longer
 points at are pruned at startup, before any upload or save can race it, and all of them when the
-plan is deleted.
+plan is deleted. An upload is written to a hidden temp file and moved into place; startup also
+deletes the temp files an interrupted upload left behind.
 """
 
 from __future__ import annotations
@@ -95,13 +96,30 @@ def _looks_like(content_type: str, data: bytes) -> bool:
     return head.startswith(b"<") and b"<svg" in head
 
 
+def _is_temp(name: str) -> bool:
+    """Whether `name` is an upload's temp file, `.<plan_id>.<version>.<ext>.tmp` (see _write)."""
+    if not (name.startswith(".") and name.endswith(".tmp")):
+        return False
+    parts = name[1:-4].split(".")
+    return (
+        len(parts) == 3
+        and PLAN_ID_RE.match(parts[0]) is not None
+        and VERSION_RE.match(parts[1]) is not None
+        and parts[2] in EXT_TYPES
+    )
+
+
 def _write(folder: Path, plan_id: str, ext: str, data: bytes) -> str:
     """Store `data` as a new version next to the plan's others; return its version."""
     folder.mkdir(parents=True, exist_ok=True)
     version = image_version(data)
     tmp = folder / f".{plan_id}.{version}.{ext}.tmp"
-    tmp.write_bytes(data)
-    tmp.replace(folder / f"{plan_id}.{version}.{ext}")
+    try:
+        tmp.write_bytes(data)
+        tmp.replace(folder / f"{plan_id}.{version}.{ext}")
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return version
 
 
@@ -159,10 +177,18 @@ async def async_prune_underlay(
 
 
 async def async_prune_underlays(hass: HomeAssistant, plans: dict[str, dict[str, Any]]) -> None:
-    """Prune every plan's images, and drop those of plans that no longer exist."""
+    """Prune every plan's images, and drop those of plans that no longer exist.
+
+    Also delete the temp files interrupted uploads left behind: none can be running yet, as
+    uploads are refused until the store is published after this (see UnderlayView.post).
+    """
 
     def prune_all(folder: Path) -> None:
-        owners = {p.name.split(".")[0] for p in folder.iterdir()} if folder.is_dir() else set()
+        names = [p.name for p in folder.iterdir()] if folder.is_dir() else []
+        for name in names:
+            if _is_temp(name) and (folder / name).is_file():
+                (folder / name).unlink(missing_ok=True)
+        owners = {name.split(".")[0] for name in names}
         for plan_id in owners | set(plans):
             if PLAN_ID_RE.match(plan_id):
                 _prune(folder, plan_id, _plan_version(plans.get(plan_id)))

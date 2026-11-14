@@ -54,6 +54,9 @@ describe('websocket api', () => {
       underlay('/api/chartroom/underlay/other'),
       { width_px: 100 },
       'https://example.com/x.png',
+      false,
+      0,
+      '',
     ]) {
       const plan = await get(u);
       expect(plan.underlay, JSON.stringify(u)).toBeNull();

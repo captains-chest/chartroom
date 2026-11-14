@@ -25,6 +25,6 @@ export function underlayPlanId(url: string): string | null {
  * integration checked the URL still loads, shows without the drawing, and saves again.
  */
 export const ownUnderlayOnly = <P extends Plan>(planId: string, plan: P): P =>
-  plan.underlay && underlayPlanId(plan.underlay.url) !== planId
+  plan.underlay != null && underlayPlanId(plan.underlay.url) !== planId
     ? { ...plan, underlay: null }
     : plan;

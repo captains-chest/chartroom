@@ -24,7 +24,7 @@ from .const import (
     VERSION,
 )
 from .store import ChartroomStore
-from .underlay import UnderlayView
+from .underlay import UnderlayView, async_prune_underlays
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 FRONTEND_DIR = Path(__file__).parent / "frontend"
@@ -56,6 +56,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store = ChartroomStore(hass)
     await store.async_load()
     hass.data[DOMAIN] = store
+    # Drop underlay images kept for an editor's Undo that a closed tab never pruned.
+    await async_prune_underlays(hass, store.plans())
 
     # Static routes cannot be removed from aiohttp, so register them once per run.
     if not hass.data.get(DATA_STATIC):

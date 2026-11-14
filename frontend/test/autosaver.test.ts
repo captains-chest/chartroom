@@ -65,7 +65,8 @@ describe('Autosaver', () => {
     expect(saves).toEqual(['b', 'c']);
     expect(statuses.slice(-2)).toEqual(['Unsaved changes', 'Saving…']);
     settle();
-    await second;
+    expect(await second).toBe(true);
+    expect(await s.flush()).toBe(true);
     expect(statuses.at(-1)).toBe('Saved');
   });
 
@@ -74,7 +75,7 @@ describe('Autosaver', () => {
     s.schedule('b');
     const done = s.flush();
     settle();
-    await done;
+    expect(await done).toBe(false);
     expect(statuses.at(-1)).toBe('!Save failed: offline');
     s.schedule('c');
     await vi.advanceTimersByTimeAsync(DELAY);

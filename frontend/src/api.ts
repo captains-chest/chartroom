@@ -19,6 +19,8 @@ export interface ChartroomApi {
   /** The stored plan, normalised, with an underlay only if it is the plan's own image. */
   getPlan(planId: string): Promise<Plan>;
   savePlan(planId: string, plan: Plan): Promise<void>;
+  /** Delete the plan's underlay images its stored plan no longer points at (kept for Undo). */
+  pruneUnderlay(planId: string): Promise<void>;
   subscribePlans(cb: (e: PlanEvent) => void): Promise<Unsubscribe>;
   mesh(): Promise<Topology>;
   info(): Promise<{ version: string }>;
@@ -35,6 +37,9 @@ export function wsApi(c: HassConnection): ChartroomApi {
     // The storage id comes with a loaded plan; it is not part of what is saved.
     savePlan: async (plan_id, { id: _id, ...plan }: Plan & { id?: string }) => {
       await send('plans/save', { plan_id, plan });
+    },
+    pruneUnderlay: async (plan_id) => {
+      await send('underlay/prune', { plan_id });
     },
     subscribePlans: async (cb) => {
       if (!c.subscribeMessage) throw new Error('no subscriptions');

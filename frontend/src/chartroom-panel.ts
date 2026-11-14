@@ -434,8 +434,11 @@ export class ChartroomPanel extends HTMLElement {
     const editor = this.#editor;
     if (!editor) return;
     this.#editor = null;
-    await editor.close();
+    const saved = await editor.close();
     this.#plan = editor.plan;
+    // Undo is over: the underlay images it could go back to are no longer needed. Not after a
+    // failed save, when the stored plan may point at another image than the one on screen.
+    if (saved && this.#planId) void this.#pruneUnderlay(this.#planId);
     this.#toolbarSlot.replaceChildren();
     this.#inspectorSlot.replaceChildren();
     this.#inspectorSlot.hidden = true;
@@ -444,6 +447,14 @@ export class ChartroomPanel extends HTMLElement {
     this.#view.setPlan(this.#plan);
     this.#controls.attach();
     this.#renderUnderlayControls();
+  }
+
+  async #pruneUnderlay(planId: string): Promise<void> {
+    try {
+      await this.#api().pruneUnderlay(planId);
+    } catch {
+      // Kept until the next time the editor closes, or Home Assistant restarts.
+    }
   }
 
   readonly #onKey = (e: KeyboardEvent): void => {

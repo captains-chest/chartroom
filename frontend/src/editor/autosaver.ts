@@ -14,11 +14,14 @@ export function autosaver<T>(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let saving: Promise<void> | null = null;
   const dispose = (): void => clearTimeout(timer);
-  const flush = async (): Promise<void> => {
+  const flush = async (): Promise<boolean> => {
     dispose();
     if (saving) await saving;
     const value = latest;
-    if (value === saved) return status('Saved');
+    if (value === saved) {
+      status('Saved');
+      return true;
+    }
     status('Saving…');
     saving = save(value).then(
       () => {
@@ -29,6 +32,7 @@ export function autosaver<T>(
     );
     await saving;
     saving = null;
+    return saved === latest;
   };
   return {
     schedule(value) {

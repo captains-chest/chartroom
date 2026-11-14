@@ -192,3 +192,88 @@ async def test_save_accepts_plan_without_schema_version(
     msg = await ws.receive_json()
     assert msg["success"]
     assert msg["result"] == {"id": "legacy", **plan}
+
+
+def _underlay(url: Any) -> dict[str, Any]:
+    return {"url": url, "width_px": 100, "height_px": 50, "scale": 0.05, "origin": [0, 0]}
+
+
+@pytest.mark.parametrize(
+    "underlay",
+    [
+        None,
+        _underlay("/api/chartroom/underlay/up"),
+        _underlay("/api/chartroom/underlay/up?v=0123456789ab"),
+    ],
+)
+async def test_save_accepts_the_plans_own_underlay(
+    hass: HomeAssistant, hass_ws_client, underlay: Any
+) -> None:
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+    plan = {"name": "Up", "underlay": underlay}
+    await ws.send_json_auto_id({"type": "chartroom/plans/save", "plan_id": "up", "plan": plan})
+    msg = await ws.receive_json()
+    assert msg["success"], msg
+    assert msg["result"] == {"id": "up", **plan}
+
+
+@pytest.mark.parametrize(
+    "underlay",
+    [
+        # Another host: the panel would send the user's token there.
+        _underlay("https://example.com/x.png"),
+        _underlay("//example.com/x.png"),
+        _underlay("@example.com/x.png"),
+        _underlay(".example.com/x.png"),
+        _underlay("https://example.com/api/chartroom/underlay/up"),
+        # Another path on Home Assistant.
+        _underlay("/api/states"),
+        _underlay("/api/chartroom/underlay/up/../../states"),
+        _underlay("/api/chartroom/underlay/../states"),
+        _underlay("/api/chartroom/underlay/up?v=1&x=https://example.com"),
+        _underlay("/api/chartroom/underlay/up?v=XYZ"),
+        _underlay("/api/chartroom/underlay/up#x"),
+        _underlay("/api/chartroom/underlay/up\n"),
+        _underlay("/api/chartroom/underlay/up?v=ab\n"),
+        _underlay("/api/chartroom/underlay/"),
+        _underlay("/api/chartroom/underlay/Up"),
+        # Another plan's image.
+        _underlay("/api/chartroom/underlay/down"),
+        _underlay("/api/chartroom/underlay/down?v=ab"),
+        # Not a URL at all.
+        _underlay(None),
+        _underlay(42),
+        {"width_px": 100},
+        "/api/chartroom/underlay/up",
+        [],
+    ],
+)
+async def test_save_rejects_any_other_underlay_url(
+    hass: HomeAssistant, hass_ws_client, hass_storage: dict[str, Any], underlay: Any
+) -> None:
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+    plan = {"name": "Up", "underlay": underlay}
+    await ws.send_json_auto_id({"type": "chartroom/plans/save", "plan_id": "up", "plan": plan})
+    msg = await ws.receive_json()
+    assert not msg["success"]
+    assert msg["error"]["code"] == "invalid_format"
+    assert hass.data[DOMAIN].get_plan("up") is None
+
+
+async def test_stored_plan_with_a_bad_underlay_still_loads(
+    hass: HomeAssistant, hass_ws_client, hass_storage: dict[str, Any]
+) -> None:
+    """A plan saved before the check keeps loading; the panel leaves its underlay out."""
+    plan = {"name": "Up", "underlay": _underlay("https://example.com/x.png")}
+    hass_storage[STORAGE_KEY] = {
+        "version": 1,
+        "key": STORAGE_KEY,
+        "data": {"plans": {"up": plan}},
+    }
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json_auto_id({"type": "chartroom/plans/get", "plan_id": "up"})
+    msg = await ws.receive_json()
+    assert msg["result"] == {"id": "up", **plan}

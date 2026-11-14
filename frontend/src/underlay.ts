@@ -3,6 +3,7 @@
 import { planBounds } from './geometry';
 import type { Hass } from './ha-types';
 import type { Plan, Underlay } from './plan/models';
+import { underlayPath, underlayPlanId } from './underlay-url';
 
 /** Longest side kept for raster images. */
 export const MAX_SIDE = 2048;
@@ -10,9 +11,6 @@ export const MAX_BYTES = 10 * 1024 * 1024;
 
 /** The image types the integration stores. */
 export const UNDERLAY_TYPES = /^image\/(png|jpeg|webp|svg\+xml)$/;
-
-export const underlayPath = (planId: string): string =>
-  `/api/chartroom/underlay/${encodeURIComponent(planId)}`;
 
 /**
  * Where a new image goes: over the existing walls when there are some (same width), otherwise
@@ -94,15 +92,19 @@ export async function uploadUnderlay(
 }
 
 /**
- * Fetch a plan's image and `show` it as a blob URL, unless `current()` says a newer load or image
- * took over meanwhile (the URL is revoked then). Failures are ignored: the plan works without it.
+ * Fetch the plan `planId`'s image and `show` it as a blob URL, unless `current()` says a newer load
+ * or image took over meanwhile (the URL is revoked then). Failures are ignored: the plan works
+ * without it. A URL that is not the plan's own image is never fetched: the fetch carries the
+ * user's token, and a plan stored before the integration checked it may point anywhere.
  */
 export async function loadUnderlay(
   hass: Hass | undefined,
+  planId: string,
   url: string,
   current: () => boolean,
   show: (blobUrl: string) => void,
 ): Promise<void> {
+  if (underlayPlanId(url) !== planId) return;
   try {
     const res = await hass?.fetchWithAuth?.(url);
     if (!res?.ok) return;

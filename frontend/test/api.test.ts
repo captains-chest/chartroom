@@ -35,6 +35,32 @@ describe('websocket api', () => {
     expect(plan).toMatchObject({ id: 'home', name: 'Home', floor_id: null, walls: [], rooms: [] });
   });
 
+  it("drops an underlay that is not the plan's own image, keeping the rest", async () => {
+    const underlay = (url: string) => ({
+      url,
+      width_px: 100,
+      height_px: 50,
+      scale: 0.05,
+      origin: [0, 0],
+      opacity: 0.5,
+    });
+    const own = underlay('/api/chartroom/underlay/home?v=0123456789ab');
+    const get = (u: unknown) =>
+      wsApi(connection({ 'chartroom/plans/get': { name: 'Home', underlay: u } }).c).getPlan('home');
+    expect((await get(own)).underlay).toEqual(own);
+    for (const u of [
+      underlay('https://example.com/x.png'),
+      underlay('/api/states'),
+      underlay('/api/chartroom/underlay/other'),
+      { width_px: 100 },
+      'https://example.com/x.png',
+    ]) {
+      const plan = await get(u);
+      expect(plan.underlay, JSON.stringify(u)).toBeNull();
+      expect(plan.name).toBe('Home');
+    }
+  });
+
   it('rejects a plan of an unknown schema version', async () => {
     const { c } = connection({ 'chartroom/plans/get': { name: 'Next', schema_version: 2 } });
     await expect(wsApi(c).getPlan('next')).rejects.toThrow('schema_version');

@@ -1,10 +1,10 @@
 // A plan as a .json file: the plan as stored (without its storage id), and optionally its underlay
 // image embedded as a data URL. A file read back in is untrusted: its structure is checked here,
 // then it goes through the same normalising and validation as a stored plan. Loaded with the editor.
-import { PLAN_ID_PATTERN } from './plan/constants';
 import { normalizePlan, validatePlan } from './plan/functions';
 import type { Plan } from './plan/models';
-import { MAX_BYTES, UNDERLAY_TYPES, underlayPath } from './underlay';
+import { MAX_BYTES, UNDERLAY_TYPES } from './underlay';
+import { underlayPlanId } from './underlay-url';
 
 /** The key that carries the embedded underlay image, next to the plan's own keys. */
 export const IMAGE_KEY = 'underlay_image';
@@ -40,18 +40,6 @@ export async function imageBlob(url: string): Promise<Blob | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * The plan whose stored image `url` is (as the upload returns it: the path, maybe `?v=<hash>`), or
- * null for any other URL. The image is fetched with the user's token, so a plan from outside must
- * not point it anywhere else.
- */
-export function underlayPlanId(url: string): string | null {
-  const prefix = underlayPath('');
-  const m =
-    url.startsWith(prefix) && /^([^/?#]+)(\?v=[0-9a-f]{1,64})?$/.exec(url.slice(prefix.length));
-  return m && PLAN_ID_PATTERN.test(m[1]!) ? m[1]! : null;
 }
 
 type Check = (v: unknown) => boolean;

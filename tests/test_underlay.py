@@ -19,7 +19,13 @@ from custom_components.chartroom.const import (
     STORAGE_VERSION,
     UNDERLAY_MAX_BYTES,
 )
-from custom_components.chartroom.underlay import _write, async_prune_underlay, underlay_dir
+from custom_components.chartroom.underlay import (
+    DATA_WRITES,
+    _write,
+    async_prune_underlay,
+    async_prune_underlays,
+    underlay_dir,
+)
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
 JPEG = b"\xff\xd8\xff\xe0" + b"\0" * 32
@@ -294,6 +300,27 @@ async def test_reload_clean_up_waits_for_uploads_in_flight(
     assert (await resp.json())["url"] == f"{URL}?v={version}"
     names = await hass.async_add_executor_job(_names, underlay_dir(hass))
     assert not [name for name in names if name.endswith(".tmp")]
+
+
+async def test_reload_skips_clean_up_when_an_upload_is_stuck(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A write that never finishes doesn't hold setup up: the clean-up is skipped this time."""
+    await _setup(hass)
+    folder: Path = underlay_dir(hass)
+
+    def seed() -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / ".ground.0123456789ab.png.tmp").write_bytes(PNG)
+
+    await hass.async_add_executor_job(seed)
+    stuck: asyncio.Future[str] = hass.loop.create_future()
+    hass.data[DATA_WRITES] = {stuck}
+    with patch("custom_components.chartroom.underlay.WRITES_TIMEOUT", 0.05):
+        await async_prune_underlays(hass, {})
+    assert ".ground.0123456789ab.png.tmp" in await hass.async_add_executor_job(_names, folder)
+    assert "skipping image clean-up" in caplog.text
+    stuck.cancel()
 
 
 async def test_startup_keeps_an_old_file_its_plan_points_past(

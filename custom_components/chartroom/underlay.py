@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import hashlib
 from http import HTTPStatus
+import logging
 from pathlib import Path
 import re
 import secrets
@@ -26,6 +27,8 @@ from homeassistant.components.http import KEY_HASS, KEY_HASS_USER, HomeAssistant
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, PLAN_ID_RE, UNDERLAY_DIR, UNDERLAY_MAX_BYTES, UNDERLAY_URL
+
+_LOGGER = logging.getLogger(__name__)
 
 UPLOAD_CHUNK_BYTES = 64 * 1024
 TYPES = {
@@ -41,6 +44,8 @@ VERSION_RE = re.compile(r"\A[0-9a-f]{12}\Z")
 TEMP_SUFFIX_RE = re.compile(r"\A[0-9a-f]{8}\Z")
 # The uploads being written, so a reload's clean-up waits for them (see UnderlayView.post).
 DATA_WRITES = f"{DOMAIN}_underlay_writes"
+# How long a reload waits for those before it skips this start's clean-up instead.
+WRITES_TIMEOUT = 30
 # Served images never run scripts, even an SVG opened directly in a tab.
 SAFE_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
@@ -196,10 +201,18 @@ async def async_prune_underlays(hass: HomeAssistant, plans: dict[str, dict[str, 
 
     Also delete the temp files interrupted uploads left behind. Uploads are refused until the
     store is published after this (see UnderlayView.post), but one that started before a reload
-    may still be writing, so wait for those first.
+    may still be writing, so wait for those first. If one is stuck, skip the clean-up this time
+    rather than hold setup (and uploads) up; the next start does it.
     """
     if writes := hass.data.get(DATA_WRITES):
-        await asyncio.wait(set(writes))
+        _, pending = await asyncio.wait(set(writes), timeout=WRITES_TIMEOUT)
+        if pending:
+            _LOGGER.warning(
+                "%d underlay upload(s) still writing after %ss; skipping image clean-up",
+                len(pending),
+                WRITES_TIMEOUT,
+            )
+            return
 
     def prune_all(folder: Path) -> None:
         names = [p.name for p in folder.iterdir()] if folder.is_dir() else []

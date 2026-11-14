@@ -136,6 +136,11 @@ export class PlanEditor {
   #s: ToolState = initialState;
   /** Set by close(), so an import still uploading its image doesn't commit afterwards. */
   #closed = false;
+  /**
+   * Imports still running (an image may be uploading), each ending with why it failed, or null.
+   * Leaving the page asks first while one runs, and close() waits for them.
+   */
+  readonly #imports = new Set<Promise<string | null>>();
   readonly #saver: Autosaver<Plan>;
   /** Stops saving on page hide/unload. */
   readonly #stopLeaveGuard: () => void;
@@ -181,7 +186,15 @@ export class PlanEditor {
       (text, error) => this.#setSaveState(text, error),
       { retryable, describe: errorText },
     );
-    this.#stopLeaveGuard = flushOnLeave(this.#saver);
+    const saver = this.#saver;
+    const imports = this.#imports;
+    // An image still uploading is unsaved work too: the plan does not point at it yet.
+    this.#stopLeaveGuard = flushOnLeave({
+      flush: () => saver.flush(),
+      get unsaved() {
+        return saver.unsaved || imports.size > 0;
+      },
+    });
     // Home Assistant's connection is back: try a failed save now rather than after its wait.
     this.#connection = host.hass()?.connection;
     this.#connection?.addEventListener?.('ready', this.#onReconnect);
@@ -243,8 +256,21 @@ export class PlanEditor {
     return this.#saver.flush();
   }
 
-  /** Flush pending saves and detach from the view. */
-  async close(): Promise<void> {
+  /**
+   * Wait for imports still running, so an image being uploaded lands in the plan, then flush
+   * pending saves and detach from the view. Resolves to why an import it waited for failed, if one
+   * did (the editor's own status is gone once it closes), or null.
+   */
+  async close(): Promise<string | null> {
+    let failed: string | null = null;
+    // Another import may start meanwhile: the editor stays usable until they are all done.
+    while (this.#imports.size > 0) {
+      this.#setSaveState('Uploading image…');
+      for (const r of await Promise.allSettled(this.#imports)) {
+        if (r.status === 'fulfilled') failed = r.value ?? failed;
+        else failed = `Import failed: ${(r.reason as Error)?.message ?? r.reason}`;
+      }
+    }
     this.#closed = true;
     this.#underlay.close();
     this.#stopLeaveGuard();
@@ -257,6 +283,14 @@ export class PlanEditor {
     this.#view.setEditing(null);
     this.#view.el.removeEventListener('dragover', this.#onDragOver);
     this.#view.el.removeEventListener('drop', this.#onDrop);
+    return failed;
+  }
+
+  /** Count an import as running until it ends (see `#imports`). */
+  #track(job: Promise<string | null>): void {
+    this.#imports.add(job);
+    const done = (): void => void this.#imports.delete(job);
+    job.then(done, done);
   }
 
   hassChanged(): void {
@@ -749,7 +783,7 @@ export class PlanEditor {
     input.addEventListener('change', () => {
       const files = [...(input.files ?? [])];
       input.value = '';
-      if (files.length > 0) void this.#importPlan(files);
+      if (files.length > 0) this.#track(this.#importPlan(files));
     });
     const report = this.#fileReport;
     return this.#section(
@@ -813,29 +847,25 @@ export class PlanEditor {
     }
   }
 
-  /** Replace the plan with a file's, after validating it; Undo brings the old one back. */
-  async #importPlan(files: File[]): Promise<void> {
+  /**
+   * Replace the plan with a file's, after validating it; Undo brings the old one back. Resolves to
+   * the problem when it was not imported.
+   */
+  async #importPlan(files: File[]): Promise<string | null> {
+    const fail = (...lines: string[]): string => (this.#report(true, lines), lines.join(' '));
     const plans = files.filter((f) => /\.json$/i.test(f.name) || f.type === 'application/json');
-    if (plans.length !== 1) {
-      this.#report(true, [`Select one .json plan file (with its underlay image, if it has one).`]);
-      return;
-    }
+    if (plans.length !== 1)
+      return fail(`Select one .json plan file (with its underlay image, if it has one).`);
     const file = plans[0]!;
-    if (file.size > MAX_FILE_BYTES) {
-      this.#report(true, [`${file.name}: the file is larger than 16 MB`]);
-      return;
-    }
+    if (file.size > MAX_FILE_BYTES) return fail(`${file.name}: the file is larger than 16 MB`);
     const r = await readPlanFile(
       await file.text(),
       this.#host.planId,
       this.plan.floor_id ?? null,
       files.filter((f) => f !== file),
     );
-    if (this.#closed) return;
-    if (!r.ok) {
-      this.#report(true, [`${file.name} was not imported:`, ...r.problems]);
-      return;
-    }
+    if (this.#closed) return null;
+    if (!r.ok) return fail(`${file.name} was not imported:`, ...r.problems);
     let plan = r.plan;
     let image: { url: string; blob: Blob } | null = null;
     if (r.image && plan.underlay) {
@@ -848,17 +878,17 @@ export class PlanEditor {
         image = { url, blob: r.image };
       } catch (err) {
         this.#setSaveState(before.text, before.error);
-        this.#report(true, [`${file.name} was not imported: ${(err as Error).message ?? err}`]);
-        return;
+        return fail(`${file.name} was not imported: ${(err as Error).message ?? err}`);
       }
     }
-    if (this.#closed) return;
+    if (this.#closed) return null;
     // Drop the old plan's selection, drafts and measurement, keeping the tool.
     this.#s = { ...initialState, tool: this.#s.tool };
     if (image) this.#underlay.set(image.url, image.blob);
     this.#commit(plan);
     this.#report(false, [`Imported ${file.name}.`, ...r.notes]);
     this.#view.fit();
+    return null;
   }
 
   #warningsPanel(): HTMLElement | null {
@@ -1137,7 +1167,7 @@ export class PlanEditor {
     });
     input.addEventListener('change', () => {
       const file = input.files?.[0];
-      if (file) void this.#importUnderlay(file);
+      if (file) this.#track(this.#importUnderlay(file));
     });
     const opacity = h('input', {
       type: 'range',
@@ -1182,17 +1212,21 @@ export class PlanEditor {
     );
   }
 
-  async #importUnderlay(file: File): Promise<void> {
+  /** Upload and place a new underlay image. Resolves to the problem when it failed. */
+  async #importUnderlay(file: File): Promise<string | null> {
     const hass = this.#host.hass();
     this.#setSaveState('Uploading image…');
     try {
       const { underlay, blob } = await importUnderlay(hass, this.#host.planId, file, this.plan);
-      if (this.#closed) return;
+      if (this.#closed) return null;
       this.#underlay.set(underlay.url, blob);
       this.#commit({ ...this.plan, underlay });
       this.#view.fit();
+      return null;
     } catch (err) {
-      this.#setSaveState(`Import failed: ${(err as Error).message ?? err}`, true);
+      const message = (err as Error).message ?? String(err);
+      this.#setSaveState(`Import failed: ${message}`, true);
+      return `The underlay image was not imported: ${message}`;
     }
   }
 

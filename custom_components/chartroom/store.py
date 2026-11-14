@@ -7,7 +7,26 @@ from typing import Any, TypedDict
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 
-from .const import STORAGE_KEY, STORAGE_VERSION
+from .const import STORAGE_KEY, STORAGE_VERSION, UNDERLAY_URL_RE
+
+
+class InvalidPlanError(ValueError):
+    """A plan the store refuses to save; the message says why."""
+
+
+def underlay_problem(plan_id: str, underlay: Any) -> str | None:
+    """Why a plan's underlay can't be saved, or None.
+
+    The panel fetches the underlay with the user's token, so its URL must be this plan's own image
+    view (as an upload returns it): no other host, no other path, and no other plan's image.
+    """
+    if underlay is None:
+        return None
+    if not isinstance(underlay, dict) or not isinstance(url := underlay.get("url"), str):
+        return "underlay must be null or an object with a url"
+    if (m := UNDERLAY_URL_RE.match(url)) is None or m["plan_id"] != plan_id:
+        return f"underlay url must be /api/chartroom/underlay/{plan_id}, optionally with ?v=<hex>"
+    return None
 
 
 class StoredData(TypedDict):
@@ -49,7 +68,13 @@ class ChartroomStore:
         return None if plan is None else {"id": plan_id, **plan}
 
     async def async_save_plan(self, plan_id: str, plan: dict[str, Any]) -> dict[str, Any]:
-        """Create or replace a plan and persist it."""
+        """Create or replace a plan and persist it.
+
+        Every write goes through here, so this is where a plan's underlay URL is checked: raises
+        InvalidPlanError (and changes nothing) if it isn't the plan's own image.
+        """
+        if problem := underlay_problem(plan_id, plan.get("underlay")):
+            raise InvalidPlanError(problem)
         self._plans[plan_id] = plan
         await self._store.async_save({"plans": self._plans})
         return {"id": plan_id, **plan}

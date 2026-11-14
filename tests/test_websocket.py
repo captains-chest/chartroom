@@ -259,6 +259,10 @@ async def test_save_rejects_any_other_underlay_url(
     msg = await ws.receive_json()
     assert not msg["success"]
     assert msg["error"]["code"] == "invalid_format"
+    assert msg["error"]["message"] in (
+        "underlay must be null or an object with a url",
+        "underlay url must be /api/chartroom/underlay/up, optionally with ?v=<hex>",
+    )
     assert hass.data[DOMAIN].get_plan("up") is None
 
 

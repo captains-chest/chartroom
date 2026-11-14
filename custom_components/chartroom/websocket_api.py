@@ -14,11 +14,10 @@ from .const import (
     PLAN_ID_RE,
     PLAN_SCHEMA_VERSION,
     SIGNAL_PLAN_CHANGED,
-    UNDERLAY_URL_RE,
     VERSION,
 )
 from .mesh import DATA_MESH_TEST, async_get_topology
-from .store import ChartroomStore
+from .store import ChartroomStore, InvalidPlanError
 from .underlay import async_remove_underlay
 
 PLAN_ID = vol.All(str, vol.Match(PLAN_ID_RE))
@@ -29,21 +28,6 @@ def _plan_schema_version(value: Any) -> int:
     if type(value) is not int or value != PLAN_SCHEMA_VERSION:
         raise vol.Invalid(f"unsupported schema_version {value!r}")
     return value
-
-
-def _underlay_problem(plan_id: str, underlay: Any) -> str | None:
-    """Why a plan's underlay can't be saved, or None.
-
-    The panel fetches the underlay with the user's token, so its URL must be this plan's own image
-    view (as an upload returns it): no other host, no other path, and no other plan's image.
-    """
-    if underlay is None:
-        return None
-    if not isinstance(underlay, dict) or not isinstance(url := underlay.get("url"), str):
-        return "underlay must be null or an object with a url"
-    if (m := UNDERLAY_URL_RE.match(url)) is None or m["plan_id"] != plan_id:
-        return f"underlay url must be /api/chartroom/underlay/{plan_id}, optionally with ?v=<hex>"
-    return None
 
 
 @callback
@@ -123,15 +107,16 @@ async def ws_save_plan(
 ) -> None:
     """Create or replace a plan (admins only).
 
-    Only the envelope and the underlay URL are checked: the plan is stored as sent, and the
-    frontend owns its schema.
+    Only the envelope and (in the store) the underlay URL are checked: the plan is stored as sent,
+    and the frontend owns its schema.
     """
     if (store := _store(hass, connection, msg["id"])) is None:
         return
-    if problem := _underlay_problem(msg["plan_id"], msg["plan"].get("underlay")):
-        connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, problem)
+    try:
+        saved = await store.async_save_plan(msg["plan_id"], msg["plan"])
+    except InvalidPlanError as err:
+        connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, str(err))
         return
-    saved = await store.async_save_plan(msg["plan_id"], msg["plan"])
     connection.send_result(msg["id"], saved)
     async_dispatcher_send(hass, SIGNAL_PLAN_CHANGED, {"plan_id": msg["plan_id"], "deleted": False})
 

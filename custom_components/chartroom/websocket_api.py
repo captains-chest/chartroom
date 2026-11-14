@@ -1,4 +1,4 @@
-"""Websocket commands: chartroom/plans/*, chartroom/underlay/prune and chartroom/mesh/*."""
+"""Websocket commands: chartroom/plans/list, get, save, delete and subscribe; chartroom/mesh/*."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from .const import (
 )
 from .mesh import DATA_MESH_TEST, async_get_topology
 from .store import ChartroomStore
-from .underlay import async_prune_underlay, async_remove_underlay
+from .underlay import async_remove_underlay
 
 PLAN_ID = vol.All(str, vol.Match(PLAN_ID_RE))
 
@@ -55,7 +55,6 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_save_plan)
     websocket_api.async_register_command(hass, ws_delete_plan)
     websocket_api.async_register_command(hass, ws_subscribe_plans)
-    websocket_api.async_register_command(hass, ws_prune_underlay)
     websocket_api.async_register_command(hass, ws_get_mesh)
     websocket_api.async_register_command(hass, ws_test_mesh)
 
@@ -154,25 +153,6 @@ async def ws_delete_plan(
     await async_remove_underlay(hass, msg["plan_id"])
     connection.send_result(msg["id"], {"deleted": msg["plan_id"]})
     async_dispatcher_send(hass, SIGNAL_PLAN_CHANGED, {"plan_id": msg["plan_id"], "deleted": True})
-
-
-@websocket_api.websocket_command(
-    {vol.Required("type"): "chartroom/underlay/prune", vol.Required("plan_id"): PLAN_ID}
-)
-@websocket_api.require_admin
-@websocket_api.async_response
-async def ws_prune_underlay(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
-) -> None:
-    """Delete the plan's underlay images its stored plan no longer points at (admins only).
-
-    The editor keeps replaced images for Undo, and sends this when it closes.
-    """
-    if (store := _store(hass, connection, msg["id"])) is None:
-        return
-    plan = store.get_plan(msg["plan_id"])
-    removed = await async_prune_underlay(hass, msg["plan_id"], plan)
-    connection.send_result(msg["id"], {"removed": removed})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "chartroom/plans/subscribe"})

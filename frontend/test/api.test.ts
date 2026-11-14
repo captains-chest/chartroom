@@ -86,12 +86,6 @@ describe('websocket api', () => {
     expect(subscribeMessage).toHaveBeenCalledWith(cb, { type: 'chartroom/plans/subscribe' });
   });
 
-  it('asks to prune the underlay images a plan no longer points at', async () => {
-    const { c, sent } = connection();
-    await wsApi(c).pruneUnderlay('home');
-    expect(sent).toEqual([{ type: 'chartroom/underlay/prune', plan_id: 'home' }]);
-  });
-
   it('rejects a subscription the connection cannot make', async () => {
     await expect(wsApi(connection().c).subscribePlans(() => {})).rejects.toThrow();
   });

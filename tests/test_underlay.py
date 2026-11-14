@@ -15,7 +15,7 @@ from custom_components.chartroom.const import (
     STORAGE_VERSION,
     UNDERLAY_MAX_BYTES,
 )
-from custom_components.chartroom.underlay import underlay_dir
+from custom_components.chartroom.underlay import async_prune_underlay, underlay_dir
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
 JPEG = b"\xff\xd8\xff\xe0" + b"\0" * 32
@@ -100,7 +100,7 @@ async def test_undo_finds_the_replaced_image(hass: HomeAssistant, hass_client) -
 
 
 async def test_prune_keeps_the_saved_plans_image(
-    hass: HomeAssistant, hass_client, hass_ws_client, hass_read_only_access_token
+    hass: HomeAssistant, hass_client, hass_ws_client
 ) -> None:
     await _setup(hass)
     client = await hass_client()
@@ -118,13 +118,12 @@ async def test_prune_keeps_the_saved_plans_image(
         )
         assert (await ws.receive_json())["success"]
 
-    async def prune() -> dict:
-        await ws.send_json_auto_id({"type": "chartroom/underlay/prune", "plan_id": "ground"})
-        return await ws.receive_json()
+    async def prune() -> int:
+        return await async_prune_underlay(hass, "ground", hass.data[DOMAIN].get_plan("ground"))
 
     # Undone back to the first image: the second goes.
     await save({"url": first["url"]})
-    assert (await prune())["result"] == {"removed": 1}
+    assert await prune() == 1
     assert (await client.get(first["url"])).status == 200
     assert (await client.get(second["url"])).status == 404
     assert len(await hass.async_add_executor_job(_names, folder)) == 1
@@ -132,24 +131,19 @@ async def test_prune_keeps_the_saved_plans_image(
     # A URL without a version keeps the newest image.
     await client.post(URL, data=JPEG, headers={"Content-Type": "image/jpeg"})
     await save({"url": URL})
-    assert (await prune())["result"] == {"removed": 1}
+    assert await prune() == 1
     assert (await client.get(URL)).headers["Content-Type"] == "image/jpeg"
 
     # The underlay removed: nothing is kept.
     await save(None)
-    assert (await prune())["result"] == {"removed": 1}
+    assert await prune() == 1
     assert await hass.async_add_executor_job(_names, folder) == []
-
-    # Admins only.
-    reader = await hass_ws_client(hass, hass_read_only_access_token)
-    await reader.send_json_auto_id({"type": "chartroom/underlay/prune", "plan_id": "ground"})
-    assert (await reader.receive_json())["error"]["code"] == "unauthorized"
 
 
 async def test_startup_prunes_and_names_old_files_by_version(
     hass: HomeAssistant, hass_storage: dict
 ) -> None:
-    """Images a closed tab never pruned go at startup; a file from before versions is kept."""
+    """Images kept for Undo go at startup; a file from before versions is kept."""
     folder: Path = underlay_dir(hass)
     version = hashlib.sha256(PNG).hexdigest()[:12]
 
@@ -168,6 +162,35 @@ async def test_startup_prunes_and_names_old_files_by_version(
     }
     await _setup(hass)
     assert await hass.async_add_executor_job(_names, folder) == [f"ground.{version}.png"]
+
+
+async def test_startup_keeps_an_old_file_its_plan_points_past(
+    hass: HomeAssistant, hass_client, hass_storage: dict
+) -> None:
+    """A file from before versions keeps answering to the plan's `?v=`, even another image's.
+
+    Replacing the image and then Undo used to save the old image's version while the file held
+    the new one; the file was served for any version, so it must not be pruned as unreferenced.
+    """
+    folder: Path = underlay_dir(hass)
+    other = hashlib.sha256(JPEG).hexdigest()[:12]
+
+    def seed() -> None:
+        folder.mkdir(parents=True)
+        (folder / "ground.png").write_bytes(PNG)
+
+    await hass.async_add_executor_job(seed)
+    plan = {"name": "Ground", "underlay": {"url": f"{URL}?v={other}"}}
+    hass_storage[STORAGE_KEY] = {
+        "version": STORAGE_VERSION,
+        "key": STORAGE_KEY,
+        "data": {"plans": {"ground": plan}},
+    }
+    await _setup(hass)
+    assert await hass.async_add_executor_job(_names, folder) == [f"ground.{other}.png"]
+    resp = await (await hass_client()).get(f"{URL}?v={other}")
+    assert resp.status == 200
+    assert await resp.read() == PNG
 
 
 async def test_rejects_bad_uploads(hass: HomeAssistant, hass_client) -> None:

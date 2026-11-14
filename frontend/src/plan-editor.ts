@@ -317,7 +317,7 @@ export class PlanEditor {
       this.#note = '';
       this.#fileReport = null;
     }
-    if (r.commit && this.#history.commit(r.commit)) this.#afterChange();
+    if (r.commit && !this.#closed && this.#history.commit(r.commit)) this.#afterChange();
     else if (next !== prev) this.#render();
     return !r.pass;
   }
@@ -332,18 +332,20 @@ export class PlanEditor {
 
   // ---- history and saving ----
 
+  // Once closing has begun (the final save is under way), the plan no longer changes: a later
+  // edit would be saved after close, maybe as another plan once the panel moves on.
   #commit(next: Plan): void {
-    if (this.#history.commit(next)) this.#afterChange();
+    if (!this.#closed && this.#history.commit(next)) this.#afterChange();
   }
 
   undo(): void {
-    if (this.#history.undo() === undefined) return;
+    if (this.#closed || this.#history.undo() === undefined) return;
     this.#dropStaleSelection();
     this.#afterChange();
   }
 
   redo(): void {
-    if (this.#history.redo() === undefined) return;
+    if (this.#closed || this.#history.redo() === undefined) return;
     this.#dropStaleSelection();
     this.#afterChange();
   }
@@ -783,7 +785,7 @@ export class PlanEditor {
     input.addEventListener('change', () => {
       const files = [...(input.files ?? [])];
       input.value = '';
-      if (files.length > 0) this.#track(this.#importPlan(files));
+      if (files.length > 0 && !this.#closed) this.#track(this.#importPlan(files));
     });
     const report = this.#fileReport;
     return this.#section(
@@ -1167,7 +1169,7 @@ export class PlanEditor {
     });
     input.addEventListener('change', () => {
       const file = input.files?.[0];
-      if (file) this.#track(this.#importUnderlay(file));
+      if (file && !this.#closed) this.#track(this.#importUnderlay(file));
     });
     const opacity = h('input', {
       type: 'range',

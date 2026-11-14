@@ -89,4 +89,6 @@ export interface Autosaver<T> {
   flush(): Promise<void>;
   /** Drop a pending save (`flush` first to keep it). */
   dispose(): void;
+  /** A change is not stored yet: waiting for the delay, being saved, or its save failed. */
+  readonly unsaved: boolean;
 }

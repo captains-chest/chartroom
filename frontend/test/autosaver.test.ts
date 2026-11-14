@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import { autosaver } from '../src/editor/autosaver';
+import { autosaver, flushOnLeave, type Page } from '../src/editor/autosaver';
 
 const DELAY = 600;
 
@@ -86,6 +86,88 @@ describe('Autosaver', () => {
     s.schedule('b');
     s.dispose();
     await vi.advanceTimersByTimeAsync(DELAY * 2);
+    expect(saves).toEqual([]);
+  });
+});
+
+/** A stand-in for `window`: page events, and a document that can be hidden. */
+function page() {
+  const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  const hide = (): void => {
+    document.visibilityState = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+  /** Whether the browser would ask before leaving. */
+  const beforeUnload = (): boolean => {
+    const e = new Event('beforeunload', { cancelable: true });
+    p.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+  const p: Page = Object.assign(new EventTarget(), { document });
+  return { p, hide, beforeUnload };
+}
+
+describe('flushOnLeave', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('saves a change still waiting for the delay when the page is hidden or unloaded', async () => {
+    const { p, hide } = page();
+    const { s, saves, settle } = saver();
+    flushOnLeave(s, p);
+    s.schedule('b');
+    hide();
+    expect(saves).toEqual(['b']);
+    settle();
+    s.schedule('c');
+    p.dispatchEvent(new Event('pagehide'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(saves).toEqual(['b', 'c']);
+  });
+
+  it('ignores the page becoming visible, and nothing to save', () => {
+    const { p, hide } = page();
+    const { s, saves } = saver();
+    flushOnLeave(s, p);
+    p.document.dispatchEvent(new Event('visibilitychange'));
+    s.schedule('b');
+    p.document.dispatchEvent(new Event('visibilitychange'));
+    expect(saves).toEqual([]);
+    s.schedule('a');
+    hide();
+    expect(saves).toEqual([]);
+  });
+
+  it('asks before leaving only while a change is not stored', async () => {
+    const { p, beforeUnload } = page();
+    const { s, saves, settle } = saver(true);
+    flushOnLeave(s, p);
+    expect(beforeUnload()).toBe(false);
+    s.schedule('b');
+    // Sent at once, but not stored yet.
+    expect(beforeUnload()).toBe(true);
+    expect(saves).toEqual(['b']);
+    settle();
+    await vi.advanceTimersByTimeAsync(0);
+    // The save failed: still ask, and try again.
+    expect(s.unsaved).toBe(true);
+    expect(beforeUnload()).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(saves).toEqual(['b', 'b']);
+  });
+
+  it('stops listening when stopped', () => {
+    const { p, hide, beforeUnload } = page();
+    const { s, saves } = saver();
+    flushOnLeave(s, p)();
+    s.schedule('b');
+    hide();
+    p.dispatchEvent(new Event('pagehide'));
+    expect(beforeUnload()).toBe(false);
     expect(saves).toEqual([]);
   });
 });

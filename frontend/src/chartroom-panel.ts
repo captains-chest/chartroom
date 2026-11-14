@@ -206,7 +206,9 @@ export class ChartroomPanel extends HTMLElement {
   }
 
   // Home Assistant may detach the panel and attach it again: release the layers meanwhile.
+  // An open editor stays open, but its pending change is saved now rather than after the delay.
   disconnectedCallback(): void {
+    void this.#editor?.flush();
     window.removeEventListener('keydown', this.#onKey);
     this.#viewer.disconnect();
   }

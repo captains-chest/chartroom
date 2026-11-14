@@ -11,7 +11,9 @@ The first release.
 - A sidebar panel with one tab per Home Assistant floor, pan and zoom, and a dashboard card
   (`custom:chartroom-card`) registered by the integration, with no separate resource to add.
 - An editor for walls, rooms, doors, windows and sensor/signal sources, with undo, snapping and
-  floor tabs. Plans are stored in Home Assistant and update open panels and cards live.
+  floor tabs. Plans are stored in Home Assistant and update open panels and cards live. Edits
+  save a moment after each change, and at once when the page is hidden, closed or left; the
+  browser asks before leaving while a change is still not stored.
 - A home without Home Assistant floors gets one **Home** plan covering every area, with a link
   to create floors for one plan each.
 - An optional underlay image per plan (uploaded by an admin, downscaled in the browser),

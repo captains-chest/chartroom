@@ -3,7 +3,7 @@
 import { autoPlace, deviceChoices, deviceLook } from './devices';
 import { add, dist, frame, roundToMm, polygonArea } from './geometry';
 import type { Hass } from './ha-types';
-import { autosaver } from './editor/autosaver';
+import { autosaver, flushOnLeave } from './editor/autosaver';
 import { findItem, kindOps, titleOf } from './editor/kinds';
 import { areaName, roomNameForAreas } from './editor/rooms';
 import type {
@@ -136,6 +136,8 @@ export class PlanEditor {
   /** Set by close(), so an import still uploading its image doesn't commit afterwards. */
   #closed = false;
   readonly #saver: Autosaver<Plan>;
+  /** Stops saving on page hide/unload. */
+  readonly #stopLeaveGuard: () => void;
   readonly #saveState: HTMLElement;
   readonly #hint: HTMLElement;
   readonly #undoButton: HTMLButtonElement;
@@ -174,6 +176,7 @@ export class PlanEditor {
       host.plan,
       (text, error) => this.#setSaveState(text, error),
     );
+    this.#stopLeaveGuard = flushOnLeave(this.#saver);
     // The panel may already have loaded the picture.
     this.#underlayUrl = host.view.underlayUrl;
     this.#underlay = new UnderlayImage(
@@ -227,10 +230,16 @@ export class PlanEditor {
     return this.#history.present;
   }
 
+  /** Save any pending change now, without closing (the panel left the page). */
+  flush(): Promise<void> {
+    return this.#saver.flush();
+  }
+
   /** Flush pending saves and detach from the view. */
   async close(): Promise<void> {
     this.#closed = true;
     this.#underlay.close();
+    this.#stopLeaveGuard();
     await this.#saver.flush();
     this.#view.setDelegate(null);
     this.#view.drawOverlay();

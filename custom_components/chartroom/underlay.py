@@ -20,7 +20,7 @@ from aiohttp import web
 from homeassistant.components.http import KEY_HASS, KEY_HASS_USER, HomeAssistantView
 from homeassistant.core import HomeAssistant
 
-from .const import PLAN_ID_RE, UNDERLAY_DIR, UNDERLAY_MAX_BYTES, UNDERLAY_URL
+from .const import DOMAIN, PLAN_ID_RE, UNDERLAY_DIR, UNDERLAY_MAX_BYTES, UNDERLAY_URL
 
 UPLOAD_CHUNK_BYTES = 64 * 1024
 TYPES = {
@@ -203,6 +203,9 @@ class UnderlayView(HomeAssistantView):
         except UploadError as err:
             return self.json_message(err.message, err.status)
         hass = request.app[KEY_HASS]
+        # Not while (re)loading: startup prunes the images the stored plans don't point at.
+        if DOMAIN not in hass.data:
+            return self.json_message("Chartroom is not set up", HTTPStatus.SERVICE_UNAVAILABLE)
         version = await hass.async_add_executor_job(_write, underlay_dir(hass), plan_id, ext, body)
         return self.json(
             {"url": f"{UNDERLAY_URL.format(plan_id=plan_id)}?v={version}", "bytes": len(body)}

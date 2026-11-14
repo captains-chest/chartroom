@@ -3,6 +3,7 @@
 import hashlib
 from pathlib import Path
 import shutil
+from unittest.mock import patch
 
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
@@ -191,6 +192,29 @@ async def test_startup_keeps_an_old_file_its_plan_points_past(
     resp = await (await hass_client()).get(f"{URL}?v={other}")
     assert resp.status == 200
     assert await resp.read() == PNG
+
+
+async def test_no_upload_or_save_while_pruning(
+    hass: HomeAssistant, hass_client, hass_ws_client
+) -> None:
+    """Startup prunes before saves and uploads can name an image it is about to delete."""
+    seen: list[bool] = []
+
+    async def prune(hass: HomeAssistant, plans: dict) -> None:
+        seen.append(DOMAIN in hass.data)
+
+    with patch("custom_components.chartroom.async_prune_underlays", prune):
+        await _setup(hass)
+    assert seen == [False]
+
+    # Reloading: the upload view stays registered, but refuses until the store is back.
+    client = await hass_client()
+    store = hass.data.pop(DOMAIN)
+    resp = await client.post(URL, data=PNG, headers={"Content-Type": "image/png"})
+    assert resp.status == 503
+    assert await hass.async_add_executor_job(_names, underlay_dir(hass)) == []
+    hass.data[DOMAIN] = store
+    assert (await client.post(URL, data=PNG, headers={"Content-Type": "image/png"})).status == 200
 
 
 async def test_rejects_bad_uploads(hass: HomeAssistant, hass_client) -> None:

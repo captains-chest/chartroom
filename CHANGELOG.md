@@ -27,7 +27,8 @@ The first release.
 - Export a plan as a `.json` file, optionally with its underlay image embedded or saved as its own
   image file next to it, and import one (with that image file) over the current floor's plan.
   An image file the browser renamed on download is still taken when it is the only one picked
-  and of the same type. Imports are checked and validated before anything is saved, and Undo brings the old plan back.
+  and of the same type; when its type differs, the import says which type each is. Imports are
+  checked and validated before anything is saved, and Undo brings the old plan back.
 
 ### Devices
 
@@ -71,4 +72,4 @@ The first release.
 ### Requirements
 
 - Home Assistant 2026.10 or newer. No Python requirements and no runtime JavaScript
-  dependencies. Frontend: 14.78 KB gzip for the card, 54.43 KB gzip in total.
+  dependencies. Frontend: 14.78 KB gzip for the card, 54.51 KB gzip in total.

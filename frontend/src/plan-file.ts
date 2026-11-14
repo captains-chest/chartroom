@@ -44,6 +44,15 @@ const TYPE_OF_EXTENSION: Record<string, string> = {
   jpeg: 'image/jpeg',
 };
 
+/** Each underlay image type as people name it, with its article. */
+const TYPE_NAMES: Record<string, string> = {
+  'image/png': 'a PNG',
+  'image/jpeg': 'a JPEG',
+  'image/webp': 'a WebP',
+  'image/svg+xml': 'an SVG',
+};
+const typeName = (type: string): string => TYPE_NAMES[type] ?? type;
+
 /** A download name for the plan's underlay image of `type`, or null for a type it can't be. */
 export function underlayFileName(planId: string, type: string): string | null {
   const ext = EXTENSIONS[type];
@@ -249,7 +258,8 @@ export async function readPlanFile(
  * upload: an underlay type by its extension, at most 10 MB, and bytes that are that type. A
  * problem as a string otherwise. The name only picks a file the user chose; nothing is fetched.
  * Browsers rename a repeat download (`chartroom-home (1).png`), so when no file has the name but
- * exactly one image is picked, of the named file's type, that one is taken.
+ * exactly one image is picked, of the named file's type, that one is taken; of another type, the
+ * problem says which type each is.
  */
 async function imageFile(
   name: unknown,
@@ -262,10 +272,15 @@ async function imageFile(
   const file =
     files.find((f) => f.name === name) ??
     (images.length === 1 && imageTypeOfName(images[0]!.name) === type ? images[0] : undefined);
-  if (!file)
-    return files.length === 0
-      ? `the underlay image ${name} is missing: select it together with the .json file`
-      : `the underlay image ${name} is not among the selected files (${files.map((f) => f.name).join(', ')})`;
+  if (!file) {
+    if (files.length === 0)
+      return `the underlay image ${name} is missing: select it together with the .json file`;
+    // The only image picked, of another type: say so, rather than that it was not picked.
+    const only = images.length === 1 ? images[0]! : null;
+    if (only)
+      return `${only.name} is ${typeName(imageTypeOfName(only.name)!)}; the plan names ${typeName(type)} (${name})`;
+    return `the underlay image ${name} is not among the selected files (${files.map((f) => f.name).join(', ')})`;
+  }
   if (file.size > MAX_BYTES) return `${file.name} is larger than 10 MB`;
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (!looksLike(type, bytes))

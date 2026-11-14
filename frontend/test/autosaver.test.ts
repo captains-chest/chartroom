@@ -217,6 +217,38 @@ describe('Autosaver retries', () => {
     expect(late.saves).toEqual(['b']);
   });
 
+  it("drops a retry once a later attempt in the queue starts, even if that one can't be retried", async () => {
+    const saves: string[] = [];
+    const errors: unknown[] = [new Error('offline'), { code: 'invalid_format', message: 'bad' }];
+    const s = autosaver<string>(
+      async (v) => {
+        saves.push(v);
+        await Promise.resolve();
+        throw errors.shift();
+      },
+      DELAY,
+      'a',
+      () => {},
+      { retryable: (err) => (err as { code?: string }).code !== 'invalid_format' },
+    );
+    s.schedule('b');
+    void s.flush();
+    s.schedule('c');
+    void s.flush();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(saves).toEqual(['b', 'c']);
+  });
+
+  it('saves at once on an edit while a failed save waits to retry', async () => {
+    const { s, saves } = flaky();
+    s.schedule('b');
+    await vi.advanceTimersByTimeAsync(DELAY);
+    expect(saves).toEqual(['b']);
+    s.schedule('c');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(saves).toEqual(['b', 'c']);
+  });
+
   it('sends retries through the same queue, one save at a time, with the latest value', async () => {
     const { s, saves, statuses, state } = flaky();
     s.schedule('b');

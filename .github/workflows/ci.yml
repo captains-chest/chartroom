@@ -16,6 +16,7 @@ permissions:
   contents: read
 
 env:
+  # The Home Assistant image the latest end-to-end run uses. The minimum run uses hacs.json's.
   HA_VERSION: '2026.10.3'
 
 jobs:
@@ -69,9 +70,22 @@ jobs:
         run: pnpm size
 
   python:
-    name: Python
+    name: Python (${{ matrix.ha }} HA)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # uv.lock: the newest Home Assistant pytest-homeassistant-custom-component supports.
+          - ha: latest
+          # hacs.json's minimum, installed over the locked environment. Each
+          # pytest-homeassistant-custom-component release pins one Home Assistant release, and
+          # home-assistant-frontend must be the one that release pins (its package_constraints.txt).
+          # Move these with hacs.json; the version check below fails until they match.
+          - ha: minimum
+            phcc: '0.13.371'
+            frontend: '20260930.2'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -85,10 +99,36 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --group test --group lint --no-install-project
 
+      - name: Install the minimum Home Assistant
+        if: matrix.ha == 'minimum'
+        env:
+          PHCC: ${{ matrix.phcc }}
+          FRONTEND: ${{ matrix.frontend }}
+        run: |
+          uv pip install --python .venv \
+            "pytest-homeassistant-custom-component==$PHCC" "home-assistant-frontend==$FRONTEND"
+
+      - name: Home Assistant is hacs.json's minimum
+        if: matrix.ha == 'minimum'
+        run: |
+          uv run --no-sync python - <<'PY'
+          import json
+
+          from homeassistant.const import __version__
+
+          minimum = json.load(open("hacs.json"))["homeassistant"]
+          print(f"Home Assistant {__version__}, hacs.json minimum {minimum}")
+          if __version__ != minimum:
+              print(f"::error::Home Assistant {__version__} is not hacs.json's minimum {minimum}")
+              raise SystemExit(1)
+          PY
+
       - name: Ruff lint
+        if: matrix.ha == 'latest'
         run: uv run --no-sync ruff check --output-format github .
 
       - name: Ruff format
+        if: matrix.ha == 'latest'
         run: uv run --no-sync ruff format --check .
 
       - name: Tests (pytest-homeassistant-custom-component)
@@ -133,9 +173,14 @@ jobs:
           ignore: brands
 
   e2e:
-    name: End-to-end
+    name: End-to-end (${{ matrix.ha }} HA)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # latest: HA_VERSION. minimum: hacs.json's.
+        ha: [latest, minimum]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -147,13 +192,17 @@ jobs:
           cache: true
 
       - name: Start Home Assistant with Chartroom
+        env:
+          HA: ${{ matrix.ha }}
         run: |
+          if [ "$HA" = minimum ]; then tag=$(jq -r .homeassistant hacs.json); else tag=$HA_VERSION; fi
+          echo "Home Assistant $tag"
           mkdir -p .ci/ha-config/custom_components
           cp .ci/configuration.yaml .ci/ha-config/
           cp -r custom_components/chartroom .ci/ha-config/custom_components/
           docker run -d --name ha -p 127.0.0.1:8123:8123 -e TZ=Europe/Copenhagen \
             -v "$PWD/.ci/ha-config:/config" \
-            "ghcr.io/home-assistant/home-assistant:${HA_VERSION}"
+            "ghcr.io/home-assistant/home-assistant:${tag}"
 
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
@@ -171,13 +220,14 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.ha }}-ha
           path: |
             playwright-report/
             test-results/
           retention-days: 7
 
   # Single required status check for the main ruleset (mirrors captains-chest/floor-planner).
+  # A matrix job's result is success only if every entry succeeded.
   ci:
     name: CI
     if: always()

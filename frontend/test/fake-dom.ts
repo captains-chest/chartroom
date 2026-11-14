@@ -2,7 +2,7 @@
 // keep attributes, children and listeners; nothing is laid out or rendered.
 type Listener = (e: unknown) => void;
 
-class FakeElement {
+export class FakeElement {
   readonly tagName: string;
   readonly attributes = new Map<string, string>();
   readonly classList: {
@@ -94,9 +94,59 @@ class FakeElement {
   removeEventListener(type: string, fn: Listener): void {
     this.listeners.get(type)?.delete(fn);
   }
+  /** Calls the listeners for `e.type` (no bubbling); one may remove itself meanwhile. */
+  dispatchEvent(e: { type: string }): boolean {
+    for (const fn of Array.from(this.listeners.get(e.type) ?? [])) fn(e);
+    return true;
+  }
+
+  shadowRoot: FakeElement | null = null;
+  attachShadow(): FakeElement {
+    return (this.shadowRoot = new FakeElement('#shadow-root'));
+  }
 }
 
-/** Install the fake `document`, `ResizeObserver`, `CSS` and `window` globals (idempotent). */
+/** The base class custom elements extend: a fake element named after its registered tag. */
+class FakeHTMLElement extends FakeElement {
+  constructor() {
+    super('custom-element');
+  }
+}
+
+/** An EventTarget that can tell which listeners are on, like the page the editor listens to. */
+export class FakeEventTarget extends EventTarget {
+  readonly #on = new Map<string, Set<unknown>>();
+
+  override addEventListener(
+    type: string,
+    fn: EventListenerOrEventListenerObject | null,
+    options?: AddEventListenerOptions | boolean,
+  ): void {
+    if (fn) (this.#on.get(type) ?? this.#on.set(type, new Set()).get(type)!).add(fn);
+    super.addEventListener(type, fn, options);
+  }
+
+  override removeEventListener(
+    type: string,
+    fn: EventListenerOrEventListenerObject | null,
+    options?: EventListenerOptions | boolean,
+  ): void {
+    this.#on.get(type)?.delete(fn);
+    super.removeEventListener(type, fn, options);
+  }
+
+  /** How many listeners for `type` are on. */
+  listening(type: string): number {
+    return this.#on.get(type)?.size ?? 0;
+  }
+}
+
+/** The fake `window`: the page and its document, with listeners that can be counted. */
+export type FakePage = FakeEventTarget & {
+  document: FakeEventTarget & { visibilityState: string };
+};
+
+/** Install the fake `document`, `ResizeObserver`, `CSS`, `window` and custom-element globals (idempotent). */
 export function installFakeDom(): void {
   const g = globalThis as Record<string, unknown>;
   g['document'] ??= {
@@ -110,7 +160,43 @@ export function installFakeDom(): void {
   // The plan view re-selects by id after a redraw.
   g['CSS'] ??= { escape: (s: string) => s };
   // The page the editor listens to for leaving (flushOnLeave).
-  g['window'] ??= Object.assign(new EventTarget(), {
-    document: Object.assign(new EventTarget(), { visibilityState: 'visible' }),
+  g['window'] ??= Object.assign(new FakeEventTarget(), {
+    document: Object.assign(new FakeEventTarget(), { visibilityState: 'visible' }),
   });
+  // What the panel, a custom element, needs from the page.
+  g['HTMLElement'] ??= FakeHTMLElement;
+  if (!g['customElements']) {
+    const defined = new Map<string, unknown>();
+    g['customElements'] = {
+      get: (name: string) => defined.get(name),
+      define: (name: string, ctor: unknown) => void defined.set(name, ctor),
+    };
+  }
+  // Node's own localStorage needs a file to keep it in: an in-memory one instead.
+  // (Read the property's descriptor: reading Node's getter warns.)
+  if (
+    !(Object.getOwnPropertyDescriptor(globalThis, 'localStorage')?.value instanceof FakeStorage)
+  ) {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: new FakeStorage(),
+      configurable: true,
+      writable: true,
+    });
+  }
+}
+
+class FakeStorage {
+  readonly #items = new Map<string, string>();
+  getItem(k: string): string | null {
+    return this.#items.get(k) ?? null;
+  }
+  setItem(k: string, v: string): void {
+    this.#items.set(k, String(v));
+  }
+  removeItem(k: string): void {
+    this.#items.delete(k);
+  }
+  clear(): void {
+    this.#items.clear();
+  }
 }

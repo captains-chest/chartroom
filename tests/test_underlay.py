@@ -16,7 +16,7 @@ from custom_components.chartroom.const import (
     STORAGE_VERSION,
     UNDERLAY_MAX_BYTES,
 )
-from custom_components.chartroom.underlay import async_prune_underlay, underlay_dir
+from custom_components.chartroom.underlay import _write, async_prune_underlay, underlay_dir
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
 JPEG = b"\xff\xd8\xff\xe0" + b"\0" * 32
@@ -163,6 +163,48 @@ async def test_startup_prunes_and_names_old_files_by_version(
     }
     await _setup(hass)
     assert await hass.async_add_executor_job(_names, folder) == [f"ground.{version}.png"]
+
+
+async def test_startup_deletes_leftover_temp_files(hass: HomeAssistant, hass_storage: dict) -> None:
+    """An upload interrupted mid-write leaves its temp file; startup deletes only those."""
+    folder: Path = underlay_dir(hass)
+    version = hashlib.sha256(PNG).hexdigest()[:12]
+    others = ["notes.tmp", ".ground.backup.tmp", ".Ground.0123456789ab.png.tmp"]
+
+    def seed() -> None:
+        folder.mkdir(parents=True)
+        (folder / f"ground.{version}.png").write_bytes(PNG)
+        (folder / f".ground.{version}.png.tmp").write_bytes(PNG[:8])
+        (folder / ".gone.0123456789ab.svg.tmp").write_bytes(SVG[:8])
+        for name in others:
+            (folder / name).write_bytes(b"")
+
+    await hass.async_add_executor_job(seed)
+    plan = {"name": "Ground", "underlay": {"url": f"{URL}?v={version}"}}
+    hass_storage[STORAGE_KEY] = {
+        "version": STORAGE_VERSION,
+        "key": STORAGE_KEY,
+        "data": {"plans": {"ground": plan}},
+    }
+    await _setup(hass)
+    assert await hass.async_add_executor_job(_names, folder) == sorted(
+        [f"ground.{version}.png", *others]
+    )
+
+
+@pytest.mark.parametrize("step", ["write_bytes", "replace"])
+def test_failed_write_leaves_no_temp_file(tmp_path: Path, step: str) -> None:
+    """A write that fails part way, or a move that fails, deletes its temp file."""
+    original = getattr(Path, step)
+
+    def fail(self: Path, *args, **kwargs):
+        if step == "write_bytes":
+            original(self, args[0][:8])
+        raise OSError("disk full")
+
+    with patch.object(Path, step, fail), pytest.raises(OSError, match="disk full"):
+        _write(tmp_path, "ground", "png", PNG)
+    assert _names(tmp_path) == []
 
 
 async def test_startup_keeps_an_old_file_its_plan_points_past(

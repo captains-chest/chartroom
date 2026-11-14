@@ -58,7 +58,7 @@ under **Settings → Areas, labels & zones** and assign your areas to them.
   problems are listed and nothing is saved. Undo brings the old plan back. For a plan exported with
   an underlay file, select the `.json` and the image together; if the browser renamed the image
   (`chartroom-home (1).png`), the one image picked is taken as long as its type matches, with a
-  note saying so. An imported underlay comes along only with its image (embedded or picked alongside), or when
+  note saying so; otherwise the problem says which type each is. An imported underlay comes along only with its image (embedded or picked alongside), or when
   it is already this plan's.
 - **Materials**: the loss per centimetre for each wall material, used by the signal heatmap.
 - The outer outline is worked out from the walls; there is no outline tool.

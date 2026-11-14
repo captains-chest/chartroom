@@ -304,16 +304,34 @@ describe('underlay as a separate file', () => {
     ]);
   });
 
-  it('rejects the only image picked when its type is not the named one', async () => {
+  it('rejects the only image picked when its type is not the named one, saying why', async () => {
     const jpg = 'chartroom-floor_ground.jpg';
     const jpeg = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], jpg, { type: 'image/jpeg' });
     expect(await problems(read(text, 'ground', [jpeg]))).toEqual([
-      `the underlay image ${name} is not among the selected files (${jpg})`,
+      `${jpg} is a JPEG; the plan names a PNG (${name})`,
     ]);
     // The type is the extension's, not what the browser guessed.
     const webp = 'chartroom-floor_ground (1).webp';
     expect(await problems(read(text, 'ground', [pngFile(webp)]))).toEqual([
-      `the underlay image ${name} is not among the selected files (${webp})`,
+      `${webp} is a WebP; the plan names a PNG (${name})`,
+    ]);
+    // Other picked files that are not images do not change it.
+    const txt = new File(['hi'], 'notes.txt', { type: 'text/plain' });
+    expect(await problems(read(text, 'ground', [txt, jpeg]))).toEqual([
+      `${jpg} is a JPEG; the plan names a PNG (${name})`,
+    ]);
+    // The other way round, and with "an".
+    const svgName = underlayFileName(PLAN_ID, 'image/svg+xml')!;
+    const svgText = planFileJson(plan, { file: svgName });
+    expect(await problems(read(svgText, 'ground', [pngFile()]))).toEqual([
+      `${name} is a PNG; the plan names an SVG (${svgName})`,
+    ]);
+  });
+
+  it('says an image is not among the selected files when none of them is an image', async () => {
+    const txt = new File(['hi'], 'notes.txt', { type: 'text/plain' });
+    expect(await problems(read(text, 'ground', [txt]))).toEqual([
+      `the underlay image ${name} is not among the selected files (notes.txt)`,
     ]);
   });
 

@@ -73,6 +73,8 @@ export interface EditorHost {
   save(plan: Plan): Promise<void>;
   planId: string;
   plan: Plan;
+  /** The stored underlay was dropped on load for pointing outside Chartroom. */
+  underlayIgnored?: boolean;
 }
 
 const TOOLS: { tool: Tool; key: string; hint: string }[] = [
@@ -1138,6 +1140,13 @@ export class PlanEditor {
           ? `${u.width_px} × ${u.height_px} px · ${(u.width_px * u.scale).toFixed(2)} m wide`
           : 'A drawing to trace over (PNG, JPEG, WebP or SVG).',
       ),
+      !u && this.#host.underlayIgnored
+        ? h(
+            'p',
+            { class: 'hint', role: 'status', 'data-hint': 'underlay-ignored' },
+            'The saved underlay pointed outside Chartroom, so it was not loaded. Import the image again.',
+          )
+        : null,
       field(u ? 'Replace image' : 'Import image', input),
       u ? field('Opacity', opacity) : null,
       u

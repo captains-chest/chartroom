@@ -76,6 +76,9 @@ export class ChartroomPanel extends HTMLElement {
   readonly #underlayControls: HTMLElement;
   readonly #underlayToggle: HTMLButtonElement;
   readonly #underlayOpacity: HTMLInputElement;
+  readonly #underlayIgnoredNote: HTMLElement;
+  /** The stored plan's underlay was dropped on load for pointing outside Chartroom. */
+  #underlayIgnored = false;
   #plansRequested = false;
   readonly #sheet: HTMLElement;
   #narrow = false;
@@ -144,6 +147,12 @@ export class ChartroomPanel extends HTMLElement {
       this.#underlayToggle,
       this.#underlayOpacity,
     );
+    this.#underlayIgnoredNote = h(
+      'p',
+      { class: 'underlay-ignored', role: 'status', hidden: true },
+      'This plan’s underlay pointed outside Chartroom, so it was not loaded. ',
+      'Import the image again under Edit › Underlay.',
+    );
     const stored = localStorage.getItem(LAYER_KEY);
     this.#viewer.setLayer(isHeatLayer(stored) ? stored : null);
     if (localStorage.getItem(MESH_KEY) === '1') this.#viewer.setMesh(true);
@@ -157,6 +166,7 @@ export class ChartroomPanel extends HTMLElement {
       }),
       this.#viewer.layers.el,
       this.#underlayControls,
+      this.#underlayIgnoredNote,
     );
     this.#stage = h(
       'div',
@@ -298,6 +308,7 @@ export class ChartroomPanel extends HTMLElement {
       this.#viewer.closeTime();
       this.#planId = null;
       this.#plan = null;
+      this.#underlayIgnored = false;
       this.#view.setPlan(null);
       void this.#loadUnderlay();
       this.#editButton.hidden = true;
@@ -311,10 +322,11 @@ export class ChartroomPanel extends HTMLElement {
     }
     if (tab.plan_id === this.#planId && this.#plan) return;
     try {
-      const plan = await this.#viewer.load(tab.plan_id);
-      if (!plan) return;
+      const loaded = await this.#viewer.load(tab.plan_id);
+      if (!loaded) return;
       this.#planId = tab.plan_id;
-      this.#plan = plan;
+      this.#plan = loaded.plan;
+      this.#underlayIgnored = loaded.underlayIgnored;
       this.#showEmpty(null);
       this.#view.fit();
       void this.#loadUnderlay();
@@ -358,6 +370,8 @@ export class ChartroomPanel extends HTMLElement {
     this.#underlayOpacity.hidden = !pref.visible;
     this.#underlayOpacity.value = String(pref.opacity ?? u?.opacity ?? 0.5);
     this.#view.setUnderlayDisplay(editing ? null : pref);
+    // Only an admin can import the image again; anyone else just sees the plan without it.
+    this.#underlayIgnoredNote.hidden = !this.#underlayIgnored || !!u || editing || !this.#isAdmin;
   }
 
   #showEmpty(text: string | null, tab?: FloorTab): void {
@@ -399,6 +413,8 @@ export class ChartroomPanel extends HTMLElement {
     await this.#api().savePlan(this.#planId, plan);
     const before = this.#plan;
     this.#plan = plan;
+    // The save replaced the stored plan, so the ignored underlay is gone from it for good.
+    this.#underlayIgnored = false;
     if (
       before &&
       (before.name !== plan.name || (before.floor_id ?? null) !== (plan.floor_id ?? null))
@@ -421,6 +437,7 @@ export class ChartroomPanel extends HTMLElement {
       save: (plan) => this.#savePlan(plan),
       planId: this.#planId,
       plan: this.#plan,
+      underlayIgnored: this.#underlayIgnored,
     });
     this.#toolbarSlot.replaceChildren(this.#editor.toolbar);
     this.#inspectorSlot.replaceChildren(this.#editor.inspector);
@@ -491,6 +508,9 @@ const panelStyles = `
   .underlay-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 8px;
     padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent); }
   .underlay-controls input { width: 120px; }
+  .underlay-ignored { position: absolute; left: 12px; bottom: 12px; max-width: min(360px, calc(100% - 80px));
+    margin: 0; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem; color: var(--secondary-text-color, #727272);
+    background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent); }
   .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
     justify-content: center; gap: 8px; color: var(--secondary-text-color, #727272); text-align: center; padding: 16px; }
   .empty .hint { font-size: 0.85rem; margin: 0; }

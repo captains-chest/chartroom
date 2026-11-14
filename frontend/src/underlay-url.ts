@@ -23,8 +23,12 @@ export function underlayPlanId(url: string): string | null {
 /**
  * The plan, without its underlay when that is not the plan's own image: a plan stored before the
  * integration checked the URL still loads, shows without the drawing, and saves again.
+ * `underlayIgnored` says one was dropped, so an admin can be told to import the image again.
  */
-export const ownUnderlayOnly = <P extends Plan>(planId: string, plan: P): P =>
-  plan.underlay != null && underlayPlanId(plan.underlay.url) !== planId
-    ? { ...plan, underlay: null }
-    : plan;
+export function ownUnderlayOnly<P extends Plan>(
+  planId: string,
+  plan: P,
+): { plan: P; underlayIgnored: boolean } {
+  const ignored = plan.underlay != null && underlayPlanId(plan.underlay.url) !== planId;
+  return { plan: ignored ? { ...plan, underlay: null } : plan, underlayIgnored: ignored };
+}

@@ -5,16 +5,19 @@ of the image's SHA-256, and the plan points at it with `?v=<version>`. Replacing
 leaves the previous one in place for the editor's Undo. Versions the stored plan no longer
 points at are pruned at startup, before any upload or save can race it, and all of them when the
 plan is deleted. An upload is written to a hidden temp file and moved into place; startup also
-deletes the temp files an interrupted upload left behind.
+deletes the temp files an interrupted upload left behind, after waiting for the uploads still
+being written when a reload began.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 from http import HTTPStatus
 from pathlib import Path
 import re
+import secrets
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -34,6 +37,10 @@ TYPES = {
 EXT_TYPES = {ext: content_type for content_type, ext in TYPES.items()}
 # The `?v=` of an image URL: the first 12 hex digits of the image's SHA-256.
 VERSION_RE = re.compile(r"\A[0-9a-f]{12}\Z")
+# A temp file's random suffix, so uploads of the same image at once never share one (see _write).
+TEMP_SUFFIX_RE = re.compile(r"\A[0-9a-f]{8}\Z")
+# The uploads being written, so a reload's clean-up waits for them (see UnderlayView.post).
+DATA_WRITES = f"{DOMAIN}_underlay_writes"
 # Served images never run scripts, even an SVG opened directly in a tab.
 SAFE_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
@@ -98,15 +105,19 @@ def _looks_like(content_type: str, data: bytes) -> bool:
 
 
 def _is_temp(name: str) -> bool:
-    """Whether `name` is an upload's temp file, `.<plan_id>.<version>.<ext>.tmp` (see _write)."""
+    """Whether `name` is an upload's temp file, `.<plan_id>.<version>.<ext>.<suffix>.tmp`.
+
+    Also one without the suffix, as earlier builds named them (see _write).
+    """
     if not (name.startswith(".") and name.endswith(".tmp")):
         return False
     parts = name[1:-4].split(".")
     return (
-        len(parts) == 3
+        len(parts) in (3, 4)
         and PLAN_ID_RE.match(parts[0]) is not None
         and VERSION_RE.match(parts[1]) is not None
         and parts[2] in EXT_TYPES
+        and (len(parts) == 3 or TEMP_SUFFIX_RE.match(parts[3]) is not None)
     )
 
 
@@ -114,7 +125,8 @@ def _write(folder: Path, plan_id: str, ext: str, data: bytes) -> str:
     """Store `data` as a new version next to the plan's others; return its version."""
     folder.mkdir(parents=True, exist_ok=True)
     version = image_version(data)
-    tmp = folder / f".{plan_id}.{version}.{ext}.tmp"
+    # Each write its own temp file: two uploads of one image would otherwise share it.
+    tmp = folder / f".{plan_id}.{version}.{ext}.{secrets.token_hex(4)}.tmp"
     try:
         tmp.write_bytes(data)
         tmp.replace(folder / f"{plan_id}.{version}.{ext}")
@@ -182,9 +194,12 @@ async def async_prune_underlay(
 async def async_prune_underlays(hass: HomeAssistant, plans: dict[str, dict[str, Any]]) -> None:
     """Prune every plan's images, and drop those of plans that no longer exist.
 
-    Also delete the temp files interrupted uploads left behind: none can be running yet, as
-    uploads are refused until the store is published after this (see UnderlayView.post).
+    Also delete the temp files interrupted uploads left behind. Uploads are refused until the
+    store is published after this (see UnderlayView.post), but one that started before a reload
+    may still be writing, so wait for those first.
     """
+    if writes := hass.data.get(DATA_WRITES):
+        await asyncio.wait(set(writes))
 
     def prune_all(folder: Path) -> None:
         names = [p.name for p in folder.iterdir()] if folder.is_dir() else []
@@ -235,7 +250,13 @@ class UnderlayView(HomeAssistantView):
         # Not while (re)loading: startup prunes the images the stored plans don't point at.
         if DOMAIN not in hass.data:
             return self.json_message("Chartroom is not set up", HTTPStatus.SERVICE_UNAVAILABLE)
-        version = await hass.async_add_executor_job(_write, underlay_dir(hass), plan_id, ext, body)
+        # Tracked from the check above with no await between, so a reload can wait for it.
+        write = hass.async_add_executor_job(_write, underlay_dir(hass), plan_id, ext, body)
+        writes: set[asyncio.Future[str]] = hass.data.setdefault(DATA_WRITES, set())
+        writes.add(write)
+        write.add_done_callback(writes.discard)
+        # Shielded: a dropped request can't stop the thread, so it stays tracked until done.
+        version = await asyncio.shield(write)
         return self.json(
             {"url": f"{UNDERLAY_URL.format(plan_id=plan_id)}?v={version}", "bytes": len(body)}
         )

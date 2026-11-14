@@ -1,9 +1,11 @@
 """Underlay image view: /api/chartroom/underlay/<plan_id>."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from pathlib import Path
 import shutil
+import threading
 from unittest.mock import patch
 
 from homeassistant.core import HomeAssistant
@@ -170,12 +172,19 @@ async def test_startup_deletes_leftover_temp_files(hass: HomeAssistant, hass_sto
     """An upload interrupted mid-write leaves its temp file; startup deletes only those."""
     folder: Path = underlay_dir(hass)
     version = hashlib.sha256(PNG).hexdigest()[:12]
-    others = ["notes.tmp", ".ground.backup.tmp", ".Ground.0123456789ab.png.tmp"]
+    others = [
+        "notes.tmp",
+        ".ground.backup.tmp",
+        ".Ground.0123456789ab.png.tmp",
+        f".ground.{version}.png.backup.tmp",
+        f".ground.{version}.png.0123abcd.0123abcd.tmp",
+    ]
 
     def seed() -> None:
         folder.mkdir(parents=True)
         (folder / f"ground.{version}.png").write_bytes(PNG)
         (folder / f".ground.{version}.png.tmp").write_bytes(PNG[:8])
+        (folder / f".ground.{version}.png.0123abcd.tmp").write_bytes(PNG[:8])
         (folder / ".gone.0123456789ab.svg.tmp").write_bytes(SVG[:8])
         for name in others:
             (folder / name).write_bytes(b"")
@@ -223,6 +232,68 @@ def test_failed_write_keeps_its_error_when_cleanup_fails(tmp_path: Path) -> None
         pytest.raises(asyncio.CancelledError),
     ):
         _write(tmp_path, "ground", "png", PNG)
+
+
+def test_concurrent_writes_of_one_image_both_succeed(tmp_path: Path) -> None:
+    """Two uploads of the same image at once each write their own temp file (#48).
+
+    Both temp files are written before either is moved into place, so with one shared name the
+    second move found nothing to move and that request failed.
+    """
+    both_written = threading.Barrier(2, timeout=5)
+    original = Path.write_bytes
+
+    def write_then_wait(self: Path, data: bytes) -> int:
+        written = original(self, data)
+        both_written.wait()
+        return written
+
+    with (
+        patch.object(Path, "write_bytes", write_then_wait),
+        ThreadPoolExecutor(2) as pool,
+    ):
+        jobs = [pool.submit(_write, tmp_path, "ground", "png", PNG) for _ in range(2)]
+        versions = [job.result() for job in jobs]
+    version = hashlib.sha256(PNG).hexdigest()[:12]
+    assert versions == [version, version]
+    assert _names(tmp_path) == [f"ground.{version}.png"]
+    assert (tmp_path / f"ground.{version}.png").read_bytes() == PNG
+
+
+async def test_reload_clean_up_waits_for_uploads_in_flight(
+    hass: HomeAssistant, hass_client
+) -> None:
+    """An upload that passed the 503 check before a reload keeps its temp file until it is done."""
+    await _setup(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    started, release = threading.Event(), threading.Event()
+    original = Path.write_bytes
+
+    def slow_write(self: Path, data: bytes) -> int:
+        written = original(self, data)
+        started.set()
+        assert release.wait(5)
+        return written
+
+    client = await hass_client()
+    with patch.object(Path, "write_bytes", slow_write):
+        upload = hass.async_create_task(
+            client.post(URL, data=PNG, headers={"Content-Type": "image/png"})
+        )
+        assert await hass.async_add_executor_job(started.wait, 5)
+        reload = hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
+        # The reload's clean-up must not run while the upload's temp file is still being written.
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+        assert not reload.done()
+        release.set()
+        resp = await upload
+        assert await reload
+    assert resp.status == 200
+    version = hashlib.sha256(PNG).hexdigest()[:12]
+    assert (await resp.json())["url"] == f"{URL}?v={version}"
+    names = await hass.async_add_executor_job(_names, underlay_dir(hass))
+    assert not [name for name in names if name.endswith(".tmp")]
 
 
 async def test_startup_keeps_an_old_file_its_plan_points_past(

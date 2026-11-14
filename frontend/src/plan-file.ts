@@ -215,6 +215,10 @@ export async function readPlanFile(
   let image: Blob | null = null;
   const picked = imageName != null ? await imageFile(imageName, files) : null;
   if (typeof picked === 'string') return fail(picked);
+  if (picked && picked.file.name !== imageName)
+    notes.push(
+      `Took ${picked.file.name} as the underlay image ${String(imageName)}: it is the only image selected, of the same type.`,
+    );
   for (const f of files)
     if (f !== picked?.file) notes.push(`Left out ${f.name}: the plan does not name it.`);
   if (picked) {
@@ -233,7 +237,7 @@ export async function readPlanFile(
     }
   } else if (plan.underlay && underlayPlanId(plan.underlay.url) !== planId) {
     notes.push(
-      'Left out the underlay: its image is not in the file. Export with the underlay to bring it along.',
+      'Left out the underlay: its image is not in the file. Export with underlay or with underlay file to bring it along.',
     );
     plan = { ...plan, underlay: null };
   }
@@ -244,6 +248,8 @@ export async function readPlanFile(
  * The image file `name` (the plan's `underlay_file`) among the picked `files`, checked like an
  * upload: an underlay type by its extension, at most 10 MB, and bytes that are that type. A
  * problem as a string otherwise. The name only picks a file the user chose; nothing is fetched.
+ * Browsers rename a repeat download (`chartroom-home (1).png`), so when no file has the name but
+ * exactly one image is picked, of the named file's type, that one is taken.
  */
 async function imageFile(
   name: unknown,
@@ -252,13 +258,17 @@ async function imageFile(
   const type = typeof name === 'string' && name.length <= 255 ? imageTypeOfName(name) : null;
   if (typeof name !== 'string' || !type || /[/\\]/.test(name))
     return `${IMAGE_FILE_KEY} is not a PNG, JPEG, WebP or SVG file name`;
-  const file = files.find((f) => f.name === name);
+  const images = files.filter((f) => imageTypeOfName(f.name) !== null);
+  const file =
+    files.find((f) => f.name === name) ??
+    (images.length === 1 && imageTypeOfName(images[0]!.name) === type ? images[0] : undefined);
   if (!file)
     return files.length === 0
       ? `the underlay image ${name} is missing: select it together with the .json file`
       : `the underlay image ${name} is not among the selected files (${files.map((f) => f.name).join(', ')})`;
-  if (file.size > MAX_BYTES) return `${name} is larger than 10 MB`;
+  if (file.size > MAX_BYTES) return `${file.name} is larger than 10 MB`;
   const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!looksLike(type, bytes)) return `${name} is not a ${EXTENSIONS[type]!.toUpperCase()} image`;
+  if (!looksLike(type, bytes))
+    return `${file.name} is not a ${EXTENSIONS[type]!.toUpperCase()} image`;
   return { file, blob: new Blob([bytes], { type }) };
 }

@@ -23,7 +23,8 @@ The first release.
   living room with no wall between them. Plans saved with one area per room load unchanged.
 - Export a plan as a `.json` file, optionally with its underlay image embedded or saved as its own
   image file next to it, and import one (with that image file) over the current floor's plan.
-  Imports are checked and validated before anything is saved, and Undo brings the old plan back.
+  An image file the browser renamed on download is still taken when it is the only one picked
+  and of the same type. Imports are checked and validated before anything is saved, and Undo brings the old plan back.
 
 ### Devices
 
@@ -67,4 +68,4 @@ The first release.
 ### Requirements
 
 - Home Assistant 2026.10 or newer. No Python requirements and no runtime JavaScript
-  dependencies. Frontend: 14.8 KB gzip for the card, 53.77 KB gzip in total.
+  dependencies. Frontend: 14.8 KB gzip for the card, 53.88 KB gzip in total.

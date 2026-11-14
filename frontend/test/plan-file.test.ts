@@ -119,7 +119,9 @@ describe('plan import', () => {
     ]) {
       const r = await ok(read(planFileJson({ ...fixture, underlay: underlay(url) })));
       expect(r.plan.underlay, url).toBeNull();
-      expect(r.notes.join(' ')).toMatch(/Left out the underlay/);
+      expect(r.notes, url).toEqual([
+        'Left out the underlay: its image is not in the file. Export with underlay or with underlay file to bring it along.',
+      ]);
     }
   });
 
@@ -267,11 +269,51 @@ describe('underlay as a separate file', () => {
     ]);
   });
 
-  it('rejects an image whose name does not match', async () => {
-    expect(
-      await problems(read(text, 'ground', [pngFile('chartroom-floor_ground (1).png')])),
-    ).toEqual([
-      `the underlay image ${name} is not among the selected files (chartroom-floor_ground (1).png)`,
+  it('takes the only image picked when the browser renamed it, with a note', async () => {
+    const renamed = 'chartroom-floor_ground (1).png';
+    const took = `Took ${renamed} as the underlay image ${name}: it is the only image selected, of the same type.`;
+    const r = await ok(read(text, 'ground', [pngFile(renamed)]));
+    expect(r.plan).toEqual({ ...plan, floor_id: 'ground' });
+    expect(r.image!.type).toBe('image/png');
+    expect(new Uint8Array(await r.image!.arrayBuffer())).toEqual(PNG);
+    expect(r.notes).toEqual([took]);
+    // A picked file that is not an image does not count against "only one".
+    const txt = new File(['hi'], 'notes.txt', { type: 'text/plain' });
+    const withText = await ok(read(text, 'ground', [txt, pngFile(renamed)]));
+    expect(withText.notes).toEqual([took, 'Left out notes.txt: the plan does not name it.']);
+  });
+
+  it('checks a renamed image like any other', async () => {
+    const renamed = 'chartroom-floor_ground (1).png';
+    const html = new TextEncoder().encode('<script>alert(1)</script>');
+    expect(await problems(read(text, 'ground', [pngFile(renamed, html)]))).toEqual([
+      `${renamed} is not a PNG image`,
+    ]);
+    const big = new Uint8Array(10 * 1024 * 1024 + 1);
+    big.set(PNG);
+    expect(await problems(read(text, 'ground', [pngFile(renamed, big)]))).toEqual([
+      `${renamed} is larger than 10 MB`,
+    ]);
+  });
+
+  it('rejects several images when none has the name', async () => {
+    const one = 'chartroom-floor_ground (1).png';
+    const two = 'chartroom-floor_ground (2).png';
+    expect(await problems(read(text, 'ground', [pngFile(one), pngFile(two)]))).toEqual([
+      `the underlay image ${name} is not among the selected files (${one}, ${two})`,
+    ]);
+  });
+
+  it('rejects the only image picked when its type is not the named one', async () => {
+    const jpg = 'chartroom-floor_ground.jpg';
+    const jpeg = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], jpg, { type: 'image/jpeg' });
+    expect(await problems(read(text, 'ground', [jpeg]))).toEqual([
+      `the underlay image ${name} is not among the selected files (${jpg})`,
+    ]);
+    // The type is the extension's, not what the browser guessed.
+    const webp = 'chartroom-floor_ground (1).webp';
+    expect(await problems(read(text, 'ground', [pngFile(webp)]))).toEqual([
+      `the underlay image ${name} is not among the selected files (${webp})`,
     ]);
   });
 

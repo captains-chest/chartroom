@@ -96,7 +96,7 @@ class FakeElement {
   }
 }
 
-/** Install the fake `document` and `ResizeObserver` globals (idempotent). */
+/** Install the fake `document`, `ResizeObserver`, `CSS` and `window` globals (idempotent). */
 export function installFakeDom(): void {
   const g = globalThis as Record<string, unknown>;
   g['document'] ??= {
@@ -107,6 +107,8 @@ export function installFakeDom(): void {
     observe(): void {}
     disconnect(): void {}
   };
+  // The plan view re-selects by id after a redraw.
+  g['CSS'] ??= { escape: (s: string) => s };
   // The page the editor listens to for leaving (flushOnLeave).
   g['window'] ??= Object.assign(new EventTarget(), {
     document: Object.assign(new EventTarget(), { visibilityState: 'visible' }),

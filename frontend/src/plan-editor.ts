@@ -2,7 +2,8 @@
 // selection, undo/redo and autosave. Loaded on demand by the panel (its own chunk).
 import { autoPlace, deviceChoices, deviceLook } from './devices';
 import { add, dist, frame, roundToMm, polygonArea } from './geometry';
-import type { Hass } from './ha-types';
+import { errorText, retryable } from './ha-errors';
+import type { Hass, HassConnection } from './ha-types';
 import { autosaver, flushOnLeave } from './editor/autosaver';
 import { findItem, kindOps, titleOf } from './editor/kinds';
 import { areaName, roomNameForAreas } from './editor/rooms';
@@ -138,6 +139,9 @@ export class PlanEditor {
   readonly #saver: Autosaver<Plan>;
   /** Stops saving on page hide/unload. */
   readonly #stopLeaveGuard: () => void;
+  /** The connection whose reconnects retry a failed save. */
+  readonly #connection: HassConnection | undefined;
+  readonly #onReconnect = (): void => this.#saver.retry();
   readonly #saveState: HTMLElement;
   readonly #hint: HTMLElement;
   readonly #undoButton: HTMLButtonElement;
@@ -175,8 +179,12 @@ export class PlanEditor {
       SAVE_DELAY_MS,
       host.plan,
       (text, error) => this.#setSaveState(text, error),
+      { retryable, describe: errorText },
     );
     this.#stopLeaveGuard = flushOnLeave(this.#saver);
+    // Home Assistant's connection is back: try a failed save now rather than after its wait.
+    this.#connection = host.hass()?.connection;
+    this.#connection?.addEventListener?.('ready', this.#onReconnect);
     // The panel may already have loaded the picture.
     this.#underlayUrl = host.view.underlayUrl;
     this.#underlay = new UnderlayImage(
@@ -240,7 +248,10 @@ export class PlanEditor {
     this.#closed = true;
     this.#underlay.close();
     this.#stopLeaveGuard();
+    this.#connection?.removeEventListener?.('ready', this.#onReconnect);
     await this.#saver.flush();
+    // A failed last save is not retried once closed: the panel may move on to another plan.
+    this.#saver.dispose();
     this.#view.setDelegate(null);
     this.#view.drawOverlay();
     this.#view.setEditing(null);

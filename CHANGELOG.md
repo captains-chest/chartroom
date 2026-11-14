@@ -13,7 +13,9 @@ The first release.
 - An editor for walls, rooms, doors, windows and sensor/signal sources, with undo, snapping and
   floor tabs. Plans are stored in Home Assistant and update open panels and cards live. Edits
   save a moment after each change, and at once when the page is hidden, closed or left; the
-  browser asks before leaving while a change is still not stored.
+  browser asks before leaving while a change is still not stored. A save that fails (say, the
+  connection dropped) is tried again by itself, after a wait that grows to 30 seconds or as soon as
+  Home Assistant is back; one Home Assistant refuses is not.
 - A home without Home Assistant floors gets one **Home** plan covering every area, with a link
   to create floors for one plan each.
 - An optional underlay image per plan (uploaded by an admin, downscaled in the browser),
@@ -72,4 +74,4 @@ The first release.
 ### Requirements
 
 - Home Assistant 2026.10 or newer. No Python requirements and no runtime JavaScript
-  dependencies. Frontend: 14.78 KB gzip for the card, 54.51 KB gzip in total.
+  dependencies. Frontend: 14.78 KB gzip for the card, 54.82 KB gzip in total.

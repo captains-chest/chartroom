@@ -87,8 +87,13 @@ export interface Autosaver<T> {
   schedule(value: T): void;
   /** Save now if anything changed since the last save. */
   flush(): Promise<void>;
-  /** Drop a pending save (`flush` first to keep it). */
+  /** Try a failed save again now instead of after its wait (e.g. the connection is back). */
+  retry(): void;
+  /** Drop a pending save and stop retrying (`flush` first to keep it). */
   dispose(): void;
-  /** A change is not stored yet: waiting for the delay, being saved, or its save failed. */
+  /**
+   * A change is not stored yet: waiting for the delay, being saved, or its save failed (and may be
+   * waiting to retry).
+   */
   readonly unsaved: boolean;
 }

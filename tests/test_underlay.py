@@ -1,5 +1,6 @@
 """Underlay image view: /api/chartroom/underlay/<plan_id>."""
 
+import asyncio
 import hashlib
 from pathlib import Path
 import shutil
@@ -205,6 +206,23 @@ def test_failed_write_leaves_no_temp_file(tmp_path: Path, step: str) -> None:
     with patch.object(Path, step, fail), pytest.raises(OSError, match="disk full"):
         _write(tmp_path, "ground", "png", PNG)
     assert _names(tmp_path) == []
+
+
+def test_failed_write_keeps_its_error_when_cleanup_fails(tmp_path: Path) -> None:
+    """A cancelled write raises the cancellation, even if deleting its temp file fails too."""
+
+    def cancel(self: Path, *args, **kwargs):
+        raise asyncio.CancelledError
+
+    def fail(self: Path, *args, **kwargs):
+        raise PermissionError("read-only")
+
+    with (
+        patch.object(Path, "write_bytes", cancel),
+        patch.object(Path, "unlink", fail),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        _write(tmp_path, "ground", "png", PNG)
 
 
 async def test_startup_keeps_an_old_file_its_plan_points_past(

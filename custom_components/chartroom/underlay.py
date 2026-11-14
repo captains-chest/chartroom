@@ -10,6 +10,7 @@ deletes the temp files an interrupted upload left behind.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from http import HTTPStatus
 from pathlib import Path
@@ -118,7 +119,9 @@ def _write(folder: Path, plan_id: str, ext: str, data: bytes) -> str:
         tmp.write_bytes(data)
         tmp.replace(folder / f"{plan_id}.{version}.{ext}")
     except BaseException:
-        tmp.unlink(missing_ok=True)
+        # Keep the original error (even a cancellation) if the clean-up fails too.
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
         raise
     return version
 

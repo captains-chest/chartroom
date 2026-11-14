@@ -12,12 +12,6 @@ from custom_components.chartroom.const import DOMAIN
 pytest_plugins = "pytest_homeassistant_custom_component"
 
 
-@pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations):
-    """Let Home Assistant load integrations from custom_components/."""
-    return
-
-
 class _ChartroomReports(logging.Handler):
     """Collects Home Assistant's usage reports that blame Chartroom."""
 
@@ -47,3 +41,13 @@ def fail_on_deprecation_reports():
         logger.removeHandler(reports)
     if reports.messages:
         pytest.fail("\n".join(reports.messages), pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(fail_on_deprecation_reports, enable_custom_integrations):
+    """Let Home Assistant load integrations from custom_components/.
+
+    Takes the deprecation guard first, so it is set up before `hass` and torn down after it,
+    and catches reports from unloading and shutdown too.
+    """
+    return

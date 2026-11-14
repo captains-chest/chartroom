@@ -410,14 +410,19 @@ test.describe('leaving the editor', () => {
   }
 
   test('an edit reloaded away before the autosave delay is still stored', async ({ page }) => {
+    // A controllable clock (time runs as usual until paused), so the autosave timer can't fire
+    // before the reload and the test can't pass without saving on leave.
+    await page.clock.install();
     const panel = await openPlan(page, PLAN_ID);
     await startEditing(panel);
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
     await editWall(panel);
-    // Still waiting for the 600 ms delay: only saving on leave can store it now.
+    // Still waiting for the 600 ms delay, which can't elapse: only saving on leave can store it.
     await expect(panel.locator('.save-state')).toHaveText('Unsaved changes');
     // The save is in flight as the page goes, so the browser may ask before leaving: leave.
     page.on('dialog', (d) => void (d.type() === 'beforeunload' ? d.accept() : d.dismiss()));
     await page.reload();
+    await page.clock.resume();
 
     await expect.poll(storedMaterial, { timeout: 10_000 }).toBe('exterior');
     await panel.locator(`[role=tab][data-plan="${PLAN_ID}"]`).click();

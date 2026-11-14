@@ -446,11 +446,20 @@ export class ChartroomPanel extends HTMLElement {
     this.#renderUnderlayControls();
   }
 
-  async #closeEditor(): Promise<void> {
+  /** The editor closing, so pressing Done again or switching tabs meanwhile waits for it. */
+  #closing: Promise<void> | null = null;
+
+  /** Close the editor; it stays open until an image it is uploading has landed and been saved. */
+  #closeEditor(): Promise<void> {
+    return (this.#closing ??= this.#finishEditor().finally(() => (this.#closing = null)));
+  }
+
+  async #finishEditor(): Promise<void> {
     const editor = this.#editor;
     if (!editor) return;
+    // A failed upload Done waited for: its message would leave with the editor's toolbar.
+    this.#setStatus('editor', await editor.close());
     this.#editor = null;
-    await editor.close();
     this.#plan = editor.plan;
     this.#toolbarSlot.replaceChildren();
     this.#inspectorSlot.replaceChildren();
@@ -473,10 +482,16 @@ export class ChartroomPanel extends HTMLElement {
   }
 
   readonly #parts = new Map<string, string>();
-  #setStatus(part: string, text: string): void {
-    this.#parts.set(part, text);
+  /** Set one part of the status line, or clear it (null). */
+  #setStatus(part: string, text: string | null): void {
+    if (text === null) {
+      this.#parts.delete(part);
+      delete this.#status.dataset[part];
+    } else {
+      this.#parts.set(part, text);
+      this.#status.dataset[part] = text;
+    }
     this.#status.textContent = [...this.#parts.values()].join(' · ');
-    this.#status.dataset[part] = text;
   }
 }
 

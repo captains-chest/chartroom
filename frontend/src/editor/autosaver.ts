@@ -115,9 +115,13 @@ export function autosaver<T>(
 /**
  * Save at once when the page is hidden or left (tab closed, reload, app switched away), since the
  * delay's timer never fires on an unloaded page, and ask before leaving while a change is still not
- * stored. Returns a function that stops listening.
+ * stored (`unsaved`, which may count more than the saver's own state). Returns a function that
+ * stops listening.
  */
-export function flushOnLeave(saver: Autosaver<unknown>, page: Page = window): () => void {
+export function flushOnLeave(
+  saver: Pick<Autosaver<unknown>, 'flush' | 'unsaved'>,
+  page: Page = window,
+): () => void {
   const flush = (): void => void saver.flush();
   const onVisibility = (): void => {
     if (page.document.visibilityState === 'hidden') flush();

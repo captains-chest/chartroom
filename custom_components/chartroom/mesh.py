@@ -225,18 +225,32 @@ def parse_z2m(networkmap: dict[str, Any]) -> Topology:
 
 
 @callback
+def _device_for(hass: HomeAssistant, ident: tuple[str, str]) -> dr.DeviceEntry | None:
+    """Return the device registered under an identifier, or None.
+
+    Identifiers are unique only within a config entry, so several devices can share one. The device
+    owned by the identifier's own integration (``mqtt``, ``zwave_js``) wins, else the first found.
+    """
+    devices = dr.async_get(hass).async_get_devices(identifiers={ident})
+    return next(
+        (
+            device
+            for device in devices
+            if (entry := hass.config_entries.async_get_entry(device.config_entry_id))
+            and entry.domain == ident[0]
+        ),
+        next(iter(devices), None),
+    )
+
+
+@callback
 def _resolve(hass: HomeAssistant, nodes: list[MeshNode]) -> list[dict[str, Any]]:
     """Return the wire nodes, with device and entity ids filled in from the registries."""
-    dev_reg = dr.async_get(hass)
     ent_reg = er.async_get(hass)
 
     def resolved(node: MeshNode) -> dict[str, Any]:
         device_id = node.device_id or next(
-            (
-                device.id
-                for ident in node.identifiers
-                if (device := dev_reg.async_get_device(identifiers={ident}))
-            ),
+            (device.id for ident in node.identifiers if (device := _device_for(hass, ident))),
             None,
         )
         entities = node.entities

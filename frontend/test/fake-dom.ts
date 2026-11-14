@@ -107,4 +107,8 @@ export function installFakeDom(): void {
     observe(): void {}
     disconnect(): void {}
   };
+  // The page the editor listens to for leaving (flushOnLeave).
+  g['window'] ??= Object.assign(new EventTarget(), {
+    document: Object.assign(new EventTarget(), { visibilityState: 'visible' }),
+  });
 }

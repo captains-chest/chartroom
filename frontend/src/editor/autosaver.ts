@@ -52,6 +52,9 @@ export function autosaver<T>(
   };
   const once = async (): Promise<void> => {
     try {
+      // This attempt replaces any retry still waiting, e.g. one a save queued before it set.
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
       const value = latest;
       if (value === saved) return status('Saved');
       status('Saving…');
@@ -88,8 +91,11 @@ export function autosaver<T>(
     schedule(value) {
       latest = value;
       status(value === saved ? 'Saved' : 'Unsaved changes');
+      // An edit while a failed save waits to retry tries again at once, with the new value.
+      const retrying = retryTimer !== undefined;
       stopTimers();
-      timer = setTimeout(() => void flush(), delayMs);
+      if (retrying) void flush();
+      else timer = setTimeout(() => void flush(), delayMs);
     },
     flush,
     retry() {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Hass } from '../src/ha-types';
-import { loadUnderlay, UnderlayImage } from '../src/underlay';
+import { loadUnderlay, PanelUnderlay, UnderlayImage } from '../src/underlay';
 import { underlayPath } from '../src/underlay-url';
 
 const hass = (res: Response | Error, fetched: string[] = []): Hass => ({
@@ -135,6 +135,18 @@ describe('UnderlayImage', () => {
     expect(fetched).toEqual([]);
   });
 
+  it('drops a load still running when the editor closes', async () => {
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    const { conn } = versions();
+    const { urls, show } = shown();
+    const image = new UnderlayImage(() => conn, PLAN, show);
+    image.sync(`${U}?v=aaaaaaaaaaaa`);
+    image.close();
+    await vi.waitFor(() => expect(revoke).toHaveBeenCalledTimes(1));
+    expect(urls).toEqual([null]);
+    vi.restoreAllMocks();
+  });
+
   it('drops a load overtaken by another change', async () => {
     const { conn } = versions();
     const { urls, show } = shown();
@@ -145,5 +157,110 @@ describe('UnderlayImage', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(urls).toHaveLength(2);
     expect(await text(urls[1]!)).toBe('b');
+  });
+});
+
+describe('PanelUnderlay', () => {
+  const U = `${underlayPath(PLAN)}?v=0123456789ab`;
+  /** A stand-in for the plan view: like PlanView, it revokes the blob URL it replaces. */
+  const view = () => {
+    const revoked = new Set<string>();
+    const v = {
+      url: null as string | null,
+      revoked,
+      set(url: string | null) {
+        if (url === v.url) return;
+        if (v.url) revoked.add(v.url);
+        v.url = url;
+      },
+    };
+    return v;
+  };
+  /** A connection whose fetches wait until `release()`, each its own image. */
+  const slow = () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const conn: Hass = {
+      states: {},
+      fetchWithAuth: async (url: string) => {
+        await gate;
+        return new Response(new Blob([`panel ${url}`], { type: 'image/svg+xml' }));
+      },
+    };
+    return { conn, release };
+  };
+  const fast: Hass = {
+    states: {},
+    fetchWithAuth: async (url: string) =>
+      new Response(new Blob([`editor ${url}`], { type: 'image/svg+xml' })),
+  };
+  /** Open the editor the way the panel does: it takes over the view's image. */
+  const openEditor = (panel: PanelUnderlay, v: ReturnType<typeof view>) => {
+    panel.release();
+    let shown: string | null = v.url;
+    const image = new UnderlayImage(
+      () => fast,
+      PLAN,
+      (url) => {
+        shown = url;
+        v.set(url);
+      },
+      v.url ? U : null,
+    );
+    image.sync(U);
+    return () => shown;
+  };
+
+  it("doesn't let a panel load that ends after the editor opened replace the editor's image", async () => {
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    const v = view();
+    const panel = new PanelUnderlay((url) => v.set(url));
+    const { conn, release } = slow();
+    const loading = panel.load(conn, PLAN, U);
+
+    const editorShown = openEditor(panel, v);
+    await vi.waitFor(() => expect(editorShown()).toMatch(/^blob:/));
+    const editorUrl = editorShown()!;
+    expect(v.url).toBe(editorUrl);
+
+    // The panel's fetch ends only now.
+    release();
+    await loading;
+    expect(v.url).toBe(editorUrl);
+    expect(v.revoked.has(editorUrl)).toBe(false);
+    expect(await (await fetch(editorUrl)).text()).toBe(`editor ${U}`);
+    // The panel's image was never shown, and its blob URL isn't leaked.
+    expect(revoke).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
+  });
+
+  it('hands an image it already loaded to the editor without a second fetch', async () => {
+    const v = view();
+    const panel = new PanelUnderlay((url) => v.set(url));
+    const { conn, release } = slow();
+    const loading = panel.load(conn, PLAN, U);
+    release();
+    await loading;
+    const panelUrl = v.url!;
+    expect(await (await fetch(panelUrl)).text()).toBe(`panel ${U}`);
+
+    const editorShown = openEditor(panel, v);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(editorShown()).toBe(panelUrl);
+    expect(v.url).toBe(panelUrl);
+    expect(v.revoked.size).toBe(0);
+  });
+
+  it('drops an earlier panel load for a later one', async () => {
+    const v = view();
+    const panel = new PanelUnderlay((url) => v.set(url));
+    const first = slow();
+    const loading = panel.load(first.conn, PLAN, U);
+    await panel.load(fast, PLAN, U);
+    const later = v.url;
+    first.release();
+    await loading;
+    expect(v.url).toBe(later);
+    expect(await (await fetch(later!)).text()).toBe(`editor ${U}`);
   });
 });

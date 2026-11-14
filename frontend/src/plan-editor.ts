@@ -230,6 +230,7 @@ export class PlanEditor {
   /** Flush pending saves and detach from the view. */
   async close(): Promise<void> {
     this.#closed = true;
+    this.#underlay.close();
     await this.#saver.flush();
     this.#view.setDelegate(null);
     this.#view.drawOverlay();

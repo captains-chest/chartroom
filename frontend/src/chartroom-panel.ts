@@ -10,7 +10,7 @@ import { DeviceControls, deviceControlStyles } from './device-controls';
 import { PlanView, planViewStyles } from './plan-view';
 import { isHeatLayer } from './heat/functions';
 import { button, h } from './ui';
-import { loadUnderlay } from './underlay';
+import { PanelUnderlay } from './underlay';
 import { ViewerController } from './viewer';
 
 interface PanelInfo {
@@ -71,7 +71,8 @@ export class ChartroomPanel extends HTMLElement {
   #planId: string | null = null;
   #plan: Plan | null = null;
   #editor: PlanEditor | null = null;
-  #underlayLoad = 0;
+  /** The view's underlay image while the panel owns it; the editor takes it over when it opens. */
+  readonly #underlay = new PanelUnderlay((url) => this.#view.setUnderlayUrl(url));
   #underlayPref = readUnderlayPref();
   readonly #underlayControls: HTMLElement;
   readonly #underlayToggle: HTMLButtonElement;
@@ -339,19 +340,13 @@ export class ChartroomPanel extends HTMLElement {
 
   /** Fetch the current plan's underlay (if any) and show it in the read-only view. */
   async #loadUnderlay(): Promise<void> {
-    const load = ++this.#underlayLoad;
-    const u = this.#plan?.underlay;
-    const planId = this.#planId;
-    this.#view.setUnderlayUrl(null);
+    const loading = this.#underlay.load(
+      this.#viewer.hass,
+      this.#planId,
+      this.#plan?.underlay?.url ?? null,
+    );
     this.#renderUnderlayControls();
-    if (u && planId)
-      await loadUnderlay(
-        this.#viewer.hass,
-        planId,
-        u.url,
-        () => load === this.#underlayLoad,
-        (url) => this.#view.setUnderlayUrl(url),
-      );
+    await loading;
   }
 
   #setUnderlayPref(patch: Partial<UnderlayPref>): void {
@@ -431,6 +426,8 @@ export class ChartroomPanel extends HTMLElement {
     if (!this.#plan || !this.#planId) return;
     this.#viewer.closeTime();
     const { PlanEditor } = await import('./plan-editor');
+    // The editor owns the image from here: a panel load still running must not replace its own.
+    this.#underlay.release();
     this.#editor = new PlanEditor({
       view: this.#view,
       hass: () => this.#viewer.hass,
@@ -460,7 +457,9 @@ export class ChartroomPanel extends HTMLElement {
     this.toggleAttribute('editing', false);
     this.#view.setPlan(this.#plan);
     this.#controls.attach();
-    this.#renderUnderlayControls();
+    // The editor's load may have been dropped mid-way: the panel fetches the image again.
+    if (this.#view.underlayUrl) this.#renderUnderlayControls();
+    else void this.#loadUnderlay();
   }
 
   readonly #onKey = (e: KeyboardEvent): void => {

@@ -34,13 +34,13 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 - The editor's inspector no longer replaces its fields whenever any Home Assistant state changes,
   which could drop a value still being typed in (say, a room name) before it was taken. Each panel
   is redrawn only when what it shows changes.
-- A stored plan with a damaged list (say, walls that are not a list) opens without the parts
-  nothing can draw, instead of failing somewhere in the drawing code; what was wrong is logged in
-  the browser console.
+- A damaged stored plan (say, walls that are not a list, or a wall without an end) opens without
+  the parts nothing can draw, instead of failing somewhere in the drawing code; what was left out is
+  logged in the browser console, and the next save stores the plan without it.
 
 ### Requirements
 
-- Frontend: 16.64 KB gzip for the card, 57.22 KB gzip in total.
+- Frontend: 16.66 KB gzip for the card, 57.26 KB gzip in total.
 
 ## 0.1.0 — 2026-11-14
 

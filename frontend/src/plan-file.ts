@@ -1,8 +1,9 @@
 // A plan as a .json file: the plan as stored (without its storage id), and optionally its underlay
 // image, embedded as a data URL or saved as its own file next to it that the .json names. Files
-// read back in are untrusted: their structure is checked here, then the plan goes through the same
-// normalising and validation as a stored plan. Loaded with the editor.
-import { normalizePlan, validatePlan } from './plan/functions';
+// read back in are untrusted: they go through the plan schema (plan/schema.ts) like a stored plan,
+// but a file with any problem is refused, and then through validatePlan. Loaded with the editor.
+import { validatePlan } from './plan/functions';
+import { parsePlan } from './plan/schema';
 import type { Plan } from './plan/models';
 import { MAX_BYTES, UNDERLAY_TYPES } from './underlay';
 import { underlayPlanId } from './underlay-url';
@@ -101,70 +102,6 @@ export async function imageBlob(url: string): Promise<Blob | null> {
   }
 }
 
-type Check = (v: unknown) => boolean;
-const num: Check = (v) => typeof v === 'number' && Number.isFinite(v);
-const pos: Check = (v) => num(v) && (v as number) > 0;
-const str: Check = (v) => typeof v === 'string';
-const optStr: Check = (v) => v == null || str(v);
-const pt: Check = (v) => Array.isArray(v) && v.length === 2 && v.every(num);
-const pts: Check = (v) => Array.isArray(v) && v.every(pt);
-const opening = { id: str, wall: str, offset: num, width: num, material: str, thickness: num };
-/** Each list's items' fields; `devices` and `materials` may be missing. */
-const LISTS: Record<string, Record<string, Check>> = {
-  walls: { id: str, a: pt, b: pt, thickness: num, material: str },
-  doors: {
-    ...opening,
-    entity_id: optStr,
-    hinge: (v) => v === 'a' || v === 'b',
-    swing: (v) => v === 1 || v === -1,
-  },
-  windows: { ...opening, entity_id: optStr },
-  rooms: { id: str, name: str, polygon: pts, area_id: optStr },
-  sources: {
-    id: str,
-    kind: (v) => v === 'sensor' || v === 'access_point' || v === 'radio',
-    entity_id: str,
-    position: pt,
-    area_id: optStr,
-    tx_dbm: (v) => v === undefined || num(v),
-  },
-  devices: { id: str, entity_id: str, position: pt },
-  materials: { id: str, name: str, db_per_cm: num },
-};
-const UNDERLAY = {
-  url: str,
-  width_px: pos,
-  height_px: pos,
-  scale: pos,
-  origin: pt,
-  opacity: (v: unknown) => num(v) && (v as number) >= 0 && (v as number) <= 1,
-};
-
-/**
- * Problems with a normalised plan's structure: lists that are not lists, fields of the wrong type,
- * numbers that are not finite. `validatePlan` trusts the types, so a plan from outside passes this
- * first.
- */
-export function shapeProblems(plan: Plan): string[] {
-  const out: string[] = [];
-  const raw = plan as unknown as Record<string, unknown>;
-  const check = (where: string, item: unknown, fields: Record<string, Check>): void => {
-    if (typeof item !== 'object' || item === null || Array.isArray(item))
-      return void out.push(`${where} is not an object`);
-    for (const [key, ok] of Object.entries(fields))
-      if (!ok((item as Record<string, unknown>)[key])) out.push(`${where}: bad or missing ${key}`);
-  };
-  if (!pts(raw['outline'])) out.push('outline is not a list of points');
-  for (const [list, fields] of Object.entries(LISTS)) {
-    const items = raw[list];
-    if (items === undefined && (list === 'materials' || list === 'devices')) continue;
-    if (Array.isArray(items)) items.forEach((item, i) => check(`${list}[${i}]`, item, fields));
-    else out.push(`${list} is not a list`);
-  }
-  if (raw['underlay'] != null) check('underlay', raw['underlay'], UNDERLAY);
-  return out;
-}
-
 export type PlanFileResult =
   | {
       ok: true;
@@ -211,12 +148,12 @@ export async function readPlanFile(
     return fail(`the file has both ${IMAGE_KEY} and ${IMAGE_FILE_KEY}: use one`);
   let plan: Plan;
   try {
-    plan = normalizePlan(rest);
+    const parsed = parsePlan(rest);
+    if (parsed.problems.length > 0) return fail(...parsed.problems);
+    plan = parsed.plan;
   } catch (err) {
     return fail((err as Error).message);
   }
-  const shape = shapeProblems(plan);
-  if (shape.length > 0) return fail(...shape);
   const problems = validatePlan(plan);
   if (problems.length > 0) return fail(...problems);
 

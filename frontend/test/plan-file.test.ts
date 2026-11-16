@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vite-plus/test';
 import type { Hass } from '../src/ha-types';
 import { planIdForFloor } from '../src/model';
 import { PLAN_ID_PATTERN } from '../src/plan/constants';
-import { emptyPlan, normalizePlan } from '../src/plan/functions';
+import { emptyPlan } from '../src/plan/functions';
+import { normalizePlan } from '../src/plan/schema';
 import type { Plan, Underlay } from '../src/plan/models';
 import {
   dataUrl,
@@ -13,7 +14,6 @@ import {
   planFileJson,
   planFileName,
   readPlanFile,
-  shapeProblems,
   underlayFileName,
   type PlanFileResult,
 } from '../src/plan-file';
@@ -375,13 +375,6 @@ describe('underlay as a separate file', () => {
     expect(looksLike('text/html', enc('<svg>'))).toBe(false);
     expect(imageTypeOfName('a.Webp')).toBe('image/webp');
     expect(imageTypeOfName('a.gif')).toBeNull();
-  });
-});
-
-describe('shapeProblems', () => {
-  it('passes the example plan and an empty one', async () => {
-    expect(shapeProblems(fixture)).toEqual([]);
-    expect(shapeProblems(emptyPlan('x'))).toEqual([]);
   });
 });
 

@@ -1,6 +1,6 @@
-// Reading, checking and summarising a plan. Editing operations are in ops.ts.
+// Checking and summarising a plan. Reading one in is schema.ts; editing operations are in ops.ts.
 import { DEFAULT_MATERIALS, LIMITS, PLAN_SCHEMA_VERSION } from './constants';
-import type { Material, Plan, Room, Source, Wall } from './models';
+import type { Material, Plan, Source, Wall } from './models';
 import type { Point } from './types';
 
 /** A new, empty plan. */
@@ -18,45 +18,10 @@ export function emptyPlan(name: string, floor_id: string | null = null): Plan {
   };
 }
 
-/**
- * A stored plan as the panel uses it: missing lists filled in, the storage `id` and any extra keys
- * kept as they are. Throws on a schema version this build does not know.
- */
-export function normalizePlan(raw: unknown): Plan {
-  if (!raw || typeof raw !== 'object') throw new Error('not a plan');
-  const r = raw as Partial<Plan> & { schema_version?: unknown; name?: unknown };
-  const version = r.schema_version ?? PLAN_SCHEMA_VERSION;
-  if (version !== PLAN_SCHEMA_VERSION)
-    throw new Error(`unsupported schema_version ${String(version)}`);
-  return {
-    ...r,
-    schema_version: PLAN_SCHEMA_VERSION,
-    name: typeof r.name === 'string' ? r.name : 'Plan',
-    floor_id: r.floor_id ?? null,
-    outline: r.outline ?? [],
-    walls: r.walls ?? [],
-    rooms: (r.rooms ?? []).map(normalizeRoom),
-    doors: r.doors ?? [],
-    windows: r.windows ?? [],
-    sources: r.sources ?? [],
-    devices: r.devices ?? [],
-  };
-}
-
 /** The ids in order, each once, without empty ones. */
 export const uniqueIds = (ids: readonly unknown[]): string[] => [
   ...new Set(ids.filter((id): id is string => !!id && typeof id === 'string')),
 ];
-
-/**
- * A stored room as the panel uses it: a single `area_id` from plans saved before rooms could link
- * several areas becomes `area_ids`, and an empty list is dropped.
- */
-function normalizeRoom(raw: Room & { area_id?: unknown }): Room {
-  const { area_id, area_ids, ...room } = raw;
-  const ids = uniqueIds([...(Array.isArray(area_ids) ? area_ids : []), area_id]);
-  return ids.length > 0 ? { ...room, area_ids: ids } : room;
-}
 
 /** Length of a wall's centreline. */
 export function wallLength(wall: Wall): number {

@@ -103,3 +103,17 @@ describe('websocket api', () => {
     expect(sent.map((m) => m.type)).toEqual(['chartroom/mesh/get', 'chartroom/info']);
   });
 });
+
+describe('websocket api, damaged plans', () => {
+  it('opens a damaged stored plan without what nothing could draw, and says what was wrong', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { c } = connection({ 'chartroom/plans/get': { name: 'Home', walls: {}, rooms: [7] } });
+    const { plan } = await wsApi(c).getPlan('home');
+    expect(plan).toMatchObject({ walls: [], rooms: [] });
+    expect(warn).toHaveBeenCalledWith('Chartroom: plan home:', [
+      'walls is not a list',
+      'rooms[0] is not an object',
+    ]);
+    warn.mockRestore();
+  });
+});

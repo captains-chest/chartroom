@@ -1,0 +1,61 @@
+{
+  "_comment": "Rules the frontend and the integration must agree on, each written in both languages. Asserted by frontend/test/contract.test.ts and tests/test_contract.py: change both sides with this file.",
+  "plan_ids": {
+    "valid": [
+      "a",
+      "floor_ground",
+      "home",
+      "x-1_y",
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "invalid": [
+      "",
+      "up\n",
+      "Up",
+      "a/b",
+      "../x",
+      "a b",
+      "é",
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ]
+  },
+  "underlay_urls": {
+    "valid": [
+      { "url": "/api/chartroom/underlay/home", "plan_id": "home" },
+      { "url": "/api/chartroom/underlay/floor_ground?v=0123456789ab", "plan_id": "floor_ground" }
+    ],
+    "invalid": [
+      "/api/chartroom/underlay/",
+      "/api/chartroom/underlay/up\n",
+      "/api/chartroom/underlay/up%0A",
+      "/api/chartroom/underlay/a/b",
+      "/api/chartroom/underlay/home?v=XYZ",
+      "/api/chartroom/underlay/home?v=",
+      "/api/chartroom/underlay/home#x",
+      "/api/chartroom/underlay/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "https://example.com/api/chartroom/underlay/a",
+      "//example.com/api/chartroom/underlay/a"
+    ]
+  },
+  "image_types": {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/svg+xml": "svg"
+  },
+  "image_heads": [
+    { "type": "image/png", "hex": "89504e470d0a1a0a0000", "ok": true },
+    { "type": "image/png", "hex": "89504e470d0a1a", "ok": false },
+    { "type": "image/jpeg", "hex": "ffd8ffe0", "ok": true },
+    { "type": "image/jpeg", "hex": "ffd8", "ok": false },
+    { "type": "image/webp", "hex": "52494646000000005745425056503820", "ok": true },
+    { "type": "image/webp", "hex": "52494646000000005741564500000000", "ok": false },
+    { "type": "image/svg+xml", "text": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>", "ok": true },
+    { "type": "image/svg+xml", "text": "﻿ \n<?xml version=\"1.0\"?><SVG/>", "ok": true },
+    { "type": "image/svg+xml", "text": "hello <svg>", "ok": false },
+    { "type": "image/svg+xml", "text": "<html><body></body></html>", "ok": false },
+    { "type": "image/png", "text": "<svg/>", "ok": false }
+  ],
+  "underlay_max_bytes": 10485760,
+  "plan_schema_version": 1
+}

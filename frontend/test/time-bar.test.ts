@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test';
-import type { Hass, HassConnection } from '../src/ha-types';
+import type { EntityState, Hass, HassConnection } from '../src/ha-types';
 import { layerData } from '../src/heat/functions';
+import { planInputs, hassChanged } from '../src/plan-inputs';
 import { emptyPlan, planEntities } from '../src/plan/functions';
 import type { Plan } from '../src/plan/models';
 import { fetchTimeline, hassAt, statesAt, type Timeline } from '../src/time-bar';
@@ -87,6 +88,25 @@ describe('states at a time', () => {
     expect(signal.excluded.map((r) => r.id)).toEqual(['ap']);
     expect(layerData(plan(), then, 'temperature').readings[0]!.value).toBe(31);
     expect(hassAt(undefined, tl2, 5)).toBeUndefined();
+  });
+
+  it('keeps the recorded view unchanged for the plan-inputs gate until the shown time moves', () => {
+    const tl2: Timeline = new Map([['sensor.t', { t: [0, 10], s: ['31', '32'] }]]);
+    const memo = new Map<string, EntityState>();
+    const ids = planInputs(plan());
+    const live = hass();
+    const before = hassAt(live, tl2, 5, memo);
+    // A new live reading of a recorded sensor, and a light the plan does not use.
+    const next: Hass = {
+      ...live,
+      states: {
+        ...live.states,
+        'sensor.t': { ...live.states!['sensor.t']!, state: '21' },
+        'light.x': { entity_id: 'light.x', state: 'on', attributes: {} },
+      },
+    };
+    expect(hassChanged(before, hassAt(next, tl2, 5, memo), ids)).toBe(false);
+    expect(hassChanged(before, hassAt(next, tl2, 15, memo), ids)).toBe(true);
   });
 });
 

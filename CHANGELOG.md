@@ -12,6 +12,12 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   `chartroom/mesh/test_source` is registered only when Home Assistant runs with the environment
   variable `CHARTROOM_TEST_HOOKS` set (#20).
 
+### Performance
+
+- With the History slider open, the plan no longer redraws on every Home Assistant update while the
+  shown time stays put: only moving the slider, loading another range or a change to the plan
+  redraws it, as in live view (#82).
+
 ## 0.2.0 — 2026-11-16
 
 ### Fixed

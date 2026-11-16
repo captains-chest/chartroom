@@ -85,13 +85,28 @@ export function statesAt(tl: Timeline, t: number): Map<string, string> {
   return out;
 }
 
-/** `hass` as it was at `t`: recorded states over the live ones, and no service calls. */
-export function hassAt(hass: Hass | undefined, tl: Timeline, t: number): Hass | undefined {
+/**
+ * `hass` as it was at `t`: recorded states over the live ones, and no service calls. With `memo`
+ * (one per timeline), an entity keeps its recorded object while its recorded state and its live
+ * attributes stay the same, so the plan-inputs gate sees no change when only the live state moved.
+ */
+export function hassAt(
+  hass: Hass | undefined,
+  tl: Timeline,
+  t: number,
+  memo?: Map<string, EntityState>,
+): Hass | undefined {
   if (!hass?.states) return hass;
   const states: Record<string, EntityState> = { ...hass.states };
   for (const [id, state] of statesAt(tl, t)) {
     const live = states[id];
-    if (live) states[id] = { ...live, state, last_reported: undefined };
+    if (!live) continue;
+    const kept = memo?.get(id);
+    if (kept?.state === state && kept.attributes === live.attributes) states[id] = kept;
+    else {
+      states[id] = { ...live, state, last_reported: undefined };
+      memo?.set(id, states[id]);
+    }
   }
   return { ...hass, states, callService: undefined };
 }
@@ -118,6 +133,8 @@ export class TimeBar {
   readonly el: HTMLElement;
   readonly #host: TimeHost;
   #tl: Timeline = new Map();
+  /** `hassAt`'s recorded objects for `#tl`: at most one per entity in it. */
+  #memo = new Map<string, EntityState>();
   #range: (typeof RANGES)[number] = RANGES[1];
   #at = 0;
   #load = 0;
@@ -155,7 +172,7 @@ export class TimeBar {
   }
 
   view(hass: Hass | undefined): Hass | undefined {
-    return hassAt(hass, this.#tl, this.#at);
+    return hassAt(hass, this.#tl, this.#at, this.#memo);
   }
 
   /** (Re)fetch for the current plan and range; keeps the time if it is still in range. */
@@ -174,6 +191,7 @@ export class TimeBar {
       const tl = await fetchTimeline(c, this.#host.plan(), start, end, this.#range.period);
       if (load !== this.#load) return;
       this.#tl = tl;
+      this.#memo = new Map();
       this.#slider.disabled = false;
       this.el.dataset['entities'] = String(tl.size);
       this.#seek(this.#at >= start && this.#at <= end ? this.#at : end);

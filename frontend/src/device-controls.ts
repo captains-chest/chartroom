@@ -24,6 +24,8 @@ interface Press {
 export class DeviceControls implements PointerDelegate {
   readonly dialog: HTMLDialogElement;
   #press: Press | null = null;
+  /** The marker under the last right-button press, if any. */
+  #rightPress: { entity: string; x: number; y: number } | null = null;
   #lastInfo = 0;
   readonly #confirmText: HTMLElement;
   readonly #confirmButton: HTMLButtonElement;
@@ -50,10 +52,21 @@ export class DeviceControls implements PointerDelegate {
     );
     this.dialog.addEventListener('close', () => this.#close(false));
     view.el.addEventListener('keydown', (e) => this.#key(e));
+    // The view captures the pointer on press, so the contextmenu after a right-click goes to the
+    // <svg>, not the marker: remember the marker the press started on.
+    view.el.addEventListener('pointerdown', (e) => {
+      const el = e.button === 2 ? this.#marker(e.target) : null;
+      this.#rightPress = el ? { entity: el.dataset['entity']!, x: e.clientX, y: e.clientY } : null;
+    });
     view.el.addEventListener('contextmenu', (e) => {
-      const el = this.#marker(e.target);
+      const r = this.#rightPress;
+      this.#rightPress = null;
+      // A right-drag that moved is a pan, not a click.
+      const entity =
+        this.#marker(e.target)?.dataset['entity'] ??
+        (r && Math.hypot(e.clientX - r.x, e.clientY - r.y) <= SLOP_PX ? r.entity : undefined);
       // A long touch fires contextmenu too; the hold already opened the dialog.
-      if (el && this.active && !this.#press?.held) this.#moreInfo(el.dataset['entity']!);
+      if (entity && this.active && !this.#press?.held) this.#moreInfo(entity);
     });
   }
 

@@ -211,6 +211,8 @@ export class ViewerController {
   connect(): void {
     this.#watchNotice();
     this.#subscribe();
+    // Given hass before it was on the page (Lovelace may do that): the first load is still due.
+    if (this.#follow && !this.#follow.loaded && this.#hass?.connection) void this.#reload();
     void this.view.resume();
   }
 

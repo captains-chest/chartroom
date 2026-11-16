@@ -251,6 +251,18 @@ describe('viewer controller', () => {
       expect(view.plan?.name).toBe('Renamed');
     });
 
+    it('loads when put on the page after it was given hass', async () => {
+      // Lovelace may configure a card and set hass before inserting it.
+      const { viewer, el, reports } = follow();
+      el.remove();
+      viewer.hass = liveHass(recorder().c);
+      await settle();
+      expect(reports).toEqual([]);
+      document.createElement('main').append(el);
+      viewer.connect();
+      await vi.waitFor(() => expect(names(reports)).toEqual(['Home*']));
+    });
+
     it('does not reload for its own save', async () => {
       const { viewer, api, reports, lists } = follow();
       viewer.hass = liveHass(recorder().c);

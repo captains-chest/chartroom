@@ -241,8 +241,8 @@ share** app. Run `ha core check` before restarting. From a checkout or an unpack
 
 ```sh
 COPYFILE_DISABLE=1 tar -C custom_components --exclude=__pycache__ -czf - chartroom \
-  | ssh root@<host> 'tar -C /config/custom_components -xzf - && ha core check'
-ssh root@<host> ha core restart
+  | ssh root@<host> 'mkdir -p /config/custom_components && tar -C /config/custom_components -xzf - \
+      && ha core check && ha core restart'
 ```
 
 After an update (and the restart), a panel or card left open in a browser shows **Chartroom was

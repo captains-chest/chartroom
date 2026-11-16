@@ -9,6 +9,7 @@ import type { MeshLayer } from './mesh-layer';
 import { MarkerLayer, markerStyles } from './markers';
 import type { Plan } from './plan/models';
 import type { Point } from './plan/types';
+import { hassChanged, planInputs } from './plan-inputs';
 import { planBody } from './plan-svg';
 import { h, s } from './ui';
 import {
@@ -182,7 +183,9 @@ export class PlanView {
     this.markers.render(plan?.devices ?? [], this.#hass, this.#selectedDevice);
     this.#renderUnderlay();
     if (!this.#fitted) this.fit();
-    this.#heat?.setPlan(plan);
+    // The layers may hold an older hass, skipped as unchanged for the previous plan.
+    this.#heat?.setPlan(plan, this.#hass);
+    this.#mesh?.setHass(this.#hass);
     this.#mesh?.setPlan(plan);
     this.#tidyLabels();
     this.#onPlan?.();
@@ -285,12 +288,18 @@ export class PlanView {
     this.#declutter?.(this.#body, this.#heatValues, this.mpp);
   }
 
-  /** New states from Home Assistant: restyle the markers whose entity changed. */
-  setHass(hass: Hass | undefined): void {
+  /**
+   * New states from Home Assistant. The layers only hear of it when something the plan reads
+   * changed (plan-inputs.ts); returns whether it did.
+   */
+  setHass(hass: Hass | undefined): boolean {
+    const changed = hassChanged(this.#hass, hass, planInputs(this.#plan));
     this.#hass = hass;
+    if (!changed) return false;
     this.markers.update(hass);
     this.#heat?.setHass(hass);
     this.#mesh?.setHass(hass);
+    return true;
   }
 
   /** The underlay image as a URL the browser can load (a blob URL). */

@@ -66,8 +66,8 @@ export class ViewerController {
 
   set hass(hass: Hass) {
     this.#hass = hass;
-    this.view.setHass(this.shown());
-    this.#renderLayers();
+    // Only when something the plan reads changed: Home Assistant sends every state change.
+    if (this.view.setHass(this.shown())) this.#renderLayers();
     if (this.#host.el.isConnected) this.notice.watch(hass.connection);
   }
 

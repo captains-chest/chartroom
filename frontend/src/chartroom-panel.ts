@@ -67,6 +67,8 @@ export class ChartroomPanel extends HTMLElement {
   #plans: PlanSummary[] | null = null;
   #tabs: FloorTab[] = [];
   #tabsKey = '';
+  /** The floor registry the tabs were built from. */
+  #tabsFloors: Hass['floors'] | null = null;
   #tab: string | null = null;
   #planId: string | null = null;
   #plan: Plan | null = null;
@@ -235,7 +237,8 @@ export class ChartroomPanel extends HTMLElement {
       void this.#refreshPlans();
     }
     if (this.isConnected) this.#follow();
-    if (this.#plans) this.#renderTabs();
+    // The tabs follow the floor registry, not states.
+    if (this.#plans && hass.floors !== this.#tabsFloors) this.#renderTabs();
     this.#editor?.hassChanged();
   }
 
@@ -325,6 +328,7 @@ export class ChartroomPanel extends HTMLElement {
   }
 
   #renderTabs(): void {
+    this.#tabsFloors = this.#viewer.hass?.floors;
     const tabs = floorTabs(this.#viewer.hass, this.#plans ?? []);
     const key = JSON.stringify(tabs);
     if (key === this.#tabsKey) return;

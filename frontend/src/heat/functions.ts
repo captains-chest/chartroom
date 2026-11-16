@@ -77,6 +77,21 @@ export function layerData(
   return { layer, unit, readings, excluded };
 }
 
+/**
+ * When the first of `data`'s readings goes stale (`last_reported` older than STALE_MS), in
+ * `Date.now()` time; Infinity when none will (no time stamps, or the signal layer).
+ */
+export function staleAt(data: LayerData, hass: Hass | undefined, now = Date.now()): number {
+  let at = Infinity;
+  if (data.layer === 'signal') return at;
+  for (const r of data.readings) {
+    const reported = Date.parse(hass?.states?.[r.entity_id]?.last_reported ?? '');
+    // A time stamp from the future (a clock ahead of the browser's) counts from now.
+    if (Number.isFinite(reported)) at = Math.min(at, Math.min(reported, now) + STALE_MS);
+  }
+  return at;
+}
+
 /** The ramp's value range: the layer's default for the unit, widened to whole numbers around the data. */
 export function layerDomain(
   layer: HeatLayerId,

@@ -10,7 +10,18 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   plan on screen and its floor tabs update without a reload, and catch up after Home Assistant
   reconnects or the panel comes back on the page. While the editor is open it keeps its own copy;
   Done shows what is stored, and an edit made after a save elsewhere replaces it (the last save
-  wins) (#78). Frontend: 14.78 KB gzip for the card, 55.30 KB gzip in total.
+  wins) (#78).
+
+### Performance
+
+- A plan only redraws when something it shows changes: a state change of an entity the plan
+  does not use (a light in another room) no longer rebuilds the heatmap's inputs, repaints the
+  field or refreshes the layer buttons, in the panel and on every card. A reading that goes stale
+  is still noticed on time.
+
+### Requirements
+
+- Frontend: 15.03 KB gzip for the card, 55.40 KB gzip in total.
 
 ## 0.1.0 — 2026-11-14
 

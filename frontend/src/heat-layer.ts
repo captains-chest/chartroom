@@ -13,7 +13,7 @@ import { legendContent, renderLegend, signalNote } from './heat/legend';
 import type { FieldRenderer, Layout } from './heat/models';
 import type { FieldRequest, RendererKind } from './heat/types';
 import { LAYERS, TRANSITION_MS } from './heat/constants';
-import { easeOut, layerData, layerDomain, layoutKey, rampLut } from './heat/functions';
+import { easeOut, layerData, layerDomain, layoutKey, rampLut, staleAt } from './heat/functions';
 import type { LayerData } from './heat/models';
 import type { HeatLayerId } from './heat/types';
 import type { Hass } from './ha-types';
@@ -70,6 +70,8 @@ export class HeatLayer {
   #domain: [Anim, Anim] | null = null;
   #fade: Anim | null = null;
   #raf = 0;
+  /** Re-reads the states when a reading goes stale: that changes with time, not with `hass`. */
+  #staleTimer: ReturnType<typeof setTimeout> | undefined;
   #sig = '';
   #lut: Uint8Array = rampLut(LAYERS.temperature.ramp);
   #signalNote: string[] = [];
@@ -153,8 +155,10 @@ export class HeatLayer {
     this.#refresh();
   }
 
-  setPlan(plan: Plan | null): void {
+  /** A new plan, with the states to read it with (the view's latest: it may skip some). */
+  setPlan(plan: Plan | null, hass: Hass | undefined = this.#hass): void {
     this.#plan = plan;
+    this.#hass = hass;
     this.#refresh();
   }
 
@@ -184,6 +188,7 @@ export class HeatLayer {
   #refresh(): void {
     const layer = this.#layer;
     const plan = this.#plan;
+    clearTimeout(this.#staleTimer);
     if (!layer || !plan) {
       this.#data = null;
       this.#wantKey = this.#key = '';
@@ -196,6 +201,9 @@ export class HeatLayer {
     }
     const data = layerData(plan, this.#hass, layer);
     this.#data = data;
+    const stale = staleAt(data, this.#hass);
+    if (stale < Infinity && !this.#disposed)
+      this.#staleTimer = setTimeout(() => this.#refresh(), stale - Date.now() + 1);
     const bounds = planBounds(plan);
     const outline = plan.outline;
     const input = layer === 'signal' ? signalInput(plan, this.#hass, data.readings) : null;
@@ -222,8 +230,9 @@ export class HeatLayer {
       else if (a.to !== r.value)
         Object.assign(a, { from: current(a, now, this.#ms), to: r.value, t0: now });
     }
-    const sig = JSON.stringify([key, values, target, data.excluded, this.#signalNote]);
-    if (sig !== this.#sig) {
+    const sig = key + JSON.stringify([values, target, data.excluded, this.#signalNote]);
+    const changed = sig !== this.#sig;
+    if (changed) {
       this.#sig = sig;
       renderLegend(this.legend, legendContent(data, target, this.#signalNote));
       this.onReadings?.(data, target);
@@ -261,7 +270,8 @@ export class HeatLayer {
           console.warn('Chartroom heatmap:', res);
           this.#blank(key);
         });
-    } else this.#start();
+      // Same layout and the same readings: the field on screen is already right.
+    } else if (changed) this.#start();
   }
 
   /** Nothing to draw for layout `key`: hide the field and settle. */
@@ -359,6 +369,7 @@ export class HeatLayer {
 
   dispose(): void {
     this.#disposed = true;
+    clearTimeout(this.#staleTimer);
     cancelAnimationFrame(this.#raf);
     this.#raf = 0;
     this.#renderer.dispose();

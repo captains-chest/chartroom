@@ -2,19 +2,11 @@
 // selection, undo/redo and autosave. Loaded on demand by the panel (its own chunk).
 import { autoPlace, deviceChoices, deviceLook } from './devices';
 import { add, dist, frame, roundToMm, polygonArea } from './geometry';
-import { errorText, retryable } from './ha-errors';
-import type { Hass, HassConnection } from './ha-types';
-import { autosaver, flushOnLeave } from './editor/autosaver';
+import type { Hass } from './ha-types';
+import { EditSession } from './editor/session';
 import { findItem, kindOps, titleOf } from './editor/kinds';
 import { areaName, roomNameForAreas } from './editor/rooms';
-import type {
-  Autosaver,
-  Items,
-  Selection,
-  ToolContext,
-  ToolResult,
-  ToolState,
-} from './editor/models';
+import type { Items, Selection, ToolContext, ToolResult, ToolState } from './editor/models';
 import {
   closeRoom,
   down,
@@ -27,7 +19,6 @@ import {
   withTool,
 } from './editor/tools';
 import type { Item, Kind, Tool } from './editor/types';
-import { History } from './history';
 import { areaChoices, entityArea, sourceChoices } from './model';
 import { limitWarnings, materialsOf } from './plan/functions';
 import type { Device, Door, Plan, Room, Source, Wall } from './plan/models';
@@ -123,8 +114,6 @@ const TOOLS: { tool: Tool; key: string; hint: string }[] = [
 
 /** Snap radius on screen. */
 const SNAP_PX = 10;
-/** Autosave this long after the last change. */
-const SAVE_DELAY_MS = 600;
 /** An inspector section's content. */
 type Fields = (HTMLElement | null)[];
 /** Drag-and-drop type for an entity dragged from the Device list onto the plan. */
@@ -135,21 +124,9 @@ export class PlanEditor {
   readonly inspector: HTMLElement;
   readonly #host: EditorHost;
   readonly #view: PlanView;
-  readonly #history: History<Plan>;
+  /** The plan's history, saving, imports running and closing (no DOM). */
+  readonly #session: EditSession;
   #s: ToolState = initialState;
-  /** Set by close(), so an import still uploading its image doesn't commit afterwards. */
-  #closed = false;
-  /**
-   * Imports still running (an image may be uploading), each ending with why it failed, or null.
-   * Leaving the page asks first while one runs, and close() waits for them.
-   */
-  readonly #imports = new Set<Promise<string | null>>();
-  readonly #saver: Autosaver<Plan>;
-  /** Stops saving on page hide/unload. */
-  readonly #stopLeaveGuard: () => void;
-  /** The connection whose reconnects retry a failed save. */
-  readonly #connection: HassConnection | undefined;
-  readonly #onReconnect = (): void => this.#saver.retry();
   readonly #saveState: HTMLElement;
   readonly #hint: HTMLElement;
   readonly #undoButton: HTMLButtonElement;
@@ -181,26 +158,12 @@ export class PlanEditor {
   constructor(host: EditorHost) {
     this.#host = host;
     this.#view = host.view;
-    this.#history = new History(host.plan);
-    this.#saver = autosaver(
-      (plan) => host.save(plan),
-      SAVE_DELAY_MS,
-      host.plan,
-      (text, error) => this.#setSaveState(text, error),
-      { retryable, describe: errorText },
-    );
-    const saver = this.#saver;
-    const imports = this.#imports;
-    // An image still uploading is unsaved work too: the plan does not point at it yet.
-    this.#stopLeaveGuard = flushOnLeave({
-      flush: () => saver.flush(),
-      get unsaved() {
-        return saver.unsaved || imports.size > 0;
-      },
+    this.#session = new EditSession({
+      plan: host.plan,
+      save: (plan) => host.save(plan),
+      status: (text, error) => this.#setSaveState(text, error),
+      connection: host.hass()?.connection,
     });
-    // Home Assistant's connection is back: try a failed save now rather than after its wait.
-    this.#connection = host.hass()?.connection;
-    this.#connection?.addEventListener?.('ready', this.#onReconnect);
     this.#underlay = host.underlay;
     for (const t of TOOLS) {
       const label = titleOf(t.tool);
@@ -244,54 +207,33 @@ export class PlanEditor {
   }
 
   get plan(): Plan {
-    return this.#history.present;
+    return this.#session.plan;
   }
 
   /** A change is not stored yet (after close: its last save failed). */
   get unsaved(): boolean {
-    return this.#saver.unsaved;
+    return this.#session.unsaved;
   }
 
   /** Save any pending change now, without closing (the panel left the page). */
   flush(): Promise<void> {
-    return this.#saver.flush();
+    return this.#session.flush();
   }
 
   /**
-   * Wait for imports still running, so an image being uploaded lands in the plan, then flush
-   * pending saves and detach from the view. Resolves to why an import it waited for failed, if one
-   * did (the editor's own status is gone once it closes), or null.
+   * Close the session (it waits for imports still running and the last save), then detach from the
+   * view. Resolves to what went wrong that the user would otherwise not see once the editor's
+   * toolbar is gone (a failed import, an unsaved change), or null.
    */
   async close(): Promise<string | null> {
-    let failed: string | null = null;
-    // Another import may start meanwhile: the editor stays usable until they are all done.
-    while (this.#imports.size > 0) {
-      this.#setSaveState('Uploading image…');
-      for (const r of await Promise.allSettled(this.#imports)) {
-        if (r.status === 'fulfilled') failed = r.value ?? failed;
-        else failed = `Import failed: ${(r.reason as Error)?.message ?? r.reason}`;
-      }
-    }
-    this.#closed = true;
+    const problem = await this.#session.close();
     if (this.#frame) cancelAnimationFrame(this.#frame);
-    this.#stopLeaveGuard();
-    this.#connection?.removeEventListener?.('ready', this.#onReconnect);
-    await this.#saver.flush();
-    // A failed last save is not retried once closed: the panel may move on to another plan.
-    this.#saver.dispose();
     this.#view.setDelegate(null);
     this.#view.drawOverlay();
     this.#view.setEditing(null);
     this.#view.el.removeEventListener('dragover', this.#onDragOver);
     this.#view.el.removeEventListener('drop', this.#onDrop);
-    return failed;
-  }
-
-  /** Count an import as running until it ends (see `#imports`). */
-  #track(job: Promise<string | null>): void {
-    this.#imports.add(job);
-    const done = (): void => void this.#imports.delete(job);
-    job.then(done, done);
+    return problem;
   }
 
   hassChanged(): void {
@@ -318,7 +260,7 @@ export class PlanEditor {
       this.#note = '';
       this.#fileReport = null;
     }
-    if (r.commit && !this.#closed && this.#history.commit(r.commit)) this.#afterChange();
+    if (r.commit && this.#session.commit(r.commit)) this.#afterChange();
     else if (next !== prev) this.#render();
     return !r.pass;
   }
@@ -333,20 +275,19 @@ export class PlanEditor {
 
   // ---- history and saving ----
 
-  // Once closing has begun (the final save is under way), the plan no longer changes: a later
-  // edit would be saved after close, maybe as another plan once the panel moves on.
+  // Once closing has begun (the final save is under way), the session takes no more changes.
   #commit(next: Plan): void {
-    if (!this.#closed && this.#history.commit(next)) this.#afterChange();
+    if (this.#session.commit(next)) this.#afterChange();
   }
 
   undo(): void {
-    if (this.#closed || this.#history.undo() === undefined) return;
+    if (!this.#session.undo()) return;
     this.#dropStaleSelection();
     this.#afterChange();
   }
 
   redo(): void {
-    if (this.#closed || this.#history.redo() === undefined) return;
+    if (!this.#session.redo()) return;
     this.#dropStaleSelection();
     this.#afterChange();
   }
@@ -356,10 +297,10 @@ export class PlanEditor {
     if (sel && !findItem(this.plan, sel)) this.#s = { ...this.#s, selection: null };
   }
 
+  /** The plan changed: show its underlay image (Undo may go back to another) and draw it. */
   #afterChange(): void {
     this.#syncUnderlay();
     this.#render();
-    this.#saver.schedule(this.plan);
   }
 
   #setSaveState(text: string, error = false): void {
@@ -433,7 +374,7 @@ export class PlanEditor {
     if (typeof requestAnimationFrame !== 'function') return this.#render();
     this.#frame ||= requestAnimationFrame(() => {
       this.#frame = 0;
-      if (!this.#closed) this.#render();
+      if (!this.#session.closed) this.#render();
     });
   }
 
@@ -449,8 +390,8 @@ export class PlanEditor {
     this.#view.setPlan(this.#s.preview ?? this.plan, this.#s.selection, !!this.#s.drag);
     this.#renderOverlay();
     if (!this.#s.drag) this.#renderInspector();
-    this.#undoButton.disabled = !this.#history.canUndo;
-    this.#redoButton.disabled = !this.#history.canRedo;
+    this.#undoButton.disabled = !this.#session.canUndo;
+    this.#redoButton.disabled = !this.#session.canRedo;
   }
 
   #renderOverlay(): void {
@@ -795,7 +736,7 @@ export class PlanEditor {
     input.addEventListener('change', () => {
       const files = [...(input.files ?? [])];
       input.value = '';
-      if (files.length > 0 && !this.#closed) this.#track(this.#importPlan(files));
+      if (files.length > 0 && !this.#session.closed) this.#session.track(this.#importPlan(files));
     });
     const report = this.#fileReport;
     return this.#section(
@@ -877,7 +818,7 @@ export class PlanEditor {
       this.plan.floor_id ?? null,
       files.filter((f) => f !== file),
     );
-    if (this.#closed) return null;
+    if (this.#session.closed) return null;
     if (!r.ok) return fail(`${file.name} was not imported:`, ...r.problems);
     let plan = r.plan;
     let image: { url: string; blob: Blob } | null = null;
@@ -886,7 +827,12 @@ export class PlanEditor {
       const before = { text: state.textContent ?? '', error: state.classList.contains('error') };
       this.#setSaveState('Uploading image…');
       try {
-        const url = await uploadUnderlay(this.#host.hass(), this.#host.planId, r.image);
+        const url = await uploadUnderlay(
+          this.#host.hass(),
+          this.#host.planId,
+          r.image,
+          this.#session.signal,
+        );
         plan = { ...plan, underlay: { ...plan.underlay, url } };
         image = { url, blob: r.image };
       } catch (err) {
@@ -894,7 +840,7 @@ export class PlanEditor {
         return fail(`${file.name} was not imported: ${(err as Error).message ?? err}`);
       }
     }
-    if (this.#closed) return null;
+    if (this.#session.closed) return null;
     // Drop the old plan's selection, drafts and measurement, keeping the tool.
     this.#s = { ...initialState, tool: this.#s.tool };
     if (image) this.#underlay.put(image.url, image.blob);
@@ -1180,7 +1126,7 @@ export class PlanEditor {
     });
     input.addEventListener('change', () => {
       const file = input.files?.[0];
-      if (file && !this.#closed) this.#track(this.#importUnderlay(file));
+      if (file && !this.#session.closed) this.#session.track(this.#importUnderlay(file));
     });
     const opacity = h('input', {
       type: 'range',
@@ -1230,8 +1176,14 @@ export class PlanEditor {
     const hass = this.#host.hass();
     this.#setSaveState('Uploading image…');
     try {
-      const { underlay, blob } = await importUnderlay(hass, this.#host.planId, file, this.plan);
-      if (this.#closed) return null;
+      const { underlay, blob } = await importUnderlay(
+        hass,
+        this.#host.planId,
+        file,
+        this.plan,
+        this.#session.signal,
+      );
+      if (this.#session.closed) return null;
       this.#underlay.put(underlay.url, blob);
       this.#commit({ ...this.plan, underlay });
       this.#view.fit();

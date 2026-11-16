@@ -66,22 +66,25 @@ export async function importUnderlay(
   planId: string,
   file: File,
   plan: Plan,
+  signal?: AbortSignal,
 ): Promise<{ underlay: Underlay; blob: Blob }> {
   if (!hass?.fetchWithAuth) throw new Error('not connected');
   if (!UNDERLAY_TYPES.test(file.type)) throw new Error('use a PNG, JPEG, WebP or SVG');
   const { blob, width, height } = await prepare(file);
-  const url = await uploadUnderlay(hass, planId, blob);
+  const url = await uploadUnderlay(hass, planId, blob, signal);
   return { underlay: placeUnderlay(plan, url, width, height), blob };
 }
 
 /**
  * Store `blob` as a new version of the plan's image; the URL the plan points at it with. The
- * previous versions stay until the editor closes, so Undo can go back to them.
+ * previous versions stay until the editor closes, so Undo can go back to them. `signal` aborts the
+ * upload (the editor closed and stopped waiting for it).
  */
 export async function uploadUnderlay(
   hass: Hass | undefined,
   planId: string,
   blob: Blob,
+  signal?: AbortSignal,
 ): Promise<string> {
   if (!hass?.fetchWithAuth) throw new Error('not connected');
   if (blob.size > MAX_BYTES) throw new Error('image is larger than 10 MB');
@@ -89,6 +92,7 @@ export async function uploadUnderlay(
     method: 'POST',
     headers: { 'Content-Type': blob.type },
     body: blob,
+    signal,
   });
   if (!res.ok) throw new Error(`upload failed (${res.status})`);
   return ((await res.json()) as { url: string }).url;

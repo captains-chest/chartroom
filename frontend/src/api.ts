@@ -2,7 +2,7 @@
 // Assistant's connection itself and its tests can hand it a fake.
 import type { HassConnection, PlanSummary } from './ha-types';
 import type { Topology } from './mesh-layer';
-import { normalizePlan } from './plan/functions';
+import { parsePlan } from './plan/schema';
 import type { Plan } from './plan/models';
 import { ownUnderlayOnly } from './underlay-url';
 
@@ -22,7 +22,10 @@ export type Unsubscribe = () => Promise<void> | void;
 
 export interface ChartroomApi {
   listPlans(): Promise<PlanSummary[]>;
-  /** The stored plan, normalised, with an underlay only if it is the plan's own image. */
+  /**
+   * The stored plan through the plan schema (repaired, problems logged), with an underlay only if
+   * it is the plan's own image.
+   */
   getPlan(planId: string): Promise<LoadedPlan>;
   savePlan(planId: string, plan: Plan): Promise<void>;
   subscribePlans(cb: (e: PlanEvent) => void): Promise<Unsubscribe>;
@@ -36,8 +39,12 @@ export function wsApi(c: HassConnection): ChartroomApi {
     c.sendMessagePromise<T>({ type: `chartroom/${type}`, ...data });
   return {
     listPlans: async () => (await send<{ plans: PlanSummary[] }>('plans/list')).plans,
-    getPlan: async (plan_id) =>
-      ownUnderlayOnly(plan_id, normalizePlan(await send('plans/get', { plan_id }))),
+    getPlan: async (plan_id) => {
+      // A damaged stored plan still opens, without what nothing could draw.
+      const { plan, problems } = parsePlan(await send('plans/get', { plan_id }), { repair: true });
+      if (problems.length > 0) console.warn(`Chartroom: plan ${plan_id}:`, problems);
+      return ownUnderlayOnly(plan_id, plan);
+    },
     // The storage id comes with a loaded plan; it is not part of what is saved.
     savePlan: async (plan_id, { id: _id, ...plan }: Plan & { id?: string }) => {
       await send('plans/save', { plan_id, plan });

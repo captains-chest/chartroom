@@ -31,6 +31,7 @@ from .const import DOMAIN, PLAN_ID_RE, UNDERLAY_DIR, UNDERLAY_MAX_BYTES, UNDERLA
 _LOGGER = logging.getLogger(__name__)
 
 UPLOAD_CHUNK_BYTES = 64 * 1024
+# The frontend has the same types and signatures (plan-file.ts): tests/fixtures/contract.json.
 TYPES = {
     "image/png": "png",
     "image/jpeg": "jpg",

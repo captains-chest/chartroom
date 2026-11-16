@@ -22,9 +22,15 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   is being dragged, the temperature and humidity fields keep their shape and are worked out again
   where the drag ends, instead of once per pointer move; the signal map still follows the drag.
 
+### Fixed
+
+- A stored plan with a damaged list (say, walls that are not a list) opens without the parts
+  nothing can draw, instead of failing somewhere in the drawing code; what was wrong is logged in
+  the browser console.
+
 ### Requirements
 
-- Frontend: 15.04 KB gzip for the card, 55.67 KB gzip in total.
+- Frontend: 15.10 KB gzip for the card, 56.05 KB gzip in total.
 
 ## 0.1.0 — 2026-11-14
 

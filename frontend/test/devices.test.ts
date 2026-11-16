@@ -3,7 +3,8 @@ import { pointInPolygon } from '../src/geometry';
 import type { EntityState, Hass } from '../src/ha-types';
 import { autoPlace, deviceChoices, deviceLook, spotsInRoom, tapAction } from '../src/devices';
 import { LIMITS } from '../src/plan/constants';
-import { emptyPlan, limitWarnings, normalizePlan, validatePlan } from '../src/plan/functions';
+import { emptyPlan, limitWarnings, validatePlan } from '../src/plan/functions';
+import { normalizePlan } from '../src/plan/schema';
 import type { Plan } from '../src/plan/models';
 import { addDevice, deleteDevice, moveDevice, scalePlan, updateDevice } from '../src/plan/ops';
 

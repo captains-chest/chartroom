@@ -8,7 +8,8 @@ NAME: Final = "Chartroom"
 VERSION: Final = "0.1.0"
 
 # A plan id: also its underlay's file name, so nothing that could leave the folder.
-# frontend/src/plan/constants.ts (PLAN_ID_PATTERN) holds the same rule.
+# frontend/src/plan/constants.ts (PLAN_ID_PATTERN) holds the same rule; tests/fixtures/contract.json
+# checks both.
 _PLAN_ID: Final = r"[a-z0-9_-]{1,64}"
 PLAN_ID_RE: Final = re.compile(rf"\A{_PLAN_ID}\Z")
 
@@ -17,7 +18,8 @@ PLAN_ID_RE: Final = re.compile(rf"\A{_PLAN_ID}\Z")
 STORAGE_KEY: Final = f"{DOMAIN}.plans"
 STORAGE_VERSION: Final = 1
 # The plan schema_version this build accepts on save. The plan schema and its migrations live in
-# the frontend (normalizePlan); a plan without the field predates it and counts as this version.
+# the frontend (frontend/src/plan/schema.ts); a plan without the field predates it and counts as
+# this version.
 PLAN_SCHEMA_VERSION: Final = 1
 
 PANEL_URL_PATH: Final = "chartroom"
@@ -32,7 +34,7 @@ CARD_JS: Final = "chartroom-card.js"
 UNDERLAY_URL: Final = "/api/chartroom/underlay/{plan_id}"
 # The only URL a plan's underlay may have: the image view's, as an upload returns it. The panel
 # fetches it with the user's token, so it must never point anywhere else (underlayPlanId in
-# frontend/src/underlay-url.ts holds the same rule).
+# frontend/src/underlay-url.ts holds the same rule; tests/fixtures/contract.json checks both).
 UNDERLAY_URL_RE: Final = re.compile(
     rf"\A/api/chartroom/underlay/(?P<plan_id>{_PLAN_ID})(?:\?v=[0-9a-f]{{1,64}})?\Z"
 )

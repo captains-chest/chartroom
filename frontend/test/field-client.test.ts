@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 import { fieldGrid } from '../src/field';
 import type { Point } from '../src/plan/types';
 import { CanvasRenderer } from '../src/heat/canvas-renderer';
-import { FieldClient } from '../src/heat/field-client';
+import { FieldClient, SUPERSEDED } from '../src/heat/field-client';
 import type { Layout } from '../src/heat/models';
 import type { WorkerRequest, WorkerRequestBody, WorkerResponse } from '../src/worker-protocol';
 
@@ -68,6 +68,46 @@ describe('field client', () => {
       'field',
     );
     expect(worker.sent).toHaveLength(1);
+  });
+});
+
+describe('field client lanes', () => {
+  const ask = (key: string): WorkerRequestBody => ({ ...mesh, key }) as WorkerRequestBody;
+  const answer = (worker: FakeWorker, i: number): void => {
+    const req = worker.sent[i]!;
+    worker.reply({ type: 'error', id: req.id, message: `done ${(req as { key: string }).key}` });
+  };
+
+  it('keeps one request in flight and one waiting per lane, the latest', async () => {
+    const [client, worker] = withWorker();
+    const a = client.request(ask('a'), 'heat1');
+    const b = client.request(ask('b'), 'heat1');
+    const c = client.request(ask('c'), 'heat1');
+    const other = client.request(ask('x'), 'heat2');
+    // b gave its place to c without reaching the worker; the other lane runs alongside.
+    expect(worker.sent.map((r) => (r as { key: string }).key)).toEqual(['a', 'x']);
+    expect(await b).toMatchObject({ type: 'error', message: SUPERSEDED });
+
+    answer(worker, 0);
+    expect(await a).toMatchObject({ message: 'done a' });
+    await Promise.resolve();
+    expect(worker.sent.map((r) => (r as { key: string }).key)).toEqual(['a', 'x', 'c']);
+    answer(worker, 2);
+    expect(await c).toMatchObject({ message: 'done c' });
+    answer(worker, 1);
+    expect(await other).toMatchObject({ message: 'done x' });
+
+    // The lane is free again: the next request goes straight out.
+    await Promise.resolve();
+    void client.request(ask('d'), 'heat1');
+    expect(worker.sent).toHaveLength(4);
+  });
+
+  it('leaves requests without a lane alone', () => {
+    const [client, worker] = withWorker();
+    void client.request(ask('a'));
+    void client.request(ask('b'));
+    expect(worker.sent).toHaveLength(2);
   });
 });
 

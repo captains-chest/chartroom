@@ -168,7 +168,15 @@ export class PlanView {
     return metresPerPixel(this.#view, Math.max(1, this.#svg.clientWidth));
   }
 
-  setPlan(plan: Plan | null, selected?: { kind: string; id: string } | null): void {
+  /**
+   * Show `plan`. `preview`: a drag in the editor is under way, so layers that are slow to follow
+   * (the temperature and humidity layout) may wait for the drag to end.
+   */
+  setPlan(
+    plan: Plan | null,
+    selected?: { kind: string; id: string } | null,
+    preview = false,
+  ): void {
     this.#plan = plan;
     this.#body.innerHTML = plan ? planBody(plan) : '';
     if (selected) {
@@ -184,7 +192,7 @@ export class PlanView {
     this.#renderUnderlay();
     if (!this.#fitted) this.fit();
     // The layers may hold an older hass, skipped as unchanged for the previous plan.
-    this.#heat?.setPlan(plan, this.#hass);
+    this.#heat?.setPlan(plan, this.#hass, preview);
     this.#mesh?.setHass(this.#hass);
     this.#mesh?.setPlan(plan);
     this.#tidyLabels();

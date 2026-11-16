@@ -18,10 +18,13 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   does not use (a light in another room) no longer rebuilds the heatmap's inputs, repaints the
   field or refreshes the layer buttons, in the panel and on every card. A reading that goes stale
   is still noticed on time.
+- Dragging in the editor redraws the plan at most once a frame. While a wall, room, door or sensor
+  is being dragged, the temperature and humidity fields keep their shape and are worked out again
+  where the drag ends, instead of once per pointer move; the signal map still follows the drag.
 
 ### Requirements
 
-- Frontend: 15.03 KB gzip for the card, 55.40 KB gzip in total.
+- Frontend: 15.04 KB gzip for the card, 55.67 KB gzip in total.
 
 ## 0.1.0 — 2026-11-14
 

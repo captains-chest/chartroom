@@ -273,3 +273,46 @@ describe('following plan saves made elsewhere (#78)', () => {
     expect(t.panel.plan!.name).toBe('Mine');
   });
 });
+
+describe('dragging in the editor', () => {
+  it('redraws the plan once a frame, as a preview until the drag ends', async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (f: FrameRequestCallback) => frames.push(f));
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => void (frames[id - 1] = () => {}));
+    try {
+      const plan = home();
+      plan.sources = [{ id: 's', kind: 'sensor', entity_id: 'sensor.t', position: [1, 1] }];
+      const t = await PanelHarness.mount({ home: plan });
+      await t.openEditor();
+      const view = t.panel.view;
+      const setPlan = vi.spyOn(view, 'setPlan');
+      const hit = { dataset: { kind: 'source', id: 's' } };
+      const target = { closest: (sel: string) => (sel === '[data-kind]' ? hit : null) };
+      const e = { button: 0, clientX: 0, clientY: 0, target } as unknown as PointerEvent;
+      const d = view.delegate!;
+      expect(d.down([1, 1], e)).toBe(true);
+      setPlan.mockClear();
+
+      d.move([1.5, 1], e);
+      d.move([2, 1], e);
+      d.move([2.5, 1], e);
+      expect(setPlan).not.toHaveBeenCalled();
+      expect(frames).toHaveLength(1);
+      frames[0]!(0);
+      expect(setPlan).toHaveBeenCalledOnce();
+      expect(setPlan.mock.calls[0]![2]).toBe(true);
+      expect(setPlan.mock.calls[0]![0]?.sources[0]?.position).toEqual([2.5, 1]);
+
+      d.move([3, 1], e);
+      d.up([3, 1], e);
+      expect(setPlan).toHaveBeenCalledTimes(2);
+      expect(setPlan.mock.calls[1]![2]).toBe(false);
+      expect(t.panel.plan?.sources[0]?.position).toEqual([3, 1]);
+      // The frame the last move asked for was cancelled by the drop's render.
+      frames[1]!(0);
+      expect(setPlan).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

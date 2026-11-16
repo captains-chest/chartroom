@@ -296,9 +296,9 @@ export class ChartroomPanel extends HTMLElement {
     const planId = this.#planId;
     const url = this.#plan?.underlay?.url;
     if (!planId) return;
-    // Not over a tab switch or an editor opened meanwhile (no `begin()`: a tab load stays current).
-    const tab = this.#tab;
-    const current = (): boolean => !this.#editor && this.#planId === planId && this.#tab === tab;
+    // Not over a switch to another plan or an editor opened meanwhile (no `begin()`: a tab load
+    // stays current). The plan's own tab may change: a save can move it to another floor.
+    const current = (): boolean => !this.#editor && this.#planId === planId;
     try {
       const loaded = await this.#viewer.load(planId, current);
       if (!loaded) return;

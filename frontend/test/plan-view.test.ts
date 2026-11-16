@@ -144,6 +144,8 @@ describe('plan view and Home Assistant states', () => {
 
     const next = sensorPlan('sensor.u');
     view.setPlan(next);
-    expect(heat.setPlan).toHaveBeenLastCalledWith(next, h2);
+    expect(heat.setPlan).toHaveBeenLastCalledWith(next, h2, false);
+    view.setPlan(next, null, true);
+    expect(heat.setPlan).toHaveBeenLastCalledWith(next, h2, true);
   });
 });

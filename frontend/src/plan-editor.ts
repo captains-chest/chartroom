@@ -157,6 +157,8 @@ export class PlanEditor {
   /** Fetches the image version the plan points at, after an import, Undo or Redo. */
   readonly #underlay: UnderlayImage;
   #lastClick = { t: 0, x: 0, y: 0 };
+  /** A drag's render waiting for the next frame (#renderSoon). */
+  #frame = 0;
   /** What the Source tool places next. */
   #sourceKind: SourceKind = 'sensor';
   #deviceKey = '';
@@ -277,6 +279,7 @@ export class PlanEditor {
       }
     }
     this.#closed = true;
+    if (this.#frame) cancelAnimationFrame(this.#frame);
     this.#underlay.close();
     this.#stopLeaveGuard();
     this.#connection?.removeEventListener?.('ready', this.#onReconnect);
@@ -428,19 +431,30 @@ export class PlanEditor {
     const next = move(this.#s, this.#ctx(), p);
     if (next === this.#s) return;
     this.#s = next;
-    // A drag redraws the plan; the drawing cursor only the overlay.
-    if (next.drag) this.#render();
+    // A drag redraws the plan, once a frame; the drawing cursor only the overlay.
+    if (next.drag) this.#renderSoon();
     else this.#renderOverlay();
+  }
+
+  /** Pointer moves can come faster than the screen draws: render once in the next frame. */
+  #renderSoon(): void {
+    if (typeof requestAnimationFrame !== 'function') return this.#render();
+    this.#frame ||= requestAnimationFrame(() => {
+      this.#frame = 0;
+      if (!this.#closed) this.#render();
+    });
   }
 
   // ---- rendering ----
 
   #render(): void {
+    if (this.#frame) cancelAnimationFrame(this.#frame);
+    this.#frame = 0;
     const { tool } = this.#s;
     for (const [t, b] of this.#toolButtons) b.setAttribute('aria-pressed', String(t === tool));
     this.#hint.textContent = TOOLS.find((t) => t.tool === tool)?.hint ?? '';
     this.#view.setEditing(tool);
-    this.#view.setPlan(this.#s.preview ?? this.plan, this.#s.selection);
+    this.#view.setPlan(this.#s.preview ?? this.plan, this.#s.selection, !!this.#s.drag);
     this.#view.setUnderlayUrl(this.#underlayUrl);
     this.#renderOverlay();
     if (!this.#s.drag) this.#renderInspector();

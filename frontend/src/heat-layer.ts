@@ -45,6 +45,8 @@ const current = (a: Anim, now: number, ms: number): number =>
 const done = (a: Anim, now: number, ms: number): boolean =>
   ms <= 0 || now - a.t0 >= ms || a.from === a.to;
 
+let lanes = 0;
+
 export class HeatLayer {
   readonly box: HTMLElement;
   readonly legend: HTMLElement;
@@ -52,6 +54,8 @@ export class HeatLayer {
   #canvas!: HTMLCanvasElement;
   #renderer: FieldRenderer;
   readonly #client = new FieldClient();
+  /** This layer's lane in the field client: a newer layout replaces one still waiting. */
+  readonly #lane = `heat${++lanes}`;
   #layer: HeatLayerId | null = null;
   #plan: Plan | null = null;
   #hass: Hass | undefined;
@@ -73,6 +77,8 @@ export class HeatLayer {
   /** Re-reads the states when a reading goes stale: that changes with time, not with `hass`. */
   #staleTimer: ReturnType<typeof setTimeout> | undefined;
   #sig = '';
+  /** A drag in the editor is under way: keep the field's layout until it ends. */
+  #preview = false;
   #lut: Uint8Array = rampLut(LAYERS.temperature.ramp);
   #signalNote: string[] = [];
   readonly #idle: (() => void)[] = [];
@@ -156,9 +162,10 @@ export class HeatLayer {
   }
 
   /** A new plan, with the states to read it with (the view's latest: it may skip some). */
-  setPlan(plan: Plan | null, hass: Hass | undefined = this.#hass): void {
+  setPlan(plan: Plan | null, hass: Hass | undefined = this.#hass, preview = false): void {
     this.#plan = plan;
     this.#hass = hass;
+    this.#preview = preview;
     this.#refresh();
   }
 
@@ -238,7 +245,10 @@ export class HeatLayer {
       this.onReadings?.(data, target);
     }
     if (data.readings.length === 0) return this.#blank(key);
-    if (key !== this.#wantKey) {
+    // Planning a temperature or humidity field takes the worker a while: during a drag the field
+    // keeps the layout it has and is planned again for where the drag ends.
+    const hold = this.#preview && !input && this.#layout !== null;
+    if (key !== this.#wantKey && !hold) {
       this.#wantKey = key;
       const box = bounds ?? { minX: 0, minY: 0, maxX: 1, maxY: 1 };
       const ids = data.readings.map((r) => r.id);
@@ -250,15 +260,18 @@ export class HeatLayer {
       }
       const grid = fieldGrid(box);
       void this.#client
-        .request({
-          type: 'mesh',
-          key,
-          sensors: data.readings.map((r) => r.position),
-          outline,
-          grid,
-          walls,
-          rooms: plan.rooms.map((r) => [...r.polygon]),
-        })
+        .request(
+          {
+            type: 'mesh',
+            key,
+            sensors: data.readings.map((r) => r.position),
+            outline,
+            grid,
+            walls,
+            rooms: plan.rooms.map((r) => [...r.polygon]),
+          },
+          this.#lane,
+        )
         .then((res) => {
           if (key !== this.#wantKey) return;
           if (res.type === 'mesh')

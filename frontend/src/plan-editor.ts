@@ -3,6 +3,7 @@
 import { autoPlace, deviceChoices, deviceLook } from './devices';
 import { add, dist, frame, roundToMm, polygonArea } from './geometry';
 import type { Hass } from './ha-types';
+import { Inspector, type Part } from './editor/inspector';
 import { EditSession } from './editor/session';
 import { findItem, kindOps, titleOf } from './editor/kinds';
 import { areaName, roomNameForAreas } from './editor/rooms';
@@ -122,6 +123,7 @@ const ENTITY_MIME = 'application/x-chartroom-entity';
 export class PlanEditor {
   readonly toolbar: HTMLElement;
   readonly inspector: HTMLElement;
+  readonly #inspector: Inspector;
   readonly #host: EditorHost;
   readonly #view: PlanView;
   /** The plan's history, saving, imports running and closing (no DOM). */
@@ -139,7 +141,6 @@ export class PlanEditor {
   #frame = 0;
   /** What the Source tool places next. */
   #sourceKind: SourceKind = 'sensor';
-  #deviceKey = '';
   #note = '';
   /** What the last plan import or export said: problems (`error`) or notes. */
   #fileReport: { error: boolean; lines: string[] } | null = null;
@@ -193,6 +194,7 @@ export class PlanEditor {
       this.#saveState,
     );
     this.inspector = h('div', { class: 'inspector' });
+    this.#inspector = new Inspector(this.inspector);
     this.#view.setDelegate({
       down: (p, e) => this.#down(p, e),
       move: (p) => this.#move(p),
@@ -236,15 +238,13 @@ export class PlanEditor {
     return problem;
   }
 
+  /**
+   * Home Assistant's states or registries changed: the inspector rebuilds only the parts that show
+   * what changed (a redraw mid-drag would drop the device being dragged from the list, and one
+   * mid-typing the field).
+   */
   hassChanged(): void {
-    const k = this.#s.selection?.kind;
-    if (this.#s.tool === 'device' || k === 'device') {
-      // States change all the time; only redraw the list when the entities on offer change (a
-      // redraw mid-drag would drop the item being dragged).
-      if (this.#deviceListKey() !== this.#deviceKey) this.#renderInspector();
-      return;
-    }
-    if (!k || k === 'room' || k === 'source') this.#renderInspector();
+    this.#renderInspector();
   }
 
   #setTool(tool: Tool): void {
@@ -449,21 +449,88 @@ export class PlanEditor {
     this.#view.drawOverlay(...out);
   }
 
+  /**
+   * The inspector's parts for the current tool and selection, each with what it is built from;
+   * only parts whose inputs changed are rebuilt.
+   */
   #renderInspector(): void {
     const plan = this.plan;
+    const hass = this.#host.hass();
     const { tool, selection: sel, measured } = this.#s;
-    const parts: (HTMLElement | null)[] = [this.#warningsPanel()];
-    if (tool === 'source' && !sel) parts.push(this.#newSourcePanel());
-    if (tool === 'device' && !sel) parts.push(this.#devicesPanel());
-    if (measured) parts.push(this.#measurePanel(measured));
-    if (sel) parts.push(this.#itemPanel(sel));
-    else if (tool !== 'device') parts.push(this.#planPanel(), this.#filePanel());
-    if (tool === 'device' || sel?.kind === 'device') this.#deviceKey = this.#deviceListKey();
+    const parts: Part[] = [{ key: 'warnings', deps: [plan], build: () => this.#warningsPanel() }];
+    if (tool === 'source' && !sel)
+      parts.push({ key: 'new-source', deps: [], build: () => this.#newSourcePanel() });
+    if (tool === 'device' && !sel)
+      parts.push({
+        key: 'devices',
+        deps: [this.#deviceListKey(), hass?.areas, this.#note, plan.floor_id],
+        build: () => this.#devicesPanel(),
+      });
+    if (measured)
+      parts.push({ key: 'measure', deps: [measured], build: () => this.#measurePanel(measured) });
+    if (sel)
+      parts.push({
+        key: `item:${sel.kind}:${sel.id}`,
+        deps: [
+          findItem(plan, sel),
+          plan.materials,
+          plan.floor_id,
+          ...this.#itemHassDeps(sel, hass),
+        ],
+        build: () => this.#itemPanel(sel),
+      });
+    else if (tool !== 'device')
+      parts.push(
+        { key: 'plan', deps: [plan, hass?.floors], build: () => this.#planPanel() },
+        {
+          key: 'plan-file',
+          deps: [!!plan.underlay, this.#fileReport],
+          build: () => this.#filePanel(),
+        },
+      );
     if (!sel && tool !== 'source' && tool !== 'device')
-      parts.push(this.#underlayPanel(), this.#materialsPanel());
-    this.inspector.replaceChildren(...parts.filter((x): x is HTMLElement => x !== null));
+      parts.push(
+        {
+          key: 'underlay',
+          deps: [plan.underlay, this.#host.underlayIgnored],
+          build: () => this.#underlayPanel(),
+        },
+        { key: 'materials', deps: [plan.materials], build: () => this.#materialsPanel() },
+      );
+    this.#inspector.render(parts);
     this.inspector.dataset['selection'] = sel ? `${sel.kind}:${sel.id}` : '';
     this.inspector.dataset['walls'] = String(plan.walls.length);
+  }
+
+  /** What of Home Assistant an item's panel shows: its pickers' choices, names, its state. */
+  #itemHassDeps(sel: Selection, hass: Hass | undefined): unknown[] {
+    const plan = this.plan;
+    switch (sel.kind) {
+      case 'room':
+        return [hass?.areas];
+      case 'source': {
+        const src = plan.sources.find((x) => x.id === sel.id);
+        const choices = src ? sourceChoices(hass, src.kind, plan.floor_id ?? null) : [];
+        return [
+          hass?.areas,
+          hass?.entities,
+          hass?.devices,
+          choices.map((c) => `${c.entity_id}=${c.name}@${c.area_id}`).join(),
+        ];
+      }
+      case 'device': {
+        const dev = plan.devices?.find((d) => d.id === sel.id);
+        return [
+          hass?.areas,
+          hass?.entities,
+          hass?.devices,
+          this.#deviceListKey(),
+          dev && hass?.states?.[dev.entity_id],
+        ];
+      }
+      default:
+        return [];
+    }
   }
 
   #section(title: string, kind: string, ...children: (HTMLElement | null)[]): HTMLElement {

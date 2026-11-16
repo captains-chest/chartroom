@@ -13,6 +13,12 @@ test = [
 ]
 lint = ["ruff==0.17.3"]
 
+[tool.uv]
+# Pillow 12.3.0, which Home Assistant pins, has security advisories fixed in 13.0.0 (#73). It is
+# only in the test environment, through pytest-homeassistant-custom-component. Remove this once a
+# pytest-homeassistant-custom-component release pins Home Assistant with Pillow >= 13.0.0.
+override-dependencies = ["pillow>=13.0.0"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

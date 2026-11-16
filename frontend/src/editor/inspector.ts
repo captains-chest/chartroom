@@ -31,9 +31,14 @@ export class Inspector {
       if (node) nodes.push(node);
     }
     this.#parts = next;
-    // Putting the same elements back would still move them, and take the focus from a field.
-    if (nodes.length === this.#nodes.length && nodes.every((n, i) => n === this.#nodes[i])) return;
+    // Only the parts that changed are touched: moving an element, even back to where it was,
+    // takes the focus from a field in it.
+    const keep = new Set(nodes);
+    for (const n of this.#nodes) if (!keep.has(n)) n.remove();
+    nodes.forEach((n, i) => {
+      const at = this.el.children[i] ?? null;
+      if (at !== n) this.el.insertBefore(n, at);
+    });
     this.#nodes = nodes;
-    this.el.replaceChildren(...nodes);
   }
 }

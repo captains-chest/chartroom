@@ -75,6 +75,14 @@ export class FakeElement {
     this.children = [];
     this.append(...nodes);
   }
+  insertBefore(n: FakeElement, ref: FakeElement | null): FakeElement {
+    n.remove();
+    n.parent = this;
+    const i = ref ? this.children.indexOf(ref) : -1;
+    if (i < 0) this.children.push(n);
+    else this.children.splice(i, 0, n);
+    return n;
+  }
   remove(): void {
     if (!this.parent) return;
     this.parent.children = this.parent.children.filter((c) => c !== this);

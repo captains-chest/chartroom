@@ -223,6 +223,20 @@ test.describe('devices', () => {
     }
   });
 
+  test('right-click on a marker opens details without toggling', async ({ page }) => {
+    const present = await savePlaced();
+    const coffee = 'switch.coffee_maker';
+    test.skip(!present.includes(coffee), 'no switch.coffee_maker on this instance');
+    const was = await state(coffee);
+    const panel = await openPlan(page);
+    const box = (await marker(panel, coffee).boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+    const info = page.locator('ha-more-info-dialog');
+    await expect(info).toBeAttached();
+    await expect(info.getByText('Coffee maker').first()).toBeVisible();
+    expect(await state(coffee)).toBe(was);
+  });
+
   test('a lock asks before it unlocks', async ({ page }) => {
     const lock = 'lock.front_door_lock';
     const was = await state(lock);

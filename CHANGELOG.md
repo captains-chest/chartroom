@@ -2,6 +2,13 @@
 
 All notable changes to Chartroom. Versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- Right-clicking a device marker now opens Home Assistant's more-info dialog, as a hold or the
+  context-menu key does; it did nothing in the panel (#87).
+
 ## 0.2.0 — 2026-11-16
 
 ### Fixed

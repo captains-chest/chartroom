@@ -9,6 +9,7 @@ import { LayerToggles } from './layer-toggles';
 import type { PlanView } from './plan-view';
 import type { TimeBar } from './time-bar';
 import { button, h } from './ui';
+import { UnderlayStore } from './underlay-store';
 import { UpdateNotice } from './version';
 
 export interface ViewerHost {
@@ -24,6 +25,8 @@ export class ViewerController {
   readonly layers: LayerToggles;
   readonly timeButton: HTMLButtonElement;
   readonly notice = new UpdateNotice();
+  /** The underlay image the view draws: the panel and the editor say which one to show. */
+  readonly underlay: UnderlayStore;
   readonly #host: ViewerHost;
   readonly #api: (c: HassConnection) => ChartroomApi;
   #hass?: Hass;
@@ -39,6 +42,10 @@ export class ViewerController {
   ) {
     this.#host = host;
     this.#api = api;
+    this.underlay = new UnderlayStore(
+      () => this.#hass,
+      (url) => view.setUnderlayUrl(url),
+    );
     const changed = (): void => host.changed?.(this.#layer, this.view.meshOn);
     this.layers = new LayerToggles(
       (layer) => {

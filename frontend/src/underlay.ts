@@ -3,7 +3,7 @@
 import { planBounds } from './geometry';
 import type { Hass } from './ha-types';
 import type { Plan, Underlay } from './plan/models';
-import { underlayPath, underlayPlanId } from './underlay-url';
+import { underlayPath } from './underlay-url';
 
 /** Longest side kept for raster images. */
 export const MAX_SIDE = 2048;
@@ -92,116 +92,4 @@ export async function uploadUnderlay(
   });
   if (!res.ok) throw new Error(`upload failed (${res.status})`);
   return ((await res.json()) as { url: string }).url;
-}
-
-/**
- * Fetch the plan `planId`'s image and `show` it as a blob URL, unless `current()` says a newer load
- * or image took over meanwhile (the URL is revoked then). Failures are ignored: the plan works
- * without it. A URL that is not the plan's own image is never fetched: the fetch carries the
- * user's token, and a plan stored before the integration checked it may point anywhere.
- */
-export async function loadUnderlay(
-  hass: Hass | undefined,
-  planId: string,
-  url: string,
-  current: () => boolean,
-  show: (blobUrl: string) => void,
-): Promise<void> {
-  if (underlayPlanId(url) !== planId) return;
-  try {
-    const res = await hass?.fetchWithAuth?.(url);
-    if (!res?.ok) return;
-    const blobUrl = URL.createObjectURL(await res.blob());
-    if (current()) show(blobUrl);
-    else URL.revokeObjectURL(blobUrl);
-  } catch {
-    // Offline or gone: the plan shows without its drawing.
-  }
-}
-
-/**
- * The panel's own underlay loads into the read-only view. Once the editor opens it owns the view's
- * image, so `release()` drops a panel load still in flight (its blob URL is revoked, not shown).
- */
-export class PanelUnderlay {
-  #load = 0;
-  readonly #show: (blobUrl: string | null) => void;
-
-  constructor(show: (blobUrl: string | null) => void) {
-    this.#show = show;
-  }
-
-  /** Show plan `planId`'s image at `url` (none for null), dropping any earlier load. */
-  async load(hass: Hass | undefined, planId: string | null, url: string | null): Promise<void> {
-    const load = ++this.#load;
-    this.#show(null);
-    if (url && planId) await loadUnderlay(hass, planId, url, () => load === this.#load, this.#show);
-  }
-
-  /** Hand the view's image over to the editor: a panel load still in flight is dropped. */
-  release(): void {
-    this.#load++;
-  }
-}
-
-/**
- * The editor's underlay image, kept in step with the plan's underlay URL: Undo and Redo switch
- * between stored versions of the image, so a URL change means fetching that version.
- */
-export class UnderlayImage {
-  /** The image URL on screen or loading, or null. */
-  #url: string | null;
-  #closed = false;
-  readonly #hass: () => Hass | undefined;
-  readonly #planId: string;
-  readonly #show: (blobUrl: string | null) => void;
-
-  /**
-   * `show` gets a blob URL for the image, or null while another one loads. `shown` is the URL
-   * of an image already on screen. Only plan `planId`'s own image is ever fetched.
-   */
-  constructor(
-    hass: () => Hass | undefined,
-    planId: string,
-    show: (blobUrl: string | null) => void,
-    shown: string | null = null,
-  ) {
-    this.#hass = hass;
-    this.#planId = planId;
-    this.#show = show;
-    this.#url = shown;
-  }
-
-  /** The image URL on screen or loading. */
-  get url(): string | null {
-    return this.#url;
-  }
-
-  /** Show the image just stored at `url`, without fetching it back. */
-  set(url: string, blob: Blob): void {
-    this.#url = url;
-    this.#show(URL.createObjectURL(blob));
-  }
-
-  /**
-   * Show the image at the plan's underlay `url`, fetching it unless it is already shown. No
-   * underlay (null) keeps the last image, so undoing its removal needs no fetch.
-   */
-  sync(url: string | null): void {
-    if (url === null || url === this.#url) return;
-    this.#url = url;
-    this.#show(null);
-    void loadUnderlay(
-      this.#hass(),
-      this.#planId,
-      url,
-      () => !this.#closed && this.#url === url,
-      this.#show,
-    );
-  }
-
-  /** The editor closed: a load still running is dropped, and the panel owns the image again. */
-  close(): void {
-    this.#closed = true;
-  }
 }

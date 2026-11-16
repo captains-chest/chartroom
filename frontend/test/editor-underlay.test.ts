@@ -5,6 +5,7 @@ import type { Plan } from '../src/plan/models';
 import { PlanEditor } from '../src/plan-editor';
 import { dataUrl, planFileJson } from '../src/plan-file';
 import { PlanView } from '../src/plan-view';
+import { UnderlayStore } from '../src/underlay-store';
 import { installFakeDom } from './fake-dom';
 
 vi.mock('../src/heat-layer', () => ({
@@ -64,6 +65,10 @@ function editor(
   return new PlanEditor({
     view,
     hass: () => hass,
+    underlay: new UnderlayStore(
+      () => hass,
+      (url) => view.setUnderlayUrl(url),
+    ),
     save,
     planId: 'home',
     plan,

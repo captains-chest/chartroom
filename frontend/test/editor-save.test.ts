@@ -4,6 +4,7 @@ import { emptyPlan } from '../src/plan/functions';
 import type { Plan } from '../src/plan/models';
 import { PlanEditor } from '../src/plan-editor';
 import { PlanView } from '../src/plan-view';
+import { UnderlayStore } from '../src/underlay-store';
 import { installFakeDom } from './fake-dom';
 
 vi.mock('../src/heat-layer', () => ({
@@ -56,6 +57,10 @@ function editor(save: (plan: Plan) => Promise<void>, conn?: HassConnection) {
   const e = new PlanEditor({
     view,
     hass: () => (conn ? { connection: conn } : undefined),
+    underlay: new UnderlayStore(
+      () => undefined,
+      (url) => view.setUnderlayUrl(url),
+    ),
     save: async (p) => {
       saves.push(p);
       await save(p);

@@ -58,7 +58,8 @@ import type { PlanView } from './plan-view';
 import { signalLimitWarnings } from './signal';
 import { count } from './text';
 import { button, field, h, numberInput, s, select, textInput } from './ui';
-import { importUnderlay, UnderlayImage, uploadUnderlay } from './underlay';
+import { importUnderlay, uploadUnderlay } from './underlay';
+import type { UnderlayStore } from './underlay-store';
 
 export type { Tool } from './editor/types';
 
@@ -71,6 +72,8 @@ const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
 export interface EditorHost {
   view: PlanView;
   hass(): Hass | undefined;
+  /** The view's underlay image: the editor shows the version its plan points at. */
+  underlay: UnderlayStore;
   save(plan: Plan): Promise<void>;
   planId: string;
   plan: Plan;
@@ -152,10 +155,8 @@ export class PlanEditor {
   readonly #undoButton: HTMLButtonElement;
   readonly #redoButton: HTMLButtonElement;
   readonly #toolButtons = new Map<Tool, HTMLButtonElement>();
-  /** The underlay image on screen, as a blob URL. */
-  #underlayUrl: string | null = null;
-  /** Fetches the image version the plan points at, after an import, Undo or Redo. */
-  readonly #underlay: UnderlayImage;
+  /** Shows the image version the plan points at, after an import, Undo or Redo. */
+  readonly #underlay: UnderlayStore;
   #lastClick = { t: 0, x: 0, y: 0 };
   /** A drag's render waiting for the next frame (#renderSoon). */
   #frame = 0;
@@ -200,14 +201,7 @@ export class PlanEditor {
     // Home Assistant's connection is back: try a failed save now rather than after its wait.
     this.#connection = host.hass()?.connection;
     this.#connection?.addEventListener?.('ready', this.#onReconnect);
-    // The panel may already have loaded the picture.
-    this.#underlayUrl = host.view.underlayUrl;
-    this.#underlay = new UnderlayImage(
-      () => host.hass(),
-      host.planId,
-      (url) => this.#setUnderlayUrl(url),
-      this.#underlayUrl ? (host.plan.underlay?.url ?? null) : null,
-    );
+    this.#underlay = host.underlay;
     for (const t of TOOLS) {
       const label = titleOf(t.tool);
       const b = button(label, () => this.#setTool(t.tool), {
@@ -246,7 +240,7 @@ export class PlanEditor {
     this.#view.el.addEventListener('dragover', this.#onDragOver);
     this.#view.el.addEventListener('drop', this.#onDrop);
     this.#setTool('select');
-    this.#underlay.sync(this.plan.underlay?.url ?? null);
+    this.#syncUnderlay();
   }
 
   get plan(): Plan {
@@ -280,7 +274,6 @@ export class PlanEditor {
     }
     this.#closed = true;
     if (this.#frame) cancelAnimationFrame(this.#frame);
-    this.#underlay.close();
     this.#stopLeaveGuard();
     this.#connection?.removeEventListener?.('ready', this.#onReconnect);
     await this.#saver.flush();
@@ -364,8 +357,7 @@ export class PlanEditor {
   }
 
   #afterChange(): void {
-    // Undo and Redo may go back to another image: each stored image keeps its own URL.
-    this.#underlay.sync(this.plan.underlay?.url ?? null);
+    this.#syncUnderlay();
     this.#render();
     this.#saver.schedule(this.plan);
   }
@@ -455,7 +447,6 @@ export class PlanEditor {
     this.#hint.textContent = TOOLS.find((t) => t.tool === tool)?.hint ?? '';
     this.#view.setEditing(tool);
     this.#view.setPlan(this.#s.preview ?? this.plan, this.#s.selection, !!this.#s.drag);
-    this.#view.setUnderlayUrl(this.#underlayUrl);
     this.#renderOverlay();
     if (!this.#s.drag) this.#renderInspector();
     this.#undoButton.disabled = !this.#history.canUndo;
@@ -852,8 +843,9 @@ export class PlanEditor {
     let imageName: string | null = null;
     try {
       if (underlay !== 'none') {
-        if (!this.#underlayUrl) throw new Error('the underlay image is not loaded');
-        image = await (await fetch(this.#underlayUrl)).blob();
+        const url = this.plan.underlay?.url;
+        image = url ? this.#underlay.blob(url) : null;
+        if (!image) throw new Error('the underlay image is not loaded');
         if (underlay === 'file') {
           imageName = underlayFileName(this.#host.planId, image.type);
           if (!imageName) throw new Error(`the underlay image is ${image.type || 'of no type'}`);
@@ -905,7 +897,7 @@ export class PlanEditor {
     if (this.#closed) return null;
     // Drop the old plan's selection, drafts and measurement, keeping the tool.
     this.#s = { ...initialState, tool: this.#s.tool };
-    if (image) this.#underlay.set(image.url, image.blob);
+    if (image) this.#underlay.put(image.url, image.blob);
     this.#commit(plan);
     this.#report(false, [`Imported ${file.name}.`, ...r.notes]);
     this.#view.fit();
@@ -1240,7 +1232,7 @@ export class PlanEditor {
     try {
       const { underlay, blob } = await importUnderlay(hass, this.#host.planId, file, this.plan);
       if (this.#closed) return null;
-      this.#underlay.set(underlay.url, blob);
+      this.#underlay.put(underlay.url, blob);
       this.#commit({ ...this.plan, underlay });
       this.#view.fit();
       return null;
@@ -1251,10 +1243,9 @@ export class PlanEditor {
     }
   }
 
-  #setUnderlayUrl(url: string | null): void {
-    // The view revokes the old blob URL when it gets the new one.
-    this.#underlayUrl = url;
-    this.#render();
+  /** Undo and Redo may go back to another image: each stored image keeps its own URL. */
+  #syncUnderlay(): void {
+    void this.#underlay.show(this.#host.planId, this.plan.underlay?.url ?? null);
   }
 }
 

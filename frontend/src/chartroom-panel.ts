@@ -10,7 +10,6 @@ import { DeviceControls, deviceControlStyles } from './device-controls';
 import { PlanView, planViewStyles } from './plan-view';
 import { isHeatLayer } from './heat/functions';
 import { button, h } from './ui';
-import { PanelUnderlay } from './underlay';
 import { ViewerController } from './viewer';
 
 interface PanelInfo {
@@ -73,8 +72,6 @@ export class ChartroomPanel extends HTMLElement {
   #planId: string | null = null;
   #plan: Plan | null = null;
   #editor: PlanEditor | null = null;
-  /** The view's underlay image while the panel owns it; the editor takes it over when it opens. */
-  readonly #underlay = new PanelUnderlay((url) => this.#view.setUnderlayUrl(url));
   #underlayPref = readUnderlayPref();
   readonly #underlayControls: HTMLElement;
   readonly #underlayToggle: HTMLButtonElement;
@@ -410,11 +407,7 @@ export class ChartroomPanel extends HTMLElement {
 
   /** Fetch the current plan's underlay (if any) and show it in the read-only view. */
   async #loadUnderlay(): Promise<void> {
-    const loading = this.#underlay.load(
-      this.#viewer.hass,
-      this.#planId,
-      this.#plan?.underlay?.url ?? null,
-    );
+    const loading = this.#viewer.underlay.show(this.#planId, this.#plan?.underlay?.url ?? null);
     this.#renderUnderlayControls();
     await loading;
   }
@@ -496,12 +489,11 @@ export class ChartroomPanel extends HTMLElement {
     if (!this.#plan || !this.#planId) return;
     this.#viewer.closeTime();
     const { PlanEditor } = await import('./plan-editor');
-    // The editor owns the image from here: a panel load still running must not replace its own.
-    this.#underlay.release();
     this.#missed = false;
     this.#editor = new PlanEditor({
       view: this.#view,
       hass: () => this.#viewer.hass,
+      underlay: this.#viewer.underlay,
       save: (plan) => this.#savePlan(plan),
       planId: this.#planId,
       plan: this.#plan,
@@ -537,9 +529,8 @@ export class ChartroomPanel extends HTMLElement {
     this.toggleAttribute('editing', false);
     this.#view.setPlan(this.#plan);
     this.#controls.attach();
-    // The editor's load may have been dropped mid-way: the panel fetches the image again.
-    if (this.#view.underlayUrl) this.#renderUnderlayControls();
-    else void this.#loadUnderlay();
+    // The image the plan ends with: already shown, unless its load failed.
+    void this.#loadUnderlay();
     // Show what was saved elsewhere meanwhile, unless the editor's last save failed: then its
     // copy stays on screen, so Edit starts from it and saves it again.
     if (this.#missed && !editor.unsaved) this.#planSaved(null);

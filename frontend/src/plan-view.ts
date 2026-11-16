@@ -310,10 +310,9 @@ export class PlanView {
     return true;
   }
 
-  /** The underlay image as a URL the browser can load (a blob URL). */
+  /** The underlay image as a URL the browser can load (a blob URL its UnderlayStore owns). */
   setUnderlayUrl(url: string | null): void {
     if (url === this.#underlayUrl) return;
-    if (this.#underlayUrl?.startsWith('blob:')) URL.revokeObjectURL(this.#underlayUrl);
     this.#underlayUrl = url;
     this.#renderUnderlay();
   }

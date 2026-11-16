@@ -1,8 +1,8 @@
 // What the panel and the card share around the plan view: the layer buttons, the History slider
-// (loaded on first use), the hass the plan shows, loading a plan, and releasing the view's layers
-// while the element is off the page.
-import { wsApi, type ChartroomApi, type LoadedPlan } from './api';
-import type { Hass, HassConnection } from './ha-types';
+// (loaded on first use), the hass the plan shows, loading, following and saving a plan, the
+// underlay image, and releasing the view's layers while the element is off the page.
+import { wsApi, type ChartroomApi, type LoadedPlan, type PlanEvent, type Unsubscribe } from './api';
+import type { Hass, HassConnection, PlanSummary } from './ha-types';
 import { layerCounts } from './heat/functions';
 import type { HeatLayerId } from './heat/types';
 import { LayerToggles } from './layer-toggles';
@@ -21,6 +21,29 @@ export interface ViewerHost {
   changed?(layer: HeatLayerId | null, mesh: boolean): void;
 }
 
+/** Which stored plan to show, for `ViewerController.follow`. */
+export interface FollowRule {
+  /** The plan to show among the stored ones; undefined for none. */
+  pick(plans: readonly PlanSummary[]): PlanSummary | undefined;
+  /**
+   * When the rule names one plan: changes to other plans cannot change the pick, so they are
+   * ignored. Otherwise any change lists the plans again and picks anew.
+   */
+  planId?: string;
+}
+
+/** What following a plan came to, each time it loads (the host shows it). */
+export type FollowResult =
+  | {
+      kind: 'plan';
+      planId: string;
+      loaded: LoadedPlan;
+      /** The first plan shown for the rule, or another than before: the host fits it. */
+      moved: boolean;
+    }
+  | { kind: 'none'; plans: PlanSummary[] }
+  | { kind: 'error'; error: unknown };
+
 export class ViewerController {
   readonly layers: LayerToggles;
   readonly timeButton: HTMLButtonElement;
@@ -34,6 +57,17 @@ export class ViewerController {
   #time: TimeBar | null = null;
   #load = 0;
   #planId: string | null = null;
+  #follow: {
+    rule: FollowRule;
+    report: (r: FollowResult) => void;
+    /** A load has started (it waits for the connection). */
+    loaded: boolean;
+    /** A plan has been shown for this rule. */
+    shown: boolean;
+  } | null = null;
+  #subscription: Promise<Unsubscribe | null> | null = null;
+  /** Saves of ours per plan whose change event has not come back yet. */
+  readonly #ownSaves = new Map<string, number>();
 
   constructor(
     readonly view: PlanView,
@@ -65,6 +99,7 @@ export class ViewerController {
     });
     this.layers.el.append(this.timeButton);
     view.onPlan(() => this.#renderLayers());
+    view.setApi(() => this.api);
   }
 
   get hass(): Hass | undefined {
@@ -75,7 +110,10 @@ export class ViewerController {
     this.#hass = hass;
     // Only when something the plan reads changed: Home Assistant sends every state change.
     if (this.view.setHass(this.shown())) this.#renderLayers();
-    if (this.#host.el.isConnected) this.notice.watch(hass.connection);
+    if (!this.#host.el.isConnected) return;
+    this.#watchNotice();
+    this.#subscribe();
+    if (this.#follow && !this.#follow.loaded && hass.connection) void this.#reload();
   }
 
   /** What the plan shows: live, or the recorded states at the slider's time. */
@@ -103,6 +141,31 @@ export class ViewerController {
   begin(): () => boolean {
     const load = ++this.#load;
     return () => load === this.#load;
+  }
+
+  /**
+   * Show the plan `rule` picks, now and whenever the stored plans change (saved or deleted here or
+   * anywhere else), until `follow` is called again. `report` hears each outcome.
+   */
+  follow(rule: FollowRule, report: (r: FollowResult) => void): void {
+    this.#follow = { rule, report, loaded: false, shown: false };
+    if (this.#hass?.connection) void this.#reload();
+  }
+
+  /**
+   * Save plan `planId`. Its change event, when it comes back, is known as ours: following does not
+   * reload a plan for a save made here.
+   */
+  async save(planId: string, plan: Parameters<ChartroomApi['savePlan']>[1]): Promise<void> {
+    const api = this.api;
+    if (!api) throw new Error('not connected');
+    this.#ownSaves.set(planId, (this.#ownSaves.get(planId) ?? 0) + 1);
+    try {
+      await api.savePlan(planId, plan);
+    } catch (err) {
+      this.#ownSave(planId);
+      throw err;
+    }
   }
 
   /** Fetch a plan and show it; null when a later load started meanwhile. */
@@ -144,9 +207,10 @@ export class ViewerController {
     this.#markTime();
   }
 
-  /** Back on the page: check the version again and rebuild the layers that were on. */
+  /** Back on the page: check the version again, follow plan changes and rebuild the layers. */
   connect(): void {
-    this.notice.watch(this.#hass?.connection);
+    this.#watchNotice();
+    this.#subscribe();
     void this.view.resume();
   }
 
@@ -155,6 +219,66 @@ export class ViewerController {
     this.view.dispose();
     this.#time?.pause();
     this.notice.dispose();
+    const unsubscribe = this.#subscription;
+    this.#subscription = null;
+    void unsubscribe?.then((u) => u?.());
+  }
+
+  #watchNotice(): void {
+    const c = this.#hass?.connection;
+    if (c) this.notice.watch(c, this.#api(c));
+  }
+
+  /** Listen for plan changes while following one and on the page. */
+  #subscribe(): void {
+    const api = this.api;
+    if (!this.#follow || this.#subscription || !api) return;
+    this.#subscription = api.subscribePlans((e) => this.#changed(e)).catch(() => null);
+  }
+
+  /** Whether `e` is the echo of a save made here (and counts it off). */
+  #ownSave(planId: string): boolean {
+    const n = this.#ownSaves.get(planId) ?? 0;
+    if (n === 0) return false;
+    if (n === 1) this.#ownSaves.delete(planId);
+    else this.#ownSaves.set(planId, n - 1);
+    return true;
+  }
+
+  #changed(e: PlanEvent): void {
+    if (!e.deleted && this.#ownSave(e.plan_id)) return;
+    const follow = this.#follow;
+    if (!follow) return;
+    const named = follow.rule.planId;
+    if (named !== undefined && e.plan_id !== named) return;
+    void this.#reload();
+  }
+
+  /** List the plans, pick one with the rule and load it. */
+  async #reload(): Promise<void> {
+    const follow = this.#follow;
+    const api = this.api;
+    if (!follow || !api) return;
+    follow.loaded = true;
+    const current = this.begin();
+    try {
+      const plans = await api.listPlans();
+      if (!current() || follow !== this.#follow) return;
+      const summary = follow.rule.pick(plans);
+      if (!summary) {
+        this.#planId = null;
+        this.view.setPlan(null);
+        return follow.report({ kind: 'none', plans });
+      }
+      const before = this.#planId;
+      const loaded = await this.load(summary.id, current);
+      if (!loaded || follow !== this.#follow) return;
+      const moved = !follow.shown || before !== summary.id;
+      follow.shown = true;
+      follow.report({ kind: 'plan', planId: summary.id, loaded, moved });
+    } catch (error) {
+      if (current() && follow === this.#follow) follow.report({ kind: 'error', error });
+    }
   }
 
   #markTime(): void {

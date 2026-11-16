@@ -1,4 +1,3 @@
-import type { Unsubscribe } from './api';
 import { DeviceControls, deviceControlStyles } from './device-controls';
 import type { Hass } from './ha-types';
 import { isHeatLayer } from './heat/functions';
@@ -38,8 +37,6 @@ export class ChartroomCard extends HTMLElement {
   readonly #title: HTMLElement;
   readonly #stage: HTMLElement;
   readonly #message: HTMLElement;
-  #loaded = '';
-  #unsubscribe: Promise<Unsubscribe | null> | null = null;
 
   constructor() {
     super();
@@ -102,74 +99,50 @@ export class ChartroomCard extends HTMLElement {
     viewer.layers.el.hidden = config.layer_toggles !== true && config.history !== true;
     viewer.layers.el.classList.toggle('no-toggles', config.layer_toggles !== true);
     viewer.timeButton.hidden = config.history !== true;
-    this.#loaded = '';
-    if (viewer.hass) void this.#loadPlan();
+    this.#follow(config);
   }
 
   set hass(hass: Hass) {
+    // The viewer loads the plan once connected, and follows changes while on the page.
     this.#viewer.hass = hass;
-    if (!this.#loaded && hass.connection) void this.#loadPlan();
-    if (this.isConnected) this.#subscribe();
   }
 
   // Lovelace moves cards by removing and re-adding them: release on removal, rebuild on return.
   connectedCallback(): void {
-    if (this.#viewer.hass) this.#subscribe();
     this.#viewer.connect();
   }
 
   disconnectedCallback(): void {
-    const unsub = this.#unsubscribe;
-    this.#unsubscribe = null;
-    void unsub?.then((u) => u?.());
     this.#viewer.disconnect();
   }
 
-  /** Reload when a plan is saved or deleted elsewhere (the editor in the panel), so edits show live. */
-  #subscribe(): void {
-    const api = this.#viewer.api;
-    if (this.#unsubscribe || !api) return;
-    this.#unsubscribe = api
-      .subscribePlans((e) => {
-        const shown = this.dataset['plan'];
-        if (!shown || e.plan_id === shown || !this.#config?.plan_id) {
-          this.#loaded = '';
-          void this.#loadPlan(true);
-        }
-      })
-      .catch(() => null);
-  }
-
-  async #loadPlan(live = false): Promise<void> {
-    const api = this.#viewer.api;
-    if (!api || !this.#config) return;
-    this.#loaded = `${this.#config.plan_id ?? ''}|${this.#config.floor_id ?? ''}`;
-    const current = this.#viewer.begin();
-    try {
-      const plans = await api.listPlans();
-      const cfg = this.#config;
-      const summary = cfg.plan_id
-        ? plans.find((p) => p.id === cfg.plan_id)
-        : cfg.floor_id
-          ? plans.find((p) => p.floor_id === cfg.floor_id)
-          : plans[0];
-      if (!summary) {
-        delete this.dataset['plan'];
-        this.#view.setPlan(null);
-        this.#show(
-          plans.length === 0
-            ? 'No floor plan yet. Draw one in the Chartroom panel.'
-            : `No plan ${cfg.plan_id ? `"${cfg.plan_id}"` : `for floor "${cfg.floor_id}"`}.`,
-        );
-        return;
-      }
-      if (!(await this.#viewer.load(summary.id, current))) return;
-      if (!live || this.dataset['plan'] !== summary.id) this.#view.fit();
-      this.dataset['plan'] = summary.id;
-      this.#show(null);
-    } catch (err) {
-      if (current()) this.#show(`Could not load the plan: ${(err as Error).message ?? err}`);
-    }
+  /** Show the configured plan, and follow saves and deletes (the editor in the panel) live. */
+  #follow(cfg: ChartroomCardConfig): void {
+    this.#viewer.follow(
+      {
+        planId: cfg.plan_id,
+        pick: (plans) =>
+          cfg.plan_id
+            ? plans.find((p) => p.id === cfg.plan_id)
+            : cfg.floor_id
+              ? plans.find((p) => p.floor_id === cfg.floor_id)
+              : plans[0],
+      },
+      (r) => {
+        if (r.kind === 'plan') {
+          if (r.moved) this.#view.fit();
+          this.dataset['plan'] = r.planId;
+          this.#show(null);
+        } else if (r.kind === 'none') {
+          delete this.dataset['plan'];
+          this.#show(
+            r.plans.length === 0
+              ? 'No floor plan yet. Draw one in the Chartroom panel.'
+              : `No plan ${cfg.plan_id ? `"${cfg.plan_id}"` : `for floor "${cfg.floor_id}"`}.`,
+          );
+        } else this.#show(`Could not load the plan: ${(r.error as Error)?.message ?? r.error}`);
+      },
+    );
   }
 
   #show(message: string | null): void {

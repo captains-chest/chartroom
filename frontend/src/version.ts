@@ -1,7 +1,7 @@
 // The frontend's build version against the integration's. After an update Home Assistant serves
 // the new frontend, but an open tab keeps running the old one until it reloads; when the versions
 // differ, the panel and the card show a small prompt to reload.
-import { wsApi, type ChartroomApi } from './api';
+import type { ChartroomApi } from './api';
 import type { HassConnection } from './ha-types';
 import { button, h } from './ui';
 
@@ -41,11 +41,15 @@ export class UpdateNotice {
     );
   }
 
-  watch(c: HassConnection | undefined, build: string = BUILD_VERSION): void {
+  /** Check over `api`, now and whenever `c` reconnects. */
+  watch(
+    c: HassConnection | undefined,
+    api: Pick<ChartroomApi, 'info'>,
+    build: string = BUILD_VERSION,
+  ): void {
     if (!c || c === this.#conn) return;
     this.dispose();
     this.#conn = c;
-    const api = wsApi(c);
     this.#check = (): void =>
       void versionMismatch(api, build).then((v) => {
         if (!v) return;

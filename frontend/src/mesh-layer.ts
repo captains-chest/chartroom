@@ -1,7 +1,7 @@
 // Mesh links between placed devices: the Zigbee and Z-Wave topology the integration reads from ZHA,
 // Z-Wave JS and Zigbee2MQTT (chartroom/mesh/get), drawn as lines coloured by link quality.
 // Loaded on demand, the first time the Mesh layer is switched on.
-import { wsApi } from './api';
+import type { ChartroomApi } from './api';
 import type { Hass } from './ha-types';
 import type { Plan } from './plan/models';
 import type { Point } from './plan/types';
@@ -120,9 +120,15 @@ export class MeshLayer {
   #topology: Topology | null = null;
   #error = '';
   #timer = 0;
+  readonly #api: () => Pick<ChartroomApi, 'mesh'> | null;
   #load: Promise<void> | null = null;
   /** Placed links, for tests. */
   links: PlacedLink[] = [];
+
+  /** `api`: the integration's commands, once connected. */
+  constructor(api: () => Pick<ChartroomApi, 'mesh'> | null) {
+    this.#api = api;
+  }
 
   setOn(on: boolean): Promise<void> {
     this.#on = on;
@@ -154,9 +160,9 @@ export class MeshLayer {
 
   /** Read the topology again (one request at a time). */
   #refresh(): Promise<void> {
-    const conn = this.#hass?.connection;
-    if (!this.#on || !conn) return Promise.resolve();
-    this.#load ??= wsApi(conn)
+    const api = this.#api();
+    if (!this.#on || !api) return Promise.resolve();
+    this.#load ??= api
       .mesh()
       .then(
         (t) => {

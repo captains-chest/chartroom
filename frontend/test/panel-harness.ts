@@ -18,6 +18,11 @@ installFakeDom();
 
 const apis = new WeakMap<HassConnection, ChartroomApi>();
 
+/** Let `fakeWsApi` answer for `c` with `api` (a test mounting something else than the panel). */
+export function registerApi(c: HassConnection, api: ChartroomApi): void {
+  apis.set(c, api);
+}
+
 /** Stands in for `wsApi`: the FakeApi behind a harness connection. */
 export function fakeWsApi(c: HassConnection): ChartroomApi {
   const api = apis.get(c);

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vite-plus/test';
-import type { ChartroomApi } from '../src/api';
+import { wsApi, type ChartroomApi } from '../src/api';
 import type { HassConnection } from '../src/ha-types';
 import { BUILD_VERSION, UpdateNotice, versionMismatch } from '../src/version';
 import { installFakeDom } from './fake-dom';
@@ -65,8 +65,8 @@ describe('update notice', () => {
   it('checks again on reconnect until disposed, and watches again after', () => {
     const { c, ready, checks } = shared();
     const notice = new UpdateNotice(() => {});
-    notice.watch(c, '0.1.0');
-    notice.watch(c, '0.1.0');
+    notice.watch(c, wsApi(c), '0.1.0');
+    notice.watch(c, wsApi(c), '0.1.0');
     expect(checks()).toBe(1);
     expect(ready.size).toBe(1);
     for (const fn of ready) fn();
@@ -75,7 +75,7 @@ describe('update notice', () => {
     notice.dispose();
     expect(ready.size).toBe(0);
 
-    notice.watch(c, '0.1.0');
+    notice.watch(c, wsApi(c), '0.1.0');
     expect(ready.size).toBe(1);
     expect(checks()).toBe(3);
   });
@@ -84,8 +84,8 @@ describe('update notice', () => {
     const a = shared();
     const b = shared();
     const notice = new UpdateNotice(() => {});
-    notice.watch(a.c, '0.1.0');
-    notice.watch(b.c, '0.1.0');
+    notice.watch(a.c, wsApi(a.c), '0.1.0');
+    notice.watch(b.c, wsApi(b.c), '0.1.0');
     expect(a.ready.size).toBe(0);
     expect(b.ready.size).toBe(1);
   });

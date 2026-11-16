@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import type { ChartroomApi } from '../src/api';
 import type { Hass } from '../src/ha-types';
 import { MESH_REFRESH_MS } from '../src/mesh-layer';
 import { emptyPlan } from '../src/plan/functions';
@@ -29,10 +30,11 @@ const fake = (heat: unknown): { dispose: Spy; setLayer: Spy; setHass: Spy; setPl
 const topology = { nodes: [], links: [], sources: {} };
 
 function viewWithMesh(): { view: PlanView; sent: () => number } {
-  const send = vi.fn(async () => topology);
+  const mesh = vi.fn(async () => topology);
   const view = new PlanView(true);
-  view.setHass({ connection: { sendMessagePromise: send } } as unknown as Hass);
-  return { view, sent: () => send.mock.calls.length };
+  view.setApi(() => ({ mesh }) as unknown as ChartroomApi);
+  view.setHass({ connection: {} } as unknown as Hass);
+  return { view, sent: () => mesh.mock.calls.length };
 }
 
 describe('plan view lifecycle', () => {

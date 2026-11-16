@@ -459,7 +459,7 @@ export class ChartroomPanel extends HTMLElement {
   }
 
   async #createPlan(tab: FloorTab): Promise<void> {
-    await this.#api().savePlan(newPlanId(tab), emptyPlan(tab.label, tab.floor_id));
+    await this.#viewer.save(newPlanId(tab), emptyPlan(tab.label, tab.floor_id));
     this.#planId = null;
     await this.#refreshPlans();
     await this.#selectTab(tab.key);
@@ -468,7 +468,7 @@ export class ChartroomPanel extends HTMLElement {
 
   async #savePlan(plan: Plan): Promise<void> {
     if (!this.#planId) throw new Error('no plan');
-    await this.#api().savePlan(this.#planId, plan);
+    await this.#viewer.save(this.#planId, plan);
     const before = this.#plan;
     this.#plan = plan;
     // The save replaced the stored plan, so the ignored underlay is gone from it for good.

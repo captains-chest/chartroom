@@ -45,8 +45,6 @@ const current = (a: Anim, now: number, ms: number): number =>
 const done = (a: Anim, now: number, ms: number): boolean =>
   ms <= 0 || now - a.t0 >= ms || a.from === a.to;
 
-let lanes = 0;
-
 export class HeatLayer {
   readonly box: HTMLElement;
   readonly legend: HTMLElement;
@@ -54,8 +52,6 @@ export class HeatLayer {
   #canvas!: HTMLCanvasElement;
   #renderer: FieldRenderer;
   readonly #client = new FieldClient();
-  /** This layer's lane in the field client: a newer layout replaces one still waiting. */
-  readonly #lane = `heat${++lanes}`;
   #layer: HeatLayerId | null = null;
   #plan: Plan | null = null;
   #hass: Hass | undefined;
@@ -270,7 +266,8 @@ export class HeatLayer {
             walls,
             rooms: plan.rooms.map((r) => [...r.polygon]),
           },
-          this.#lane,
+          // A newer layout replaces one still waiting.
+          'layout',
         )
         .then((res) => {
           if (key !== this.#wantKey) return;

@@ -110,6 +110,67 @@ export function sourceNote(topology: Topology | null, placed: number, error?: st
   return `Mesh: ${count(placed, 'link')} on this plan · ${parts.join(', ')}`;
 }
 
+/** What the network poll last came to: the topology, kept when a later read fails. */
+export interface TopologyState {
+  topology: Topology | null;
+  error: string;
+}
+type MeshApi = Pick<ChartroomApi, 'mesh'>;
+interface Poll {
+  readonly listeners: Set<(state: TopologyState) => void>;
+  state: TopologyState | null;
+  load: Promise<void> | null;
+  timer: ReturnType<typeof setInterval> | undefined;
+}
+
+/** One topology poll per connection (wsApi gives one api per connection), whoever shows it. */
+const polls = new Map<MeshApi, Poll>();
+
+function read(poll: Poll, api: MeshApi): Promise<void> {
+  poll.load ??= api
+    .mesh()
+    .then(
+      (topology): TopologyState => ({ topology, error: '' }),
+      (err: { message?: string }): TopologyState => ({
+        topology: poll.state?.topology ?? null,
+        error: err?.message ?? 'could not read the network',
+      }),
+    )
+    .then((state) => {
+      poll.state = state;
+      poll.load = null;
+      for (const l of poll.listeners) l(state);
+    });
+  return poll.load;
+}
+
+/**
+ * Hear the topology `api` reads now and every MESH_REFRESH_MS, until `stop`. Listeners on the same
+ * api share one poll, which stops with the last of them; a later one hears the last result at once.
+ * `ready` settles once there is a result.
+ */
+export function watchTopology(
+  api: MeshApi,
+  listener: (state: TopologyState) => void,
+): { ready: Promise<void>; stop: () => void } {
+  let poll = polls.get(api);
+  if (!poll) {
+    const p: Poll = { listeners: new Set(), state: null, load: null, timer: undefined };
+    p.timer = setInterval(() => void read(p, api), MESH_REFRESH_MS);
+    polls.set(api, (poll = p));
+  }
+  const p = poll;
+  p.listeners.add(listener);
+  if (p.state) listener(p.state);
+  const ready = p.load ?? (p.state ? Promise.resolve() : read(p, api));
+  const stop = (): void => {
+    if (!p.listeners.delete(listener) || p.listeners.size > 0) return;
+    clearInterval(p.timer);
+    if (polls.get(api) === p) polls.delete(api);
+  };
+  return { ready, stop };
+}
+
 export class MeshLayer {
   readonly g: SVGGElement = s('g', { class: 'mesh', hidden: true });
   readonly note: HTMLElement = h('div', { class: 'mesh-note', hidden: true, role: 'status' });
@@ -119,14 +180,13 @@ export class MeshLayer {
   #entities: unknown = null;
   #topology: Topology | null = null;
   #error = '';
-  #timer = 0;
-  readonly #api: () => Pick<ChartroomApi, 'mesh'> | null;
-  #load: Promise<void> | null = null;
+  #stop: (() => void) | null = null;
+  readonly #api: () => MeshApi | null;
   /** Placed links, for tests. */
   links: PlacedLink[] = [];
 
   /** `api`: the integration's commands, once connected. */
-  constructor(api: () => Pick<ChartroomApi, 'mesh'> | null) {
+  constructor(api: () => MeshApi | null) {
     this.#api = api;
   }
 
@@ -134,12 +194,12 @@ export class MeshLayer {
     this.#on = on;
     this.g.toggleAttribute('hidden', !on);
     this.note.hidden = !on;
-    clearInterval(this.#timer);
-    this.#timer = 0;
-    if (!on) return Promise.resolve();
-    this.#timer = setInterval(() => void this.#refresh(), MESH_REFRESH_MS) as unknown as number;
+    if (!on) {
+      this.dispose();
+      return Promise.resolve();
+    }
     this.#render();
-    return this.#refresh();
+    return this.#watch();
   }
 
   setPlan(plan: Plan | null): void {
@@ -148,36 +208,26 @@ export class MeshLayer {
   }
 
   setHass(hass: Hass | undefined): void {
-    const first = !this.#hass && hass;
     this.#hass = hass;
     // Placement depends on the entity registry only; states do not move anything.
     if (hass?.entities !== this.#entities) {
       this.#entities = hass?.entities;
       this.#render();
     }
-    if (first && this.#on) void this.#refresh();
+    void this.#watch();
   }
 
-  /** Read the topology again (one request at a time). */
-  #refresh(): Promise<void> {
+  /** Follow the connection's topology poll while on (once connected). */
+  #watch(): Promise<void> {
     const api = this.#api();
-    if (!this.#on || !api) return Promise.resolve();
-    this.#load ??= api
-      .mesh()
-      .then(
-        (t) => {
-          this.#topology = t;
-          this.#error = '';
-        },
-        (err: { message?: string }) => {
-          this.#error = err?.message ?? 'could not read the network';
-        },
-      )
-      .finally(() => {
-        this.#load = null;
-        this.#render();
-      });
-    return this.#load;
+    if (!this.#on || this.#stop || !api) return Promise.resolve();
+    const { ready, stop } = watchTopology(api, (state) => {
+      this.#topology = state.topology;
+      this.#error = state.error;
+      this.#render();
+    });
+    this.#stop = stop;
+    return ready;
   }
 
   #render(): void {
@@ -204,7 +254,7 @@ export class MeshLayer {
   }
 
   dispose(): void {
-    clearInterval(this.#timer);
-    this.#timer = 0;
+    this.#stop?.();
+    this.#stop = null;
   }
 }

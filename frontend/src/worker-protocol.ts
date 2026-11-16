@@ -1,6 +1,7 @@
 // Messages between the main thread and the field worker. The worker triangulates the sensor
 // layout once per change ('mesh') and then turns sensor values into a field grid ('values'); for
-// the signal layer it traces the whole field in one go ('signal', the Canvas2D fallback).
+// the signal layer it traces the whole field in one go ('signal', the Canvas2D fallback). One worker
+// serves every view on the page, so it keeps a layout per view ('view', dropped with 'drop').
 import { nodeValues, type FieldGrid, type FieldMesh } from './field';
 import { fillField, planField, type FieldPlan } from './field-plan';
 import type { Point } from './plan/types';
@@ -17,6 +18,8 @@ export type WorkerRequest =
   | {
       type: 'mesh';
       id: number;
+      /** The view whose layout this is (FieldWorker numbers them); 0 when left out. */
+      view?: number;
       key: string;
       sensors: Point[];
       outline: Point[];
@@ -25,7 +28,9 @@ export type WorkerRequest =
       walls?: ArrayLike<number>;
       rooms?: Point[][];
     }
-  | { type: 'values'; id: number; key: string; values: number[] }
+  | { type: 'values'; id: number; view?: number; key: string; values: number[] }
+  /** The view is gone: forget its layout. */
+  | { type: 'drop'; id: number; view: number }
   | {
       type: 'signal';
       id: number;
@@ -47,9 +52,10 @@ export type WorkerResponse =
   | { type: 'pong'; id: number; version: string }
   | { type: 'mesh'; id: number; key: string; mesh: FieldMesh; plan: FieldPlan }
   | { type: 'field'; id: number; key: string; grid: FieldGrid; field: Float32Array }
+  | { type: 'dropped'; id: number }
   | { type: 'error'; id: number; message: string };
 
-export const WORKER_VERSION = '3';
+export const WORKER_VERSION = '4';
 /** Largest grid side, sensor count, barrier segments and rooms the worker accepts. */
 export const MAX_FIELD_SIZE = 1024;
 export const MAX_SENSORS = 256;
@@ -68,9 +74,9 @@ const validGrid = (g: FieldGrid | undefined): boolean =>
   Number.isFinite(g.x0) &&
   Number.isFinite(g.y0);
 
-/** A request handler with the current layout. Pure apart from that state, so it is unit tested. */
+/** A request handler with each view's layout. Pure apart from that state, so it is unit tested. */
 export function createHandler(): (req: WorkerRequest) => WorkerResponse {
-  let current: { key: string; mesh: FieldMesh; plan: FieldPlan } | null = null;
+  const layouts = new Map<number, { key: string; mesh: FieldMesh; plan: FieldPlan }>();
   return (req) => {
     switch (req.type) {
       case 'ping':
@@ -87,10 +93,11 @@ export function createHandler(): (req: WorkerRequest) => WorkerResponse {
         const walls = Array.from(req.walls ?? []).slice(0, MAX_BARRIERS * 4);
         const rooms = (req.rooms ?? []).slice(0, MAX_ROOMS);
         const { mesh, plan } = planField(req.sensors, req.grid, req.outline ?? [], walls, rooms);
-        current = { key: req.key, mesh, plan };
+        layouts.set(req.view ?? 0, { key: req.key, mesh, plan });
         return { type: 'mesh', id: req.id, key: req.key, mesh, plan };
       }
       case 'values': {
+        const current = layouts.get(req.view ?? 0);
         if (!current || current.key !== req.key)
           return { type: 'error', id: req.id, message: 'unknown layout' };
         const n = current.mesh.members.reduce((s, m) => Math.max(s, ...m.map((i) => i + 1)), 0);
@@ -98,6 +105,9 @@ export function createHandler(): (req: WorkerRequest) => WorkerResponse {
         const field = fillField(current.plan, nodeValues(current.mesh, req.values));
         return { type: 'field', id: req.id, key: req.key, grid: current.plan.grid, field };
       }
+      case 'drop':
+        layouts.delete(req.view);
+        return { type: 'dropped', id: req.id };
       case 'signal': {
         if (!validGrid(req.grid))
           return {

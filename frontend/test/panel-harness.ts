@@ -5,7 +5,9 @@
 // The test file mocks what needs a browser and the API module, before anything imports them:
 //   vi.mock('../src/api', async (real) => ({ ...(await real()), wsApi: (c) => fakeWsApi(c) }));
 //   (an arrow: vi.mock is hoisted above this module's import)
-//   vi.mock('../src/field-worker', () => ({ pingWorker: () => new Promise(() => {}) }));
+//   vi.mock('../src/field-worker', () => ({
+//     holdWorker: () => ({ ready: new Promise(() => {}), release: () => {} }),
+//   }));
 //   (plus heat-layer, as in editor-underlay.test.ts)
 import type { ChartroomApi } from '../src/api';
 import type { ChartroomPanel } from '../src/chartroom-panel';

@@ -19,6 +19,10 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 - With the History slider open, the plan no longer redraws on every Home Assistant update while the
   shown time stays put: only moving the slider, loading another range or a change to the plan
   redraws it, as in live view (#82).
+- A page with several Chartroom cards, or cards and the panel, runs one field worker instead of one
+  per heatmap (plus a throwaway one each time the panel opened), and reads the mesh topology once a
+  minute per Home Assistant connection instead of once per mesh layer. The poll stops when the last
+  mesh layer is switched off or leaves the page (#80).
 
 ## 0.2.0 — 2026-11-16
 

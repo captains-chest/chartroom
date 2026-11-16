@@ -1,6 +1,6 @@
 import type { ChartroomApi } from './api';
 import type { Hass, PlanSummary } from './ha-types';
-import { pingWorker } from './field-worker';
+import { holdWorker } from './field-worker';
 import { emptyPlan } from './plan/functions';
 import type { Plan } from './plan/models';
 import { type FloorTab, floorTabs, HOME_TAB, newPlanId } from './model';
@@ -72,6 +72,7 @@ export class ChartroomPanel extends HTMLElement {
   #planId: string | null = null;
   #plan: Plan | null = null;
   #editor: PlanEditor | null = null;
+  #worker: ReturnType<typeof holdWorker> | null = null;
   #underlayPref = readUnderlayPref();
   readonly #underlayControls: HTMLElement;
   readonly #underlayToggle: HTMLButtonElement;
@@ -199,7 +200,10 @@ export class ChartroomPanel extends HTMLElement {
   }
 
   connectedCallback(): void {
-    pingWorker().then(
+    // The page's field worker, held while on the page: the heatmap finds it running.
+    this.#worker?.release();
+    this.#worker = holdWorker();
+    this.#worker.ready.then(
       (v) => this.#setStatus('worker', `worker ${v} ready`),
       () => this.#setStatus('worker', 'worker unavailable'),
     );
@@ -213,6 +217,8 @@ export class ChartroomPanel extends HTMLElement {
     void this.#editor?.flush();
     window.removeEventListener('keydown', this.#onKey);
     this.#viewer.disconnect();
+    this.#worker?.release();
+    this.#worker = null;
   }
 
   set hass(hass: Hass) {

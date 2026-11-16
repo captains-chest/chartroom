@@ -10,7 +10,9 @@ vi.mock('../src/api', async (real) => ({
   ...(await real<typeof import('../src/api')>()),
   wsApi: (c: Parameters<typeof fakeWsApi>[0]) => fakeWsApi(c),
 }));
-vi.mock('../src/field-worker', () => ({ pingWorker: () => new Promise(() => {}) }));
+vi.mock('../src/field-worker', () => ({
+  holdWorker: () => ({ ready: new Promise(() => {}), release: () => {} }),
+}));
 vi.mock('../src/heat-layer', () => ({
   HeatLayer: class {
     dispose = vi.fn();

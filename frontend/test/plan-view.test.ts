@@ -63,6 +63,28 @@ describe('plan view lifecycle', () => {
     expect(sent()).toBe(4);
   });
 
+  it('shares one topology poll between views on a connection, until the last goes', async () => {
+    const mesh = vi.fn(async () => topology);
+    const api = { mesh } as unknown as ChartroomApi;
+    const [a, b] = [new PlanView(true), new PlanView(true)];
+    for (const v of [a, b]) {
+      v.setApi(() => api);
+      v.setHass({ connection: {} } as unknown as Hass);
+    }
+    await Promise.all([a.setMesh(true), b.setMesh(true)]);
+    expect(mesh).toHaveBeenCalledOnce();
+    expect(b.mesh!.note.textContent).toContain('no ZHA');
+    await vi.advanceTimersByTimeAsync(MESH_REFRESH_MS);
+    expect(mesh).toHaveBeenCalledTimes(2);
+
+    a.dispose();
+    await vi.advanceTimersByTimeAsync(MESH_REFRESH_MS);
+    expect(mesh).toHaveBeenCalledTimes(3);
+    b.dispose();
+    await vi.advanceTimersByTimeAsync(3 * MESH_REFRESH_MS);
+    expect(mesh).toHaveBeenCalledTimes(3);
+  });
+
   it('disposes the heat layer, and builds a new one for the same layer on resume', async () => {
     const view = new PlanView(true);
     await view.setLayer('temperature');

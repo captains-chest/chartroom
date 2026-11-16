@@ -2,9 +2,15 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 import { fieldGrid } from '../src/field';
 import type { Point } from '../src/plan/types';
 import { CanvasRenderer } from '../src/heat/canvas-renderer';
+import { FieldWorker } from '../src/field-worker';
 import { FieldClient, SUPERSEDED } from '../src/heat/field-client';
 import type { Layout } from '../src/heat/models';
-import type { WorkerRequest, WorkerRequestBody, WorkerResponse } from '../src/worker-protocol';
+import {
+  createHandler,
+  type WorkerRequest,
+  type WorkerRequestBody,
+  type WorkerResponse,
+} from '../src/worker-protocol';
 
 const grid = fieldGrid({ minX: 0, minY: 0, maxX: 4, maxY: 3 }, 1, 16);
 const sensors: Point[] = [
@@ -28,14 +34,31 @@ class FakeWorker extends EventTarget {
 
 const withWorker = (): [FieldClient, FakeWorker] => {
   const worker = new FakeWorker();
-  return [new FieldClient(() => worker as unknown as Worker), worker];
+  return [new FieldClient(new FieldWorker(() => worker as unknown as Worker)), worker];
 };
+const noWorkers = (): FieldClient =>
+  new FieldClient(
+    new FieldWorker(() => {
+      throw new Error('no workers');
+    }),
+  );
+
+/** A stand-in worker that answers with the real handler. */
+class HandlerWorker extends FakeWorker {
+  readonly handle = createHandler();
+  terminated = false;
+  override postMessage(req: WorkerRequest): void {
+    super.postMessage(req);
+    queueMicrotask(() => this.reply(this.handle(req)));
+  }
+  override terminate(): void {
+    this.terminated = true;
+  }
+}
 
 describe('field client', () => {
   it('runs requests in this thread when there are no workers', async () => {
-    const client = new FieldClient(() => {
-      throw new Error('no workers');
-    });
+    const client = noWorkers();
     expect((await client.request(mesh)).type).toBe('mesh');
     expect((await client.request({ type: 'values', key: 'k', values: [1, 2, 3] })).type).toBe(
       'field',
@@ -43,12 +66,33 @@ describe('field client', () => {
   });
 
   it('turns a handler that throws into an error reply', async () => {
-    const client = new FieldClient(() => {
-      throw new Error('no workers');
-    });
+    const client = noWorkers();
     await client.request(mesh);
     const bad = { type: 'values', key: 'k', values: null } as unknown as WorkerRequestBody;
     expect((await client.request(bad)).type).toBe('error');
+  });
+
+  it('shares one worker between views, each with its own layout, until the last goes', async () => {
+    const worker = new HandlerWorker();
+    const spawn = vi.fn(() => worker as unknown as Worker);
+    const shared = new FieldWorker(spawn);
+    const a = new FieldClient(shared);
+    const b = new FieldClient(shared);
+    await a.request(mesh);
+    await b.request({ ...mesh, key: 'k2', sensors: [...sensors, [4, 3]] } as WorkerRequestBody);
+    expect(await a.request({ type: 'values', key: 'k', values: [1, 2, 3] })).toMatchObject({
+      type: 'field',
+      key: 'k',
+    });
+    expect(await b.request({ type: 'values', key: 'k2', values: [1, 2, 3, 4] })).toMatchObject({
+      type: 'field',
+      key: 'k2',
+    });
+    expect(spawn).toHaveBeenCalledOnce();
+    a.dispose();
+    expect(worker.terminated).toBe(false);
+    b.dispose();
+    expect(worker.terminated).toBe(true);
   });
 
   it('settles requests with what the worker replies, errors included', async () => {

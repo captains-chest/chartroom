@@ -33,8 +33,19 @@ export interface ChartroomApi {
   info(): Promise<{ version: string }>;
 }
 
-/** The port over Home Assistant's websocket connection. */
+const apis = new WeakMap<HassConnection, ChartroomApi>();
+
+/**
+ * The port over Home Assistant's websocket connection: one per connection, so what is shared per
+ * connection (the mesh layer's topology poll) can go by it.
+ */
 export function wsApi(c: HassConnection): ChartroomApi {
+  let api = apis.get(c);
+  if (!api) apis.set(c, (api = connectionApi(c)));
+  return api;
+}
+
+function connectionApi(c: HassConnection): ChartroomApi {
   const send = <T>(type: string, data?: object): Promise<T> =>
     c.sendMessagePromise<T>({ type: `chartroom/${type}`, ...data });
   return {

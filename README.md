@@ -235,6 +235,16 @@ custom repository: `https://github.com/captains-chest/chartroom`, type **Integra
 `custom_components` folder of your Home Assistant configuration, restart Home Assistant, and add
 the integration as above. Updates are then up to you.
 
+Home Assistant OS has no file access by default: install the official **Terminal & SSH** app and
+copy with `scp`, or `tar` over `ssh` (on the box the folder is `/config`), or use the **Samba
+share** app. Run `ha core check` before restarting. From a checkout or an unpacked release:
+
+```sh
+COPYFILE_DISABLE=1 tar -C custom_components --exclude=__pycache__ -czf - chartroom \
+  | ssh root@<host> 'tar -C /config/custom_components -xzf - && ha core check'
+ssh root@<host> ha core restart
+```
+
 After an update (and the restart), a panel or card left open in a browser shows **Chartroom was
 updated** with a **Reload** button: the page still runs the old frontend until it reloads. The
 frontend is served from a path with the version in it, so no cache can hand out an old file.

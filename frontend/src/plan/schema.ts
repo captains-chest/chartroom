@@ -137,9 +137,9 @@ export function shapeProblems(plan: Plan): string[] {
 
 /**
  * The parts of a damaged plan nothing can draw, taken out: a list that is not a list becomes
- * empty, an item that is not an object goes, and an outline that is not points becomes empty.
- * Items with a bad field stay: they load today, and dropping them would save the loss with the next
- * edit. A bad underlay is the loader's to drop (ownUnderlayOnly), which says so.
+ * empty, an item that is not an object or has a bad field goes, and an outline that is not points
+ * becomes empty. The problems say what went (the loader logs them); a later save stores the plan
+ * without them. A bad underlay is the loader's to drop (ownUnderlayOnly), which says so.
  */
 function repair(plan: Plan): Plan {
   const raw = { ...(plan as unknown as Record<string, unknown>) };
@@ -147,7 +147,9 @@ function repair(plan: Plan): Plan {
   for (const [list, spec] of Object.entries(PLAN_LISTS)) {
     const items = raw[list];
     if (items === undefined && spec.optional) continue;
-    raw[list] = Array.isArray(items) ? items.filter(isObject) : [];
+    const sound = (item: unknown): boolean =>
+      isObject(item) && Object.entries(spec.fields).every(([key, ok]) => ok(item[key]));
+    raw[list] = Array.isArray(items) ? items.filter(sound) : [];
   }
   return raw as unknown as Plan;
 }

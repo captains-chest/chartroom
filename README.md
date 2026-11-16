@@ -283,7 +283,7 @@ JavaScript dependencies; everything it needs ships in this repository.
 | `.ci/configuration.yaml`                                          | The CI Home Assistant: template sensors, lights, switches, a lock and a cover for e2e.                                                                       |
 | `tests/`, `frontend/test/`, `e2e/`                                | pytest, Vitest, and Playwright against a real Home Assistant.                                                                                                |
 
-Websocket commands: `chartroom/info` (returns `{version}`, used for the update prompt), `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin; save rejects a plan whose `schema_version` this version does not know), and `chartroom/plans/subscribe`, which sends `{plan_id, deleted}` whenever a plan is saved or deleted. `chartroom/mesh/get` returns the mesh topology `{nodes, links, sources}` (`chartroom/mesh/test_source`, admin only, swaps in a fake one for tests). Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB). Each upload is kept as its own version, addressed by `?v=<hash>`, so the editor's Undo can go back to a replaced image; versions the plan no longer points at are deleted when Home Assistant starts and when the plan is deleted. The frontend sends the `chartroom/*` commands through one port, `ChartroomApi` in `frontend/src/api.ts`; the panel and the card share their viewer (layers, History slider, plan loading) in `frontend/src/viewer.ts`.
+Websocket commands: `chartroom/info` (returns `{version}`, used for the update prompt), `chartroom/plans/list`, `chartroom/plans/get`, `chartroom/plans/save` and `chartroom/plans/delete` (save and delete need an admin; save rejects a plan whose `schema_version` this version does not know), and `chartroom/plans/subscribe`, which sends `{plan_id, deleted}` whenever a plan is saved or deleted. `chartroom/mesh/get` returns the mesh topology `{nodes, links, sources}` (`chartroom/mesh/test_source`, admin only, swaps in a fake one for tests; it exists only when Home Assistant runs with the environment variable `CHARTROOM_TEST_HOOKS` set). Underlay images live at `/api/chartroom/underlay/<plan_id>` (GET for any user, POST for admins; at most 10 MB). Each upload is kept as its own version, addressed by `?v=<hash>`, so the editor's Undo can go back to a replaced image; versions the plan no longer points at are deleted when Home Assistant starts and when the plan is deleted. The frontend sends the `chartroom/*` commands through one port, `ChartroomApi` in `frontend/src/api.ts`; the panel and the card share their viewer (layers, History slider, plan loading) in `frontend/src/viewer.ts`.
 
 ## Example data
 
@@ -320,7 +320,8 @@ uv run pytest
 ```
 
 End-to-end tests need a running Home Assistant with Chartroom copied into its
-`custom_components`. They onboard a fresh instance, or use `HA_TOKEN` for an existing one:
+`custom_components`, started with `CHARTROOM_TEST_HOOKS=1` in its environment (the mesh tests use
+the test hook it turns on). They onboard a fresh instance, or use `HA_TOKEN` for an existing one:
 
 ```sh
 pnpm exec playwright install chromium

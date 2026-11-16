@@ -200,7 +200,7 @@ jobs:
           mkdir -p .ci/ha-config/custom_components
           cp .ci/configuration.yaml .ci/ha-config/
           cp -r custom_components/chartroom .ci/ha-config/custom_components/
-          docker run -d --name ha -p 127.0.0.1:8123:8123 -e TZ=Europe/Copenhagen \
+          docker run -d --name ha -p 127.0.0.1:8123:8123 -e TZ=Europe/Copenhagen -e CHARTROOM_TEST_HOOKS=1 \
             -v "$PWD/.ci/ha-config:/config" \
             "ghcr.io/home-assistant/home-assistant:${tag}"
 

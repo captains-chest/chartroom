@@ -242,7 +242,8 @@ that still overlaps (small cards) is hidden; the marker keeps its accessible nam
   device marker or source shows one of its entities or another entity of its device, and draws a
   line for each link with both ends on the plan: hue from red (bad) to green (good) by LQI/255, or
   by RSSI from -90 to -40 dBm; dashed grey when unknown. It re-reads every 60 s while on.
-- `chartroom/mesh/test_source` (admin) swaps in a fake topology, in memory only, for e2e.
+- `chartroom/mesh/test_source` (admin) swaps in a fake topology, in memory only, for e2e. It is
+  registered only when Home Assistant runs with `CHARTROOM_TEST_HOOKS` set, as the e2e one does.
 
 ### Old-wall-tablet check
 

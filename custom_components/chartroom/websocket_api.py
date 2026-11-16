@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from homeassistant.components import websocket_api
@@ -14,6 +15,9 @@ from .mesh import DATA_MESH_TEST, async_get_topology
 from .store import PLAN_ID, PLAN_SCHEMA, ChartroomStore, InvalidPlanError
 from .underlay import async_remove_underlay
 
+# Set (to anything) to register chartroom/mesh/test_source; the e2e Home Assistant does.
+TEST_HOOKS_ENV = "CHARTROOM_TEST_HOOKS"
+
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
@@ -25,7 +29,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_delete_plan)
     websocket_api.async_register_command(hass, ws_subscribe_plans)
     websocket_api.async_register_command(hass, ws_get_mesh)
-    websocket_api.async_register_command(hass, ws_test_mesh)
+    if os.environ.get(TEST_HOOKS_ENV):
+        websocket_api.async_register_command(hass, ws_test_mesh)
 
 
 def _store(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg_id: int):

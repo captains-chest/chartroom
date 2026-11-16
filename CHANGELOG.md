@@ -2,7 +2,7 @@
 
 All notable changes to Chartroom. Versions follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.2.0 — 2026-11-16
 
 ### Fixed
 
@@ -11,6 +11,16 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   reconnects or the panel comes back on the page. While the editor is open it keeps its own copy;
   Done shows what is stored, and an edit made after a save elsewhere replaces it (the last save
   wins) (#78).
+- **Done** no longer waits forever for an underlay image upload that hangs: after a minute it
+  drops the upload, closes the editor and says so in the status line (#65).
+- When the last change can't be saved as the editor closes (on **Done** or switching floors), the
+  status line now says so, instead of the failure going away with the editor's toolbar (#66).
+- The editor's inspector no longer replaces its fields whenever any Home Assistant state changes,
+  which could drop a value still being typed in (say, a room name) before it was taken. Each panel
+  is redrawn only when what it shows changes.
+- A damaged stored plan (say, walls that are not a list, or a wall without an end) opens without
+  the parts nothing can draw, instead of failing somewhere in the drawing code; what was left out is
+  logged in the browser console, and the next save stores the plan without it.
 
 ### Performance
 
@@ -24,19 +34,6 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 - The last three underlay images are kept in the browser: Undo and Redo across an image change no
   longer download it again, and opening the editor while the panel is still loading the image
   waits for that load instead of starting a second one.
-
-### Fixed
-
-- **Done** no longer waits forever for an underlay image upload that hangs: after a minute it
-  drops the upload, closes the editor and says so in the status line (#65).
-- When the last change can't be saved as the editor closes (on **Done** or switching floors), the
-  status line now says so, instead of the failure going away with the editor's toolbar (#66).
-- The editor's inspector no longer replaces its fields whenever any Home Assistant state changes,
-  which could drop a value still being typed in (say, a room name) before it was taken. Each panel
-  is redrawn only when what it shows changes.
-- A damaged stored plan (say, walls that are not a list, or a wall without an end) opens without
-  the parts nothing can draw, instead of failing somewhere in the drawing code; what was left out is
-  logged in the browser console, and the next save stores the plan without it.
 
 ### Requirements
 

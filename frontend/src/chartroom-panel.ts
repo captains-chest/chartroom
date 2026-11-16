@@ -1,5 +1,5 @@
-import type { ChartroomApi } from './api';
-import type { Hass, PlanSummary } from './ha-types';
+import type { ChartroomApi, Unsubscribe } from './api';
+import type { Hass, HassConnection, PlanSummary } from './ha-types';
 import { pingWorker } from './field-worker';
 import { emptyPlan } from './plan/functions';
 import type { Plan } from './plan/models';
@@ -81,6 +81,11 @@ export class ChartroomPanel extends HTMLElement {
   /** The stored plan's underlay was dropped on load for pointing outside Chartroom. */
   #underlayIgnored = false;
   #plansRequested = false;
+  #unsubscribe: Promise<Unsubscribe | null> | null = null;
+  /** The connection whose 'ready' (back after a drop) the panel listens to. */
+  #connection: HassConnection | undefined;
+  /** A plan was saved elsewhere while the editor was open: the panel catches up at Done. */
+  #missed = false;
   readonly #sheet: HTMLElement;
   #narrow = false;
   panel?: PanelInfo;
@@ -203,6 +208,11 @@ export class ChartroomPanel extends HTMLElement {
     );
     window.addEventListener('keydown', this.#onKey);
     this.#viewer.connect();
+    if (this.#viewer.hass) {
+      this.#follow();
+      // Back on the page: saves made while it was off it sent no event here.
+      if (this.#plans) this.#planSaved(null);
+    }
   }
 
   // Home Assistant may detach the panel and attach it again: release the layers meanwhile.
@@ -211,6 +221,11 @@ export class ChartroomPanel extends HTMLElement {
     void this.#editor?.flush();
     window.removeEventListener('keydown', this.#onKey);
     this.#viewer.disconnect();
+    const unsub = this.#unsubscribe;
+    this.#unsubscribe = null;
+    void unsub?.then((u) => u?.());
+    this.#connection?.removeEventListener?.('ready', this.#onReady);
+    this.#connection = undefined;
   }
 
   set hass(hass: Hass) {
@@ -219,6 +234,7 @@ export class ChartroomPanel extends HTMLElement {
       this.#plansRequested = true;
       void this.#refreshPlans();
     }
+    if (this.isConnected) this.#follow();
     if (this.#plans) this.#renderTabs();
     this.#editor?.hassChanged();
   }
@@ -245,6 +261,54 @@ export class ChartroomPanel extends HTMLElement {
     const api = this.#viewer.api;
     if (!api) throw new Error('not connected');
     return api;
+  }
+
+  /**
+   * Follow plans saved or deleted elsewhere (another tab or user) while on the page, as the card
+   * does, and catch up when Home Assistant reconnects, since saves meanwhile sent no event.
+   */
+  #follow(): void {
+    const api = this.#viewer.api;
+    if (this.#unsubscribe || !api) return;
+    this.#unsubscribe = api.subscribePlans((e) => this.#planSaved(e.plan_id)).catch(() => null);
+    this.#connection = this.#viewer.hass?.connection;
+    this.#connection?.addEventListener?.('ready', this.#onReady);
+  }
+
+  readonly #onReady = (): void => this.#planSaved(null);
+
+  /**
+   * Plan `planId` (null: any plan) was saved or deleted, maybe by this panel's own editor. The tabs
+   * follow, and the plan on screen loads again. An open editor keeps its own copy: the panel
+   * catches up at Done, and the editor's next save replaces the other one (the last save wins).
+   */
+  #planSaved(planId: string | null): void {
+    if (this.#editor) {
+      this.#missed = true;
+      return;
+    }
+    void this.#refreshPlans();
+    if (planId === null || planId === this.#planId) void this.#reloadPlan();
+  }
+
+  /** Load the plan on screen again, keeping the pan and zoom. */
+  async #reloadPlan(): Promise<void> {
+    const planId = this.#planId;
+    const url = this.#plan?.underlay?.url;
+    if (!planId) return;
+    // Not over a tab switch or an editor opened meanwhile (no `begin()`: a tab load stays current).
+    const tab = this.#tab;
+    const current = (): boolean => !this.#editor && this.#planId === planId && this.#tab === tab;
+    try {
+      const loaded = await this.#viewer.load(planId, current);
+      if (!loaded) return;
+      this.#plan = loaded.plan;
+      this.#underlayIgnored = loaded.underlayIgnored;
+      if (loaded.plan.underlay?.url !== url) void this.#loadUnderlay();
+      else this.#renderUnderlayControls();
+    } catch {
+      // Deleted meanwhile: the refreshed tabs show that.
+    }
   }
 
   async #refreshPlans(): Promise<void> {
@@ -430,6 +494,7 @@ export class ChartroomPanel extends HTMLElement {
     const { PlanEditor } = await import('./plan-editor');
     // The editor owns the image from here: a panel load still running must not replace its own.
     this.#underlay.release();
+    this.#missed = false;
     this.#editor = new PlanEditor({
       view: this.#view,
       hass: () => this.#viewer.hass,
@@ -471,6 +536,10 @@ export class ChartroomPanel extends HTMLElement {
     // The editor's load may have been dropped mid-way: the panel fetches the image again.
     if (this.#view.underlayUrl) this.#renderUnderlayControls();
     else void this.#loadUnderlay();
+    // Show what was saved elsewhere meanwhile, unless the editor's last save failed: then its
+    // copy stays on screen, so Edit starts from it and saves it again.
+    if (this.#missed && !editor.unsaved) this.#planSaved(null);
+    this.#missed = false;
   }
 
   readonly #onKey = (e: KeyboardEvent): void => {

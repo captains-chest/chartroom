@@ -74,11 +74,15 @@ export class PanelHarness {
   readonly hass: Hass;
   readonly page = window as unknown as FakePage;
   readonly #body: FakeElement = document.createElement('body') as unknown as FakeElement;
+  /** The connection's 'ready' listeners (Home Assistant reconnected). */
+  readonly #ready = new Set<() => void>();
   panel!: ChartroomPanel;
 
   private constructor() {
     const connection: HassConnection = {
       sendMessagePromise: () => Promise.reject(new Error('the harness has no websocket')),
+      addEventListener: (_e, fn) => void this.#ready.add(fn),
+      removeEventListener: (_e, fn) => void this.#ready.delete(fn),
     };
     apis.set(connection, this.api);
     this.hass = { connection, user: { is_admin: true }, states: {}, fetchWithAuth: this.fetch.fn };
@@ -140,6 +144,25 @@ export class PanelHarness {
     if (!input) throw new Error('no plan file input (is the editor open?)');
     Object.assign(input, { files });
     input.dispatchEvent({ type: 'change' });
+  }
+
+  /** Store `plan` as `id` from elsewhere (another tab or user), and send its plan event. */
+  async saveElsewhere(id: string, plan: Plan): Promise<void> {
+    await this.api.savePlan(id, plan);
+    await settle();
+  }
+
+  /** Home Assistant's connection came back (its 'ready' event). */
+  async reconnect(): Promise<void> {
+    for (const fn of this.#ready) fn();
+    await settle();
+  }
+
+  /** Put the panel back on the page after `remove()`. */
+  async attach(): Promise<void> {
+    this.#body.append(this.#el);
+    this.panel.connectedCallback();
+    await settle();
   }
 
   /** Take the panel off the page, as Home Assistant does when it switches panels. */

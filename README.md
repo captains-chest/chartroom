@@ -351,7 +351,7 @@ byte for byte.
 `PERF=1 pnpm e2e e2e/perf.spec.ts` runs the CPU-throttled wall-tablet check (not in CI).
 
 CI runs all of the above, plus hassfest and HACS validation, and starts Home Assistant in Docker
-for the end-to-end tests.
+for the end-to-end tests: the version in `uv.lock` and the `hacs.json` minimum.
 
 ## Credits and contact
 

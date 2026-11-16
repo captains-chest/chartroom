@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Hass } from '../src/ha-types';
 import { MESH_REFRESH_MS } from '../src/mesh-layer';
+import { emptyPlan } from '../src/plan/functions';
 import { PlanView } from '../src/plan-view';
 import { installFakeDom } from './fake-dom';
 
@@ -22,8 +23,8 @@ installFakeDom();
 
 type Spy = ReturnType<typeof vi.fn>;
 /** The stand-in behind `view.heat`. */
-const fake = (heat: unknown): { dispose: Spy; setLayer: Spy } =>
-  heat as { dispose: Spy; setLayer: Spy };
+const fake = (heat: unknown): { dispose: Spy; setLayer: Spy; setHass: Spy; setPlan: Spy } =>
+  heat as { dispose: Spy; setLayer: Spy; setHass: Spy; setPlan: Spy };
 
 const topology = { nodes: [], links: [], sources: {} };
 
@@ -99,5 +100,50 @@ describe('plan view lifecycle', () => {
     await view.resume();
     expect(view.mesh).toBe(mesh);
     expect(sent()).toBe(1);
+  });
+});
+
+describe('plan view and Home Assistant states', () => {
+  const state = (entity_id: string, s: string) => ({ entity_id, state: s, attributes: {} });
+  const sensorPlan = (entity_id: string) => {
+    const p = emptyPlan('Home');
+    p.sources = [{ id: 't', kind: 'sensor', entity_id, position: [1, 1] }];
+    return p;
+  };
+
+  it('tells its layers only about states the plan reads', async () => {
+    const view = new PlanView(true);
+    view.setPlan(sensorPlan('sensor.t'));
+    await view.setLayer('temperature');
+    const heat = fake(view.heat);
+    const h1: Hass = {
+      states: { 'sensor.t': state('sensor.t', '20'), 'light.x': state('light.x', 'on') },
+    };
+    expect(view.setHass(h1)).toBe(true);
+    expect(heat.setHass).toHaveBeenLastCalledWith(h1);
+    const calls = heat.setHass.mock.calls.length;
+
+    const h2: Hass = { ...h1, states: { ...h1.states, 'light.x': state('light.x', 'off') } };
+    expect(view.setHass(h2)).toBe(false);
+    expect(heat.setHass).toHaveBeenCalledTimes(calls);
+
+    const h3: Hass = { ...h2, states: { ...h2.states, 'sensor.t': state('sensor.t', '21') } };
+    expect(view.setHass(h3)).toBe(true);
+    expect(heat.setHass).toHaveBeenLastCalledWith(h3);
+  });
+
+  it('hands a new plan the latest states, even ones skipped for the old plan', async () => {
+    const view = new PlanView(true);
+    view.setPlan(sensorPlan('sensor.t'));
+    await view.setLayer('temperature');
+    const heat = fake(view.heat);
+    const h1: Hass = { states: { 'sensor.t': state('sensor.t', '20') } };
+    view.setHass(h1);
+    const h2: Hass = { states: { ...h1.states, 'sensor.u': state('sensor.u', '18') } };
+    expect(view.setHass(h2)).toBe(false);
+
+    const next = sensorPlan('sensor.u');
+    view.setPlan(next);
+    expect(heat.setPlan).toHaveBeenLastCalledWith(next, h2);
   });
 });

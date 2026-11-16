@@ -10,6 +10,7 @@ import {
   layerOfState,
   layoutKey,
   rampLut,
+  staleAt,
 } from '../src/heat/functions';
 import { emptyPlan } from '../src/plan/functions';
 import type { Plan, Source } from '../src/plan/models';
@@ -96,6 +97,18 @@ describe('heat layers', () => {
     const at = Date.parse('2026-10-23T08:00:00Z');
     expect(layerData(plan, hass, 'temperature', at + STALE_MS - 1).excluded).toHaveLength(2);
     expect(layerData(plan, hass, 'temperature', at + STALE_MS + 1).excluded).toHaveLength(3);
+  });
+
+  it('says when the first fresh reading goes stale, so the layer can look again then', () => {
+    const { plan, hass } = setup();
+    const data = layerData(plan, hass, 'temperature', NOW);
+    // a, b and c were reported at 07:59; old is stale already and is not a reading.
+    expect(staleAt(data, hass, NOW)).toBe(Date.parse('2026-10-24T07:59:00Z') + STALE_MS);
+    expect(staleAt(layerData(plan, hass, 'signal', NOW), hass, NOW)).toBe(Infinity);
+    const noStamps = {
+      states: { 'sensor.a_temp': { ...hass.states!['sensor.a_temp']!, last_reported: undefined } },
+    } as Hass;
+    expect(staleAt(layerData(plan, noStamps, 'temperature', NOW), noStamps, NOW)).toBe(Infinity);
   });
 
   it('falls back to the default unit with no plan or no readings', () => {

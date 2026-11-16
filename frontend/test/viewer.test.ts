@@ -148,6 +148,24 @@ describe('viewer controller', () => {
     expect(view.layer).toBeNull();
   });
 
+  it('leaves the layer buttons alone when a state the plan does not read changes', async () => {
+    const { viewer } = setup();
+    const live = liveHass(recorder().c);
+    viewer.hass = live;
+    await viewer.load('home');
+    const update = vi.spyOn(viewer.layers, 'update');
+    viewer.hass = {
+      ...live,
+      states: { ...live.states, 'light.x': { entity_id: 'light.x', state: 'on', attributes: {} } },
+    };
+    expect(update).not.toHaveBeenCalled();
+    viewer.hass = {
+      ...live,
+      states: { ...live.states, 'sensor.t': { ...live.states!['sensor.t']!, state: '22' } },
+    };
+    expect(update).toHaveBeenCalledOnce();
+  });
+
   it('switches the mesh once, and tells the host only what the user picked', async () => {
     const { viewer, view, changed } = setup();
     const setMesh = vi.spyOn(view, 'setMesh');

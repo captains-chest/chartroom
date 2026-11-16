@@ -8,6 +8,9 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 - Right-clicking a device marker now opens Home Assistant's more-info dialog, as a hold or the
   context-menu key does; it did nothing in the panel (#87).
+- Releases no longer let an admin swap the real mesh for a made-up one: the e2e test hook
+  `chartroom/mesh/test_source` is registered only when Home Assistant runs with the environment
+  variable `CHARTROOM_TEST_HOOKS` set (#20).
 
 ## 0.2.0 — 2026-11-16
 

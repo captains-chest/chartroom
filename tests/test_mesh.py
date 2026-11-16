@@ -9,10 +9,12 @@ from unittest.mock import MagicMock, patch
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.chartroom import mesh
 from custom_components.chartroom.const import DOMAIN
+from custom_components.chartroom.websocket_api import TEST_HOOKS_ENV
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -214,6 +216,20 @@ async def test_mesh_resolves_z2m_coordinator_to_bridge(hass: HomeAssistant, hass
     assert coordinator["entities"] == ["binary_sensor.zigbee2mqtt_bridge_connection_state"]
 
 
+@pytest.fixture
+def test_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opt in to chartroom/mesh/test_source, as the e2e Home Assistant does."""
+    monkeypatch.setenv(TEST_HOOKS_ENV, "1")
+
+
+async def test_mesh_test_source_needs_opt_in(hass: HomeAssistant, hass_ws_client) -> None:
+    await _setup(hass)
+    ws = await hass_ws_client(hass)
+    await ws.send_json_auto_id({"type": "chartroom/mesh/test_source", "topology": None})
+    assert (await ws.receive_json())["error"]["code"] == "unknown_command"
+
+
+@pytest.mark.usefixtures("test_hooks")
 async def test_mesh_test_source(
     hass: HomeAssistant, hass_ws_client, hass_read_only_access_token
 ) -> None:
@@ -287,6 +303,7 @@ async def test_z2m_subscribes_once_under_concurrent_requests(hass: HomeAssistant
     unsub.assert_called_once()
 
 
+@pytest.mark.usefixtures("test_hooks")
 async def test_mesh_test_source_is_resolved(hass: HomeAssistant, hass_ws_client) -> None:
     """The test topology replaces the readers but goes through the same registry resolution."""
     await _setup(hass)

@@ -34,6 +34,26 @@ describe('keyed inspector', () => {
     expect(el.children[1]).not.toBe(nb);
   });
 
+  it('leaves the parts that did not change where they are', () => {
+    const el = document.createElement('div');
+    const inspector = new Inspector(el);
+    const a = part('a', [1]);
+    const b = part('b', [1]);
+    const c = part('c', [1]);
+    inspector.render([a, b, c]);
+    const [na, , nc] = el.children;
+    const replace = vi.spyOn(el, 'replaceChildren');
+    const insert = vi.spyOn(el, 'insertBefore');
+
+    const b2 = part('b', [2]);
+    inspector.render([part('a', [1], a.build), b2, part('c', [1], c.build)]);
+    // Only the new part went in: moving a, or c, would take the focus from a field in it.
+    expect(replace).not.toHaveBeenCalled();
+    expect(insert).toHaveBeenCalledOnce();
+    expect(insert.mock.calls[0]![0]).toBe(b2.build.mock.results[0]!.value);
+    expect(el.children).toEqual([na, b2.build.mock.results[0]!.value, nc]);
+  });
+
   it('drops parts that are gone and builds them again when they come back', () => {
     const el = document.createElement('div');
     const inspector = new Inspector(el);

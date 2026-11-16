@@ -15,10 +15,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # The Home Assistant image the latest end-to-end run uses. The minimum run uses hacs.json's.
-  HA_VERSION: '2026.10.3'
-
 jobs:
   frontend:
     name: Frontend
@@ -179,7 +175,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # latest: HA_VERSION. minimum: hacs.json's.
+        # latest: uv.lock's Home Assistant (moves with Dependabot's Python updates).
+        # minimum: hacs.json's.
         ha: [latest, minimum]
     steps:
       - name: Checkout
@@ -195,7 +192,15 @@ jobs:
         env:
           HA: ${{ matrix.ha }}
         run: |
-          if [ "$HA" = minimum ]; then tag=$(jq -r .homeassistant hacs.json); else tag=$HA_VERSION; fi
+          if [ "$HA" = minimum ]; then
+            tag=$(jq -r .homeassistant hacs.json)
+          else
+            tag=$(python3 -c 'import sys, tomllib; sys.stdout.write(next(p["version"] for p in tomllib.load(open("uv.lock", "rb"))["package"] if p["name"] == "homeassistant"))')
+          fi
+          if [ -z "$tag" ] || [ "$tag" = null ]; then
+            echo "::error::No Home Assistant version for the $HA run"
+            exit 1
+          fi
           echo "Home Assistant $tag"
           mkdir -p .ci/ha-config/custom_components
           cp .ci/configuration.yaml .ci/ha-config/

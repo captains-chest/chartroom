@@ -40,7 +40,7 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ### Requirements
 
-- Frontend: 16.64 KB gzip for the card, 56.56 KB gzip in total.
+- Frontend: 16.64 KB gzip for the card, 56.98 KB gzip in total.
 
 ## 0.1.0 — 2026-11-14
 

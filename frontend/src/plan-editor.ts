@@ -1,13 +1,23 @@
-// The wall and room editor: tools, selection, dragging with snapping, an inspector for the
-// selection, undo/redo and autosave. Loaded on demand by the panel (its own chunk).
-import { autoPlace, deviceChoices, deviceLook } from './devices';
-import { add, dist, frame, roundToMm, polygonArea } from './geometry';
-import type { Hass } from './ha-types';
+// The plan editor: the controller that wires the editing session (editor/session.ts), the tools
+// (editor/tools.ts), the inspector's panels (editor/panels/) and plan files (editor/file-actions.ts)
+// to the plan view, pointer and keyboard. Loaded on demand by the panel (its own chunk).
+import { autoPlace, deviceChoices } from './devices';
+import { download, exportFiles, type ExportMode, readImport } from './editor/file-actions';
 import { Inspector, type Part } from './editor/inspector';
-import { EditSession } from './editor/session';
 import { findItem, kindOps, titleOf } from './editor/kinds';
-import { areaName, roomNameForAreas } from './editor/rooms';
-import type { Items, Selection, ToolContext, ToolResult, ToolState } from './editor/models';
+import type { Selection, ToolContext, ToolResult, ToolState } from './editor/models';
+import { overlayNodes } from './editor/overlay';
+import type { PanelContext } from './editor/panels/context';
+import { devicesPanel, type DeviceList, ENTITY_MIME } from './editor/panels/devices';
+import { filePanel } from './editor/panels/file';
+import { itemPanel } from './editor/panels/item';
+import { materialsPanel } from './editor/panels/materials';
+import { measurePanel } from './editor/panels/measure';
+import { planPanel } from './editor/panels/plan';
+import { newSourcePanel } from './editor/panels/source';
+import { underlayPanel } from './editor/panels/underlay';
+import { warningsPanel } from './editor/panels/warnings';
+import { EditSession } from './editor/session';
 import {
   closeRoom,
   down,
@@ -19,47 +29,19 @@ import {
   up,
   withTool,
 } from './editor/tools';
-import type { Item, Kind, Tool } from './editor/types';
-import { areaChoices, entityArea, sourceChoices } from './model';
-import { limitWarnings, materialsOf } from './plan/functions';
-import type { Device, Door, Plan, Room, Source, Wall } from './plan/models';
-import type { Point, SourceKind, Window } from './plan/types';
-import {
-  addDevice,
-  addSource,
-  areaFactor,
-  moveEndpoint,
-  scalePlan,
-  setMaterial,
-  twoPointFactor,
-  updateDevice,
-  updateOpening,
-  updateRoom,
-  updateSource,
-  updateWall,
-} from './plan/ops';
-import {
-  dataUrl,
-  MAX_FILE_BYTES,
-  planFileJson,
-  planFileName,
-  readPlanFile,
-  underlayFileName,
-} from './plan-file';
+import type { Kind, Tool } from './editor/types';
+import type { Hass } from './ha-types';
+import { entityArea, sourceChoices } from './model';
+import type { Plan } from './plan/models';
+import type { Point, SourceKind } from './plan/types';
+import { addDevice, addSource } from './plan/ops';
 import type { PlanView } from './plan-view';
-import { signalLimitWarnings } from './signal';
 import { count } from './text';
-import { button, field, h, numberInput, s, select, textInput } from './ui';
+import { button, h } from './ui';
 import { importUnderlay, uploadUnderlay } from './underlay';
 import type { UnderlayStore } from './underlay-store';
 
 export type { Tool } from './editor/types';
-
-const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
-  { value: 'sensor', label: 'Temperature / humidity sensor' },
-  { value: 'access_point', label: 'Wi-Fi access point' },
-  { value: 'radio', label: 'Radio (Zigbee, Z-Wave, Thread…)' },
-];
 
 export interface EditorHost {
   view: PlanView;
@@ -115,10 +97,6 @@ const TOOLS: { tool: Tool; key: string; hint: string }[] = [
 
 /** Snap radius on screen. */
 const SNAP_PX = 10;
-/** An inspector section's content. */
-type Fields = (HTMLElement | null)[];
-/** Drag-and-drop type for an entity dragged from the Device list onto the plan. */
-const ENTITY_MIME = 'application/x-chartroom-entity';
 
 export class PlanEditor {
   readonly toolbar: HTMLElement;
@@ -395,58 +373,8 @@ export class PlanEditor {
   }
 
   #renderOverlay(): void {
-    const { tool, selection: sel, draft, measured, hover: cursor, preview } = this.#s;
-    const plan = preview ?? this.plan;
-    const k = this.#view.mpp;
-    const r = 5 * k;
-    const out: SVGElement[] = [];
-    const dot = (cls: string, [cx, cy]: Point, size = r, handle?: string): void => {
-      out.push(s('circle', { class: cls, 'data-handle': handle, cx, cy, r: size }));
-    };
-    if (tool === 'select' && sel?.kind === 'wall') {
-      const wall = plan.walls.find((w) => w.id === sel.id);
-      if (wall)
-        for (const end of ['a', 'b'] as const)
-          dot('handle', wall[end], r * 1.4, `endpoint|${wall.id}|${end}`);
-    }
-    if (tool === 'select' && sel?.kind === 'room') {
-      const room = plan.rooms.find((x) => x.id === sel.id);
-      room?.polygon.forEach((pt, i) => dot('handle', pt, r, `vertex|${room.id}|${i}`));
-    }
-    const hover = cursor?.point;
-    const chain = [...draft, ...(hover && draft.length > 0 ? [hover] : [])];
-    if (chain.length > 1) {
-      const pts = chain.map((q) => q.join(',')).join(' ');
-      out.push(
-        s(tool === 'room' ? 'polygon' : 'polyline', {
-          class: `draft ${tool}`,
-          points: pts,
-        }),
-      );
-      const a = chain.at(-2)!;
-      const b = chain.at(-1)!;
-      out.push(
-        s(
-          'text',
-          {
-            class: 'measure-label',
-            x: (a[0] + b[0]) / 2,
-            y: (a[1] + b[1]) / 2 - 2 * r,
-            'font-size': 12 * k,
-          },
-          `${dist(a, b).toFixed(2)} m`,
-        ),
-      );
-    }
-    for (const q of draft) dot('draft-point', q);
-    if (measured) {
-      const [a, b] = measured;
-      out.push(s('line', { class: 'draft measure', x1: a[0], y1: a[1], x2: b[0], y2: b[1] }));
-      for (const q of measured) dot('draft-point', q);
-    }
-    if (hover && tool !== 'select')
-      dot(cursor?.target ? 'cursor target' : 'cursor', hover, r * 0.8);
-    this.#view.drawOverlay(...out);
+    const plan = this.#s.preview ?? this.plan;
+    this.#view.drawOverlay(...overlayNodes(this.#s, plan, this.#view.mpp));
   }
 
   /**
@@ -457,17 +385,26 @@ export class PlanEditor {
     const plan = this.plan;
     const hass = this.#host.hass();
     const { tool, selection: sel, measured } = this.#s;
-    const parts: Part[] = [{ key: 'warnings', deps: [plan], build: () => this.#warningsPanel() }];
+    const parts: Part[] = [{ key: 'warnings', deps: [plan], build: () => warningsPanel(plan) }];
     if (tool === 'source' && !sel)
-      parts.push({ key: 'new-source', deps: [], build: () => this.#newSourcePanel() });
+      parts.push({
+        key: 'new-source',
+        deps: [],
+        build: () => newSourcePanel(this.#sourceKind, (kind) => (this.#sourceKind = kind)),
+      });
     if (tool === 'device' && !sel)
       parts.push({
         key: 'devices',
         deps: [this.#deviceListKey(), hass?.areas, this.#note, plan.floor_id],
-        build: () => this.#devicesPanel(),
+        build: () => devicesPanel(this.#panel, this.#deviceList()),
       });
     if (measured)
-      parts.push({ key: 'measure', deps: [measured], build: () => this.#measurePanel(measured) });
+      parts.push({
+        key: 'measure',
+        deps: [measured],
+        build: () =>
+          measurePanel(this.#panel, measured, () => (this.#s = { ...this.#s, measured: null })),
+      });
     if (sel)
       parts.push({
         key: `item:${sel.kind}:${sel.id}`,
@@ -477,15 +414,22 @@ export class PlanEditor {
           plan.floor_id,
           ...this.#itemHassDeps(sel, hass),
         ],
-        build: () => this.#itemPanel(sel),
+        build: () => itemPanel(this.#panel, sel, () => this.#deleteSelection()),
       });
     else if (tool !== 'device')
       parts.push(
-        { key: 'plan', deps: [plan, hass?.floors], build: () => this.#planPanel() },
+        { key: 'plan', deps: [plan, hass?.floors], build: () => planPanel(this.#panel) },
         {
           key: 'plan-file',
           deps: [!!plan.underlay, this.#fileReport],
-          build: () => this.#filePanel(),
+          build: () =>
+            filePanel(this.#panel, {
+              report: this.#fileReport,
+              exportPlan: (mode) => this.#exportPlan(mode),
+              importFiles: (files) => {
+                if (!this.#session.closed) this.#session.track(this.#importPlan(files));
+              },
+            }),
         },
       );
     if (!sel && tool !== 'source' && tool !== 'device')
@@ -493,13 +437,45 @@ export class PlanEditor {
         {
           key: 'underlay',
           deps: [plan.underlay, this.#host.underlayIgnored],
-          build: () => this.#underlayPanel(),
+          build: () =>
+            underlayPanel(this.#panel, !!this.#host.underlayIgnored, (file) => {
+              if (!this.#session.closed) this.#session.track(this.#importUnderlay(file));
+            }),
         },
-        { key: 'materials', deps: [plan.materials], build: () => this.#materialsPanel() },
+        { key: 'materials', deps: [plan.materials], build: () => materialsPanel(this.#panel) },
       );
     this.#inspector.render(parts);
     this.inspector.dataset['selection'] = sel ? `${sel.kind}:${sel.id}` : '';
     this.inspector.dataset['walls'] = String(plan.walls.length);
+  }
+
+  /** What the panels see of the editor: the plan now, Home Assistant, and committing. */
+  readonly #panel: PanelContext = (() => {
+    const plan = (): Plan => this.plan;
+    const hass = (): Hass | undefined => this.#host.hass();
+    return {
+      get plan() {
+        return plan();
+      },
+      get hass() {
+        return hass();
+      },
+      commit: (next: Plan) => this.#commit(next),
+    };
+  })();
+
+  #deviceList(): DeviceList {
+    return {
+      choices: this.#deviceChoices(),
+      armed: this.#s.armed,
+      note: this.#note,
+      arm: (entity) => {
+        const { armed } = this.#s;
+        this.#s = { ...this.#s, armed: armed === entity ? null : entity };
+        this.#renderInspector();
+      },
+      autoPlace: () => this.#autoPlace(),
+    };
   }
 
   /** What of Home Assistant an item's panel shows: its pickers' choices, names, its state. */
@@ -533,336 +509,18 @@ export class PlanEditor {
     }
   }
 
-  #section(title: string, kind: string, ...children: (HTMLElement | null)[]): HTMLElement {
-    return h('section', { 'data-panel': kind }, h('h2', {}, title), ...children);
-  }
-
-  /** Each kind's inspector fields; `#itemPanel` adds the title and the Delete button. */
-  readonly #panels: { readonly [K in Kind]: (item: Items[K]) => Fields } = {
-    wall: (w) => this.#wallPanel(w),
-    room: (r) => this.#roomPanel(r),
-    door: (o) => this.#openingPanel(o),
-    window: (o) => this.#openingPanel(o),
-    source: (x) => this.#sourcePanel(x),
-    device: (d) => this.#devicePanel(d),
-  };
-
-  #itemPanel(sel: Selection): HTMLElement | null {
-    const item = findItem(this.plan, sel);
-    if (!item) return null;
-    const label = titleOf(sel.kind);
-    return this.#section(
-      label,
-      sel.kind,
-      ...(this.#panels[sel.kind] as (item: Item) => Fields)(item),
-      button(`Delete ${label.toLowerCase()}`, () => this.#deleteSelection(), {
-        class: 'danger',
-        'data-action': 'delete',
-      }),
-    );
-  }
-
-  #materialOptions(): { value: string; label: string }[] {
-    return [...materialsOf(this.plan).values()].map((m) => ({ value: m.id, label: m.name }));
-  }
-
-  #wallPanel(wall: Wall): Fields {
-    const { id } = wall;
-    const length = frame(wall).length;
-    return [
-      field(
-        'Material',
-        select(
-          this.#materialOptions(),
-          wall.material,
-          (v) => this.#commit(updateWall(this.plan, id, { material: v })),
-          {
-            name: 'material',
-          },
-        ),
-      ),
-      field(
-        'Thickness (cm)',
-        numberInput(
-          roundToMm(wall.thickness * 100),
-          (v) => this.#commit(updateWall(this.plan, id, { thickness: v / 100 })),
-          { name: 'thickness', min: 1, max: 100, step: 0.5 },
-        ),
-      ),
-      field(
-        'Length (m)',
-        numberInput(
-          roundToMm(length),
-          (v) => {
-            if (v <= 0.05) return;
-            const { u } = frame(wall);
-            this.#commit(moveEndpoint(this.plan, wall.b, add(wall.a, [u[0] * v, u[1] * v])));
-          },
-          { name: 'length', min: 0.05, step: 0.01 },
-        ),
-      ),
-      h('p', { class: 'meta' }, `${wall.id}`),
-    ];
-  }
-
-  #openingPanel(o: Door | Window): Fields {
-    const { id } = o;
-    const isDoor = 'hinge' in o;
-    const set = (patch: Partial<Omit<Door, 'id' | 'wall'>>): void =>
-      this.#commit(updateOpening(this.plan, id, patch));
-    return [
-      field(
-        'Width (cm)',
-        numberInput(roundToMm(o.width * 100), (v) => set({ width: v / 100 }), {
-          name: 'width',
-          min: 10,
-          step: 1,
-        }),
-      ),
-      field(
-        'Material',
-        select(this.#materialOptions(), o.material, (v) => set({ material: v }), {
-          name: 'material',
-        }),
-      ),
-      field(
-        'Thickness (cm)',
-        numberInput(roundToMm(o.thickness * 100), (v) => set({ thickness: v / 100 }), {
-          name: 'thickness',
-          min: 0.1,
-          step: 0.1,
-        }),
-      ),
-      field(
-        isDoor ? 'Sensor (optional)' : 'Sensor (optional)',
-        textInput(o.entity_id ?? '', (v) => set({ entity_id: v.trim() || undefined }), {
-          name: 'entity_id',
-          placeholder: 'binary_sensor.…',
-        }),
-      ),
-      isDoor
-        ? h(
-            'div',
-            { class: 'row' },
-            button('Flip hinge', () => set({ hinge: (o as Door).hinge === 'a' ? 'b' : 'a' }), {
-              'data-action': 'flip-hinge',
-            }),
-            button('Flip swing', () => set({ swing: (o as Door).swing === 1 ? -1 : 1 }), {
-              'data-action': 'flip-swing',
-            }),
-          )
-        : null,
-    ];
-  }
-
-  /** The room's linked Home Assistant areas, each with an unlink button, and a picker to add one. */
-  #roomAreasField(room: Room): HTMLElement {
-    const hass = this.#host.hass();
-    const linked = room.area_ids ?? [];
-    const names = (ids: readonly string[]): string[] => ids.map((a) => areaName(hass, a));
-    const setAreas = (ids: string[]): void => {
-      const fallback = `Room ${this.plan.rooms.indexOf(room) + 1}`;
-      const name = roomNameForAreas(room.name, names(linked), names(ids), fallback);
-      this.#commit(updateRoom(this.plan, room.id, { area_ids: ids, name }));
-    };
-    const free = areaChoices(hass, this.plan.floor_id ?? null).filter(
-      (a) => !linked.includes(a.area_id),
-    );
-    const rows = linked.map((id) =>
-      h(
-        'div',
-        { class: 'row', 'data-area-id': id },
-        areaName(hass, id),
-        button('×', () => setAreas(linked.filter((a) => a !== id)), {
-          'data-action': 'unlink-area',
-          'aria-label': `Unlink ${areaName(hass, id)}`,
-        }),
-      ),
-    );
-    const add = select(
-      [
-        { value: '', label: linked.length > 0 ? 'Add an area…' : '— none —' },
-        ...free.map((a) => ({ value: a.area_id, label: a.name })),
-      ],
-      '',
-      (v) => v && setAreas([...linked, v]),
-      { name: 'area', 'aria-label': 'Link an area' },
-    );
-    return h('div', { class: 'field' }, h('span', {}, 'Home Assistant areas'), ...rows, add);
-  }
-
-  #roomPanel(room: Room): Fields {
-    const { id } = room;
-    const area = polygonArea(room.polygon);
-    let target = area;
-    return [
-      field(
-        'Name',
-        textInput(
-          room.name,
-          (v) => v.trim() && this.#commit(updateRoom(this.plan, id, { name: v.trim() })),
-          { name: 'name' },
-        ),
-      ),
-      this.#roomAreasField(room),
-      h('p', { class: 'meta', 'data-area': area.toFixed(2) }, `${area.toFixed(2)} m² drawn`),
-      h(
-        'div',
-        { class: 'calibrate' },
-        field(
-          'Real area (m²)',
-          numberInput(roundToMm(area), (v) => (target = v), {
-            name: 'real-area',
-            min: 0.1,
-            step: 0.1,
-          }),
-        ),
-        button(
-          'Scale plan to match',
-          () => {
-            if (!(target > 0) || Math.abs(target - area) < 1e-6) return;
-            this.#commit(scalePlan(this.plan, areaFactor(room.polygon, target)));
-          },
-          {
-            'data-action': 'calibrate-area',
-            title: 'Rescale the whole drawing (and underlay) so this room has the real area',
-          },
-        ),
-      ),
-    ];
-  }
-
-  #measurePanel([a, b]: readonly [Point, Point]): HTMLElement {
-    const d = dist(a, b);
-    let target = d;
-    return this.#section(
-      'Measure',
-      'measure',
-      h('p', { class: 'meta', 'data-distance': d.toFixed(3) }, `${d.toFixed(2)} m drawn`),
-      field(
-        'Real distance (m)',
-        numberInput(roundToMm(d), (v) => (target = v), {
-          name: 'real-distance',
-          min: 0.01,
-          step: 0.01,
-        }),
-      ),
-      button(
-        'Scale plan to match',
-        () => {
-          if (!(target > 0) || d === 0) return;
-          this.#s = { ...this.#s, measured: null };
-          this.#commit(scalePlan(this.plan, twoPointFactor(a, b, target)));
-        },
-        { 'data-action': 'calibrate-distance', class: 'primary' },
-      ),
-    );
-  }
-
-  #planPanel(): HTMLElement {
-    const plan = this.plan;
-    const floors = Object.values(this.#host.hass()?.floors ?? {});
-    const area = plan.rooms.reduce((sum, r) => sum + polygonArea(r.polygon), 0);
-    return this.#section(
-      'Plan',
-      'plan',
-      field(
-        'Name',
-        textInput(plan.name, (v) => v.trim() && this.#commit({ ...plan, name: v.trim() }), {
-          name: 'plan-name',
-        }),
-      ),
-      field(
-        'Floor',
-        select(
-          [
-            { value: '', label: '— none —' },
-            ...floors.map((f) => ({ value: f.floor_id, label: f.name })),
-          ],
-          plan.floor_id ?? '',
-          (v) => this.#commit({ ...this.plan, floor_id: v || null }),
-          { name: 'floor' },
-        ),
-      ),
-      h(
-        'p',
-        { class: 'meta' },
-        `${plan.walls.length} walls · ${plan.rooms.length} rooms · ${plan.doors.length} doors · ${plan.windows.length} windows · ${plan.sources.length} sources · ${plan.devices?.length ?? 0} devices · ${area.toFixed(1)} m²`,
-      ),
-    );
-  }
-
-  /** Export the plan as a .json file, or import one (with its underlay image file) over it. */
-  #filePanel(): HTMLElement {
-    const input = h('input', {
-      type: 'file',
-      accept: 'application/json,.json,image/png,image/jpeg,image/webp,image/svg+xml',
-      multiple: true,
-      name: 'plan-file',
-    });
-    input.addEventListener('change', () => {
-      const files = [...(input.files ?? [])];
-      input.value = '';
-      if (files.length > 0 && !this.#session.closed) this.#session.track(this.#importPlan(files));
-    });
-    const report = this.#fileReport;
-    return this.#section(
-      'Plan file',
-      'plan-file',
-      h(
-        'div',
-        { class: 'row' },
-        button('Export', () => void this.#exportPlan('none'), { 'data-action': 'export-plan' }),
-        this.plan.underlay
-          ? button('Export with underlay', () => void this.#exportPlan('embed'), {
-              'data-action': 'export-plan-underlay',
-              title: 'Embed the underlay image in the .json file',
-            })
-          : null,
-        this.plan.underlay
-          ? button('Export with underlay file', () => void this.#exportPlan('file'), {
-              'data-action': 'export-plan-underlay-file',
-              title: 'Save the underlay image as its own file next to the .json',
-            })
-          : null,
-      ),
-      field('Import (replaces this plan; pick the .json and its image file)', input),
-      report
-        ? h(
-            'div',
-            {
-              class: report.error ? 'file-report error' : 'file-report',
-              role: report.error ? 'alert' : 'status',
-            },
-            ...report.lines.map((line) => h('p', {}, line)),
-          )
-        : null,
-    );
-  }
-
   #report(error: boolean, lines: string[]): void {
     this.#fileReport = { error, lines };
     this.#renderInspector();
   }
 
   /** Download the plan, with its underlay image embedded or as a second file, or without it. */
-  async #exportPlan(underlay: 'none' | 'embed' | 'file'): Promise<void> {
-    let image: Blob | null = null;
-    let imageName: string | null = null;
+  async #exportPlan(mode: ExportMode): Promise<void> {
     try {
-      if (underlay !== 'none') {
-        const url = this.plan.underlay?.url;
-        image = url ? this.#underlay.blob(url) : null;
-        if (!image) throw new Error('the underlay image is not loaded');
-        if (underlay === 'file') {
-          imageName = underlayFileName(this.#host.planId, image.type);
-          if (!imageName) throw new Error(`the underlay image is ${image.type || 'of no type'}`);
-        }
-      }
-      const embedded = image && !imageName ? await dataUrl(image) : null;
-      const json = planFileJson(this.plan, imageName ? { file: imageName } : embedded);
-      download(new Blob([json], { type: 'application/json' }), planFileName(this.#host.planId));
-      if (image && imageName) download(image, imageName);
+      const url = this.plan.underlay?.url;
+      const image = url ? this.#underlay.blob(url) : null;
+      for (const f of await exportFiles(this.plan, this.#host.planId, image, mode))
+        download(f.blob, f.name);
     } catch (err) {
       this.#report(true, [`Export failed: ${(err as Error).message ?? err}`]);
     }
@@ -873,58 +531,42 @@ export class PlanEditor {
    * the problem when it was not imported.
    */
   async #importPlan(files: File[]): Promise<string | null> {
-    const fail = (...lines: string[]): string => (this.#report(true, lines), lines.join(' '));
-    const plans = files.filter((f) => /\.json$/i.test(f.name) || f.type === 'application/json');
-    if (plans.length !== 1)
-      return fail(`Select one .json plan file (with its underlay image, if it has one).`);
-    const file = plans[0]!;
-    if (file.size > MAX_FILE_BYTES) return fail(`${file.name}: the file is larger than 16 MB`);
-    const r = await readPlanFile(
-      await file.text(),
-      this.#host.planId,
+    const { planId } = this.#host;
+    const r = await readImport(
+      files,
+      planId,
       this.plan.floor_id ?? null,
-      files.filter((f) => f !== file),
+      (image) =>
+        this.#uploading(() =>
+          uploadUnderlay(this.#host.hass(), planId, image, this.#session.signal),
+        ),
+      () => this.#session.closed,
     );
-    if (this.#session.closed) return null;
-    if (!r.ok) return fail(`${file.name} was not imported:`, ...r.problems);
-    let plan = r.plan;
-    let image: { url: string; blob: Blob } | null = null;
-    if (r.image && plan.underlay) {
-      const state = this.#saveState;
-      const before = { text: state.textContent ?? '', error: state.classList.contains('error') };
-      this.#setSaveState('Uploading image…');
-      try {
-        const url = await uploadUnderlay(
-          this.#host.hass(),
-          this.#host.planId,
-          r.image,
-          this.#session.signal,
-        );
-        plan = { ...plan, underlay: { ...plan.underlay, url } };
-        image = { url, blob: r.image };
-      } catch (err) {
-        this.#setSaveState(before.text, before.error);
-        return fail(`${file.name} was not imported: ${(err as Error).message ?? err}`);
-      }
+    if (!r) return null;
+    if (!r.ok) {
+      this.#report(true, r.lines);
+      return r.lines.join(' ');
     }
-    if (this.#session.closed) return null;
     // Drop the old plan's selection, drafts and measurement, keeping the tool.
     this.#s = { ...initialState, tool: this.#s.tool };
-    if (image) this.#underlay.put(image.url, image.blob);
-    this.#commit(plan);
-    this.#report(false, [`Imported ${file.name}.`, ...r.notes]);
+    if (r.image) this.#underlay.put(r.image.url, r.image.blob);
+    this.#commit(r.plan);
+    this.#report(false, [`Imported ${r.file.name}.`, ...r.notes]);
     this.#view.fit();
     return null;
   }
 
-  #warningsPanel(): HTMLElement | null {
-    const warnings = [...limitWarnings(this.plan), ...signalLimitWarnings(this.plan)];
-    if (warnings.length === 0) return null;
-    return h(
-      'section',
-      { 'data-panel': 'warnings', class: 'warnings', role: 'status' },
-      ...warnings.map((w) => h('p', {}, w)),
-    );
+  /** Show "Uploading image…" while `upload` runs; a failure puts the save state back. */
+  async #uploading<T>(upload: () => Promise<T>): Promise<T> {
+    const state = this.#saveState;
+    const before = { text: state.textContent ?? '', error: state.classList.contains('error') };
+    this.#setSaveState('Uploading image…');
+    try {
+      return await upload();
+    } catch (err) {
+      this.#setSaveState(before.text, before.error);
+      throw err;
+    }
   }
 
   /** A new source at `p`: a sensor takes the first one on this floor not placed yet. */
@@ -939,87 +581,6 @@ export class PlanEditor {
         )?.entity_id ?? '';
     }
     return addSource(plan, kind, p, entity, entity ? entityArea(this.#host.hass(), entity) : null);
-  }
-
-  #newSourcePanel(): HTMLElement {
-    return this.#section(
-      'New source',
-      'new-source',
-      field(
-        'Kind',
-        select(SOURCE_KINDS, this.#sourceKind, (v) => (this.#sourceKind = v as SourceKind), {
-          name: 'source-kind',
-        }),
-      ),
-      h('p', { class: 'hint' }, 'Click on the plan to place it, then drag it into position.'),
-    );
-  }
-
-  #sourcePanel(src: Source): Fields {
-    const { id } = src;
-    const hass = this.#host.hass();
-    const floor = this.plan.floor_id ?? null;
-    const set = (patch: Parameters<typeof updateSource>[2]): void =>
-      this.#commit(updateSource(this.plan, id, patch));
-    const pick = (v: string): void => {
-      const entity = v.trim();
-      set({ entity_id: entity, area_id: entity ? entityArea(hass, entity) : null });
-    };
-    const choices = sourceChoices(hass, src.kind, floor);
-    const inArea = src.area_id ? areaName(hass, src.area_id) : null;
-    let entityControl: HTMLElement;
-    if (src.kind === 'sensor') {
-      const opts = choices.map((c) => ({ value: c.entity_id, label: c.name }));
-      if (src.entity_id && !opts.some((o) => o.value === src.entity_id))
-        opts.unshift({ value: src.entity_id, label: `${src.entity_id} (not on this floor)` });
-      entityControl = select(
-        [
-          { value: '', label: opts.length ? '— pick a sensor —' : '— no sensors on this floor —' },
-          ...opts,
-        ],
-        src.entity_id,
-        pick,
-        { name: 'entity' },
-      );
-    } else {
-      const list = h('datalist', { id: `entities-${id}` });
-      for (const c of choices) list.append(h('option', { value: c.entity_id }, c.name));
-      entityControl = h(
-        'div',
-        { class: 'combo' },
-        textInput(src.entity_id, pick, {
-          name: 'entity',
-          list: `entities-${id}`,
-          placeholder: 'sensor.…_rssi, device_tracker.…',
-        }),
-        list,
-      );
-    }
-    return [
-      field(
-        'Kind',
-        select(SOURCE_KINDS, src.kind, (v) => set({ kind: v as SourceKind }), {
-          name: 'source-kind',
-        }),
-      ),
-      field(src.kind === 'sensor' ? 'Sensor' : 'Entity', entityControl),
-      src.kind === 'sensor'
-        ? null
-        : field(
-            'Level at 1 m (dBm)',
-            numberInput(src.tx_dbm ?? -40, (v) => set({ tx_dbm: v }), {
-              name: 'tx-dbm',
-              min: -120,
-              max: 30,
-              step: 1,
-            }),
-          ),
-      h(
-        'p',
-        { class: 'meta', 'data-area': src.area_id ?? '' },
-        `${inArea ? `In ${inArea}` : 'No area'} · ${src.position[0].toFixed(2)}, ${src.position[1].toFixed(2)} m`,
-      ),
-    ];
   }
 
   // ---- devices ----
@@ -1046,196 +607,6 @@ export class PlanEditor {
         : 'Nothing to place: link rooms to areas first, or every device in them is on the plan.';
     if (spots.length > 0) this.#commit(plan);
     else this.#renderInspector();
-  }
-
-  #devicesPanel(): HTMLElement {
-    const hass = this.#host.hass();
-    const placed = new Set((this.plan.devices ?? []).map((d) => d.entity_id));
-    const free = this.#deviceChoices().filter((c) => !placed.has(c.entity_id));
-    const areaOf = (a: string | null): string => (a ? areaName(hass, a) : 'No area');
-    const list = h('ul', { class: 'entities', 'aria-label': 'Entities not on the plan' });
-    for (const c of free) {
-      const item = h(
-        'li',
-        {
-          draggable: 'true',
-          'data-entity': c.entity_id,
-          'aria-pressed': String(this.#s.armed === c.entity_id),
-          role: 'button',
-          tabindex: 0,
-          title: `${c.entity_id} — drag onto the plan, or click and then click the plan`,
-        },
-        h('span', { class: 'name' }, c.name),
-        h('span', { class: 'meta' }, areaOf(c.area_id)),
-      );
-      const arm = (): void => {
-        const { armed } = this.#s;
-        this.#s = { ...this.#s, armed: armed === c.entity_id ? null : c.entity_id };
-        this.#renderInspector();
-      };
-      item.addEventListener('click', arm);
-      item.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          arm();
-        }
-      });
-      item.addEventListener('dragstart', (e) => {
-        e.dataTransfer?.setData(ENTITY_MIME, c.entity_id);
-        e.dataTransfer?.setData('text/plain', c.entity_id);
-        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
-      });
-      list.append(item);
-    }
-    const filter = h('input', {
-      type: 'search',
-      name: 'device-filter',
-      placeholder: 'Filter',
-      'aria-label': 'Filter entities',
-    });
-    filter.addEventListener('input', () => {
-      const q = filter.value.trim().toLowerCase();
-      for (const li of list.children) {
-        const el = li as HTMLElement;
-        el.hidden =
-          q !== '' &&
-          !el.textContent!.toLowerCase().includes(`${q}`) &&
-          !el.dataset['entity']!.includes(q);
-      }
-    });
-    return this.#section(
-      'Devices',
-      'devices',
-      h(
-        'p',
-        { class: 'meta' },
-        `${placed.size} on the plan · ${free.length} to place${this.plan.floor_id ? ' on this floor' : ''}`,
-      ),
-      button('Auto-place by area', () => this.#autoPlace(), { 'data-action': 'auto-place' }),
-      this.#note ? h('p', { class: 'hint', role: 'status' }, this.#note) : null,
-      free.length > 0 ? field('Entities', filter) : null,
-      free.length > 0
-        ? list
-        : h(
-            'p',
-            { class: 'hint' },
-            'Every light, switch, door, window, motion sensor, fan, cover and lock here is on the plan.',
-          ),
-    );
-  }
-
-  #devicePanel(dev: Device): Fields {
-    const { id } = dev;
-    const hass = this.#host.hass();
-    const placed = new Set((this.plan.devices ?? []).map((d) => d.entity_id));
-    const opts = this.#deviceChoices()
-      .filter((c) => c.entity_id === dev.entity_id || !placed.has(c.entity_id))
-      .map((c) => ({ value: c.entity_id, label: c.name }));
-    if (!opts.some((o) => o.value === dev.entity_id))
-      opts.unshift({ value: dev.entity_id, label: `${dev.entity_id} (not on this floor)` });
-    const area = hass ? entityArea(hass, dev.entity_id) : null;
-    const look = deviceLook(dev.entity_id, hass?.states?.[dev.entity_id]);
-    return [
-      field(
-        'Entity',
-        select(opts, dev.entity_id, (v) => this.#commit(updateDevice(this.plan, id, v)), {
-          name: 'entity',
-        }),
-      ),
-      h(
-        'p',
-        { class: 'meta', 'data-entity': dev.entity_id },
-        `${look.label} · ${area ? (hass?.areas?.[area]?.name ?? area) : 'No area'} · ${dev.position[0].toFixed(2)}, ${dev.position[1].toFixed(2)} m`,
-      ),
-    ];
-  }
-
-  #materialsPanel(): HTMLElement {
-    const rows = [...materialsOf(this.plan).values()].map((m) =>
-      h(
-        'tr',
-        {},
-        h('td', {}, m.name),
-        h(
-          'td',
-          {},
-          numberInput(
-            m.db_per_cm,
-            (v) => this.#commit(setMaterial(this.plan, { ...m, db_per_cm: v })),
-            {
-              name: `loss-${m.id}`,
-              min: 0,
-              step: 0.05,
-              'aria-label': `${m.name} loss in dB per cm`,
-            },
-          ),
-        ),
-      ),
-    );
-    return this.#section(
-      'Materials',
-      'materials',
-      h(
-        'table',
-        {},
-        h('thead', {}, h('tr', {}, h('th', {}, 'Material'), h('th', {}, 'dB/cm'))),
-        h('tbody', {}, ...rows),
-      ),
-    );
-  }
-
-  #underlayPanel(): HTMLElement {
-    const u = this.plan.underlay;
-    const input = h('input', {
-      type: 'file',
-      accept: 'image/png,image/jpeg,image/webp,image/svg+xml',
-      name: 'underlay',
-    });
-    input.addEventListener('change', () => {
-      const file = input.files?.[0];
-      if (file && !this.#session.closed) this.#session.track(this.#importUnderlay(file));
-    });
-    const opacity = h('input', {
-      type: 'range',
-      min: 0.1,
-      max: 1,
-      step: 0.05,
-      value: String(u?.opacity ?? 0.5),
-      name: 'opacity',
-    });
-    opacity.addEventListener('change', () => {
-      const cur = this.plan.underlay;
-      if (cur) this.#commit({ ...this.plan, underlay: { ...cur, opacity: opacity.valueAsNumber } });
-    });
-    return this.#section(
-      'Underlay',
-      'underlay',
-      h(
-        'p',
-        { class: 'meta' },
-        u
-          ? `${u.width_px} × ${u.height_px} px · ${(u.width_px * u.scale).toFixed(2)} m wide`
-          : 'A drawing to trace over (PNG, JPEG, WebP or SVG).',
-      ),
-      !u && this.#host.underlayIgnored
-        ? h(
-            'p',
-            { class: 'hint', role: 'status', 'data-hint': 'underlay-ignored' },
-            'The saved underlay pointed outside Chartroom, so it was not loaded. Import the image again.',
-          )
-        : null,
-      field(u ? 'Replace image' : 'Import image', input),
-      u ? field('Opacity', opacity) : null,
-      u
-        ? h('p', { class: 'hint' }, 'Calibrate with Measure (two points) or a room’s real area.')
-        : null,
-      u
-        ? button('Remove underlay', () => this.#commit({ ...this.plan, underlay: null }), {
-            class: 'danger',
-            'data-action': 'remove-underlay',
-          })
-        : null,
-    );
   }
 
   /** Upload and place a new underlay image. Resolves to the problem when it failed. */
@@ -1326,10 +697,3 @@ const editorStyles = `
   .measure-label { fill: var(--primary-text-color, #222); text-anchor: middle; pointer-events: none;
     paint-order: stroke; stroke: var(--primary-background-color, #fff); stroke-width: 3px; vector-effect: non-scaling-stroke; }
 `;
-
-/** Save `blob` as a download named `name`. */
-function download(blob: Blob, name: string): void {
-  const url = URL.createObjectURL(blob);
-  h('a', { href: url, download: name }).click();
-  setTimeout(() => URL.revokeObjectURL(url));
-}

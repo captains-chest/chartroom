@@ -181,6 +181,7 @@ export class MeshLayer {
   #topology: Topology | null = null;
   #error = '';
   #stop: (() => void) | null = null;
+  #watched: MeshApi | null = null;
   readonly #api: () => MeshApi | null;
   /** Placed links, for tests. */
   links: PlacedLink[] = [];
@@ -220,7 +221,10 @@ export class MeshLayer {
   /** Follow the connection's topology poll while on (once connected). */
   #watch(): Promise<void> {
     const api = this.#api();
+    // A new connection gets its own poll: leave the old one.
+    if (this.#stop && api !== this.#watched) this.dispose();
     if (!this.#on || this.#stop || !api) return Promise.resolve();
+    this.#watched = api;
     const { ready, stop } = watchTopology(api, (state) => {
       this.#topology = state.topology;
       this.#error = state.error;

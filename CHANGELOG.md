@@ -27,13 +27,17 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ### Fixed
 
+- **Done** no longer waits forever for an underlay image upload that hangs: after a minute it
+  drops the upload, closes the editor and says so in the status line (#65).
+- When the last change can't be saved as the editor closes (on **Done** or switching floors), the
+  status line now says so, instead of the failure going away with the editor's toolbar (#66).
 - A stored plan with a damaged list (say, walls that are not a list) opens without the parts
   nothing can draw, instead of failing somewhere in the drawing code; what was wrong is logged in
   the browser console.
 
 ### Requirements
 
-- Frontend: 15.45 KB gzip for the card, 55.94 KB gzip in total.
+- Frontend: 15.45 KB gzip for the card, 56.28 KB gzip in total.
 
 ## 0.1.0 — 2026-11-14
 

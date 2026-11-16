@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { CLOSE_WAIT_MS } from '../src/editor/session';
 import { emptyPlan } from '../src/plan/functions';
 import type { Plan, Underlay } from '../src/plan/models';
 import { dataUrl, planFileJson } from '../src/plan-file';
@@ -256,6 +257,49 @@ describe('following plan saves made elsewhere (#78)', () => {
     await t.closeEditor();
     expect(t.api.plans.get('home')!.name).toBe('Mine');
     expect(t.panel.plan!.name).toBe('Mine');
+  });
+});
+
+describe('closing the editor when something is stuck or failed (#65, #66)', () => {
+  /** The panel's status line. */
+  const status = (t: PanelHarness): string => {
+    const el = t.find((e) => e.getAttribute('class') === 'status');
+    return el?.textContent ?? '';
+  };
+
+  it('stops waiting at Done for an upload that hangs, aborts it and says so', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const t = await PanelHarness.mount({ home: home() });
+    await t.openEditor();
+    t.pickPlanFiles([await planFile('Imported')]);
+    await settle();
+    const [upload] = t.fetch.to(underlayPath('home'), 'POST');
+    expect(upload!.init?.signal?.aborted).toBe(false);
+
+    await t.toggleEditor();
+    expect(t.editing).toBe(true);
+    await vi.advanceTimersByTimeAsync(CLOSE_WAIT_MS);
+    await settle();
+
+    expect(t.editing).toBe(false);
+    expect(upload!.init?.signal?.aborted).toBe(true);
+    expect(status(t)).toContain('The underlay image was still uploading and was dropped');
+    expect(t.api.plans.get('home')!.name).toBe('Home');
+  });
+
+  it('says in the status line when the last change could not be saved at Done', async () => {
+    const t = await PanelHarness.mount({ home: home() });
+    await t.openEditor();
+    vi.spyOn(t.api, 'savePlan').mockRejectedValue(new Error('Connection lost'));
+    t.pickPlanFiles([
+      new File([planFileJson(emptyPlan('Renamed'))], 'renamed.json', { type: 'application/json' }),
+    ]);
+    await settle();
+    expect(t.panel.plan!.name).toBe('Renamed');
+
+    await t.closeEditor();
+    expect(status(t)).toContain('Your last change was not saved: Connection lost.');
+    expect(t.api.plans.get('home')!.name).toBe('Home');
   });
 });
 

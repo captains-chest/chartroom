@@ -265,7 +265,11 @@ export class ViewerController {
     }
   }
 
-  readonly #missed = (): void => this.#watch?.(null);
+  /** Events may have been missed: so may the echoes of saves made here, which catching up covers. */
+  readonly #missed = (): void => {
+    this.#ownSaves.clear();
+    this.#watch?.(null);
+  };
 
   /** Whether `e` is the echo of a save made here (and counts it off). */
   #ownSave(planId: string): boolean {

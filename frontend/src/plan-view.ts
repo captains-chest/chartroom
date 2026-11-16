@@ -1,5 +1,6 @@
 // The plan as live SVG: underlay image (its own SVG, under the heatmap canvas), the plan body, and
 // an overlay group the editor draws handles into. Handles pan (drag), zoom (wheel, pinch, buttons) and keeps the viewBox in metres.
+import type { ChartroomApi } from './api';
 import { planBounds } from './geometry';
 import type { Hass } from './ha-types';
 import type { LayerData } from './heat/models';
@@ -72,6 +73,7 @@ export class PlanView {
   #last: { x: number; y: number; d?: number } | null = null;
   #delegate: PointerDelegate | null = null;
   #onPlan: (() => void) | null = null;
+  #api: () => ChartroomApi | null = () => null;
 
   /**
    * `fixed`: the dashboard card. No pan or zoom, so the page still scrolls over it, and the plan is
@@ -137,6 +139,11 @@ export class PlanView {
   /** Hand pointer handling to `delegate` (the editor or the device controls). */
   setDelegate(delegate: PointerDelegate | null): void {
     this.#delegate = delegate;
+  }
+
+  /** The integration's commands, for the layers that read from it (the mesh topology). */
+  setApi(api: () => ChartroomApi | null): void {
+    this.#api = api;
   }
 
   /** Call `fn` after every setPlan (the viewer refreshes its layer buttons). */
@@ -218,7 +225,7 @@ export class PlanView {
     const generation = this.#generation;
     this.#meshLoad ??= import('./mesh-layer').then((m) => {
       if (generation !== this.#generation) return null;
-      const mesh = new m.MeshLayer();
+      const mesh = new m.MeshLayer(() => this.#api());
       this.#meshSlot.append(mesh.g);
       this.el.append(mesh.note);
       mesh.setHass(this.#hass);

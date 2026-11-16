@@ -4,7 +4,7 @@ import { emptyPlan } from '../src/plan/functions';
 import type { Plan } from '../src/plan/models';
 import { PlanView } from '../src/plan-view';
 import { TimeBar } from '../src/time-bar';
-import { ViewerController } from '../src/viewer';
+import { type FollowResult, type FollowRule, ViewerController } from '../src/viewer';
 import { FakeApi } from './fake-api';
 import { installFakeDom } from './fake-dom';
 
@@ -23,6 +23,10 @@ vi.mock('../src/heat-layer', () => ({
 }));
 
 installFakeDom();
+
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 10; i++) await new Promise<void>((r) => setImmediate(r));
+};
 
 /** The recorded state of sensor.t for the History slider. */
 const RECORDED = '15';
@@ -218,6 +222,84 @@ describe('viewer controller', () => {
     expect(fetches()).toBe(1);
     await viewer.load('other');
     await vi.waitFor(() => expect(fetches()).toBe(2));
+  });
+
+  describe('following a plan', () => {
+    const first: FollowRule = { pick: (plans) => plans[0] };
+    const follow = (rule: FollowRule = first) => {
+      const t = setup();
+      const reports: FollowResult[] = [];
+      t.viewer.follow(rule, (r) => reports.push(r));
+      const lists = vi.spyOn(t.api, 'listPlans');
+      return { ...t, reports, lists };
+    };
+    const names = (reports: FollowResult[]) =>
+      reports.map((r) =>
+        r.kind === 'plan' ? `${r.loaded.plan.name}${r.moved ? '*' : ''}` : r.kind,
+      );
+
+    it('loads once connected, then reloads when the plan is saved elsewhere', async () => {
+      const { viewer, view, api, reports } = follow();
+      await settle();
+      expect(reports).toEqual([]);
+      viewer.hass = liveHass(recorder().c);
+      await vi.waitFor(() => expect(names(reports)).toEqual(['Home*']));
+      expect(view.plan?.name).toBe('Home');
+
+      await api.savePlan('home', sensorPlan('Renamed'));
+      await vi.waitFor(() => expect(names(reports)).toEqual(['Home*', 'Renamed']));
+      expect(view.plan?.name).toBe('Renamed');
+    });
+
+    it('does not reload for its own save', async () => {
+      const { viewer, api, reports, lists } = follow();
+      viewer.hass = liveHass(recorder().c);
+      await vi.waitFor(() => expect(reports).toHaveLength(1));
+      await viewer.save('home', sensorPlan('Mine'));
+      await settle();
+      expect(api.plans.get('home')?.name).toBe('Mine');
+      expect(lists).toHaveBeenCalledOnce();
+      // A save from elsewhere after it still reloads.
+      await api.savePlan('home', sensorPlan('Theirs'));
+      await vi.waitFor(() => expect(names(reports)).toEqual(['Home*', 'Theirs']));
+    });
+
+    it('ignores other plans when the rule names one', async () => {
+      const { viewer, api, reports, lists } = follow({
+        planId: 'other',
+        pick: (plans) => plans.find((p) => p.id === 'other'),
+      });
+      viewer.hass = liveHass(recorder().c);
+      await vi.waitFor(() => expect(names(reports)).toEqual(['Other*']));
+      await api.savePlan('home', sensorPlan('Elsewhere'));
+      await settle();
+      expect(lists).toHaveBeenCalledOnce();
+    });
+
+    it('says when there is no plan to show, or the plans cannot be read', async () => {
+      const { viewer, api, view, reports } = follow({ pick: () => undefined });
+      viewer.hass = liveHass(recorder().c);
+      await vi.waitFor(() => expect(reports[0]).toMatchObject({ kind: 'none' }));
+      expect(view.plan).toBeNull();
+      vi.spyOn(api, 'listPlans').mockRejectedValue(new Error('offline'));
+      api.emit({ plan_id: 'home', deleted: true });
+      await vi.waitFor(() => expect(reports[1]).toMatchObject({ kind: 'error' }));
+    });
+
+    it('stops listening off the page and listens again on return', async () => {
+      const { viewer, api, reports, lists } = follow();
+      viewer.hass = liveHass(recorder().c);
+      await vi.waitFor(() => expect(reports).toHaveLength(1));
+      viewer.disconnect();
+      await settle();
+      api.emit({ plan_id: 'home', deleted: false });
+      await settle();
+      expect(lists).toHaveBeenCalledOnce();
+      viewer.connect();
+      await settle();
+      api.emit({ plan_id: 'home', deleted: false });
+      await vi.waitFor(() => expect(lists).toHaveBeenCalledTimes(2));
+    });
   });
 
   describe('off the page', () => {

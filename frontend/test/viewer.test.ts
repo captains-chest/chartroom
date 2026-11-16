@@ -305,7 +305,8 @@ describe('viewer controller', () => {
       await vi.waitFor(() => expect(reports).toHaveLength(1));
       viewer.disconnect();
       await settle();
-      api.emit({ plan_id: 'home', deleted: false });
+      // A save made here while away: its echo never arrives, so it must not swallow a later one.
+      await viewer.save('home', sensorPlan('Mine'));
       await settle();
       expect(lists).toHaveBeenCalledOnce();
       // Back on the page: the save meanwhile sent no event here.

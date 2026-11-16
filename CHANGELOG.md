@@ -11,6 +11,8 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 - Releases no longer let an admin swap the real mesh for a made-up one: the e2e test hook
   `chartroom/mesh/test_source` is registered only when Home Assistant runs with the environment
   variable `CHARTROOM_TEST_HOOKS` set (#20).
+- The card now catches up on plans saved while it was off the page (another dashboard view) or
+  while Home Assistant was reconnecting, as the panel does; it kept showing the old plan (#81).
 
 ### Performance
 

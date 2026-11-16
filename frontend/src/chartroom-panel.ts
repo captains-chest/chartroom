@@ -1,5 +1,5 @@
-import type { ChartroomApi, Unsubscribe } from './api';
-import type { Hass, HassConnection, PlanSummary } from './ha-types';
+import type { ChartroomApi } from './api';
+import type { Hass, PlanSummary } from './ha-types';
 import { pingWorker } from './field-worker';
 import { emptyPlan } from './plan/functions';
 import type { Plan } from './plan/models';
@@ -80,9 +80,6 @@ export class ChartroomPanel extends HTMLElement {
   /** The stored plan's underlay was dropped on load for pointing outside Chartroom. */
   #underlayIgnored = false;
   #plansRequested = false;
-  #unsubscribe: Promise<Unsubscribe | null> | null = null;
-  /** The connection whose 'ready' (back after a drop) the panel listens to. */
-  #connection: HassConnection | undefined;
   /** A plan was saved elsewhere while the editor was open: the panel catches up at Done. */
   #missed = false;
   readonly #sheet: HTMLElement;
@@ -161,6 +158,7 @@ export class ChartroomPanel extends HTMLElement {
     const stored = localStorage.getItem(LAYER_KEY);
     this.#viewer.setLayer(isHeatLayer(stored) ? stored : null);
     if (localStorage.getItem(MESH_KEY) === '1') this.#viewer.setMesh(true);
+    this.#viewer.watch((planId) => this.#planSaved(planId));
     // On a desktop the sheet's parts float over the plan; on a phone they dock below it.
     this.#sheet = h(
       'div',
@@ -207,11 +205,6 @@ export class ChartroomPanel extends HTMLElement {
     );
     window.addEventListener('keydown', this.#onKey);
     this.#viewer.connect();
-    if (this.#viewer.hass) {
-      this.#follow();
-      // Back on the page: saves made while it was off it sent no event here.
-      if (this.#plans) this.#planSaved(null);
-    }
   }
 
   // Home Assistant may detach the panel and attach it again: release the layers meanwhile.
@@ -220,11 +213,6 @@ export class ChartroomPanel extends HTMLElement {
     void this.#editor?.flush();
     window.removeEventListener('keydown', this.#onKey);
     this.#viewer.disconnect();
-    const unsub = this.#unsubscribe;
-    this.#unsubscribe = null;
-    void unsub?.then((u) => u?.());
-    this.#connection?.removeEventListener?.('ready', this.#onReady);
-    this.#connection = undefined;
   }
 
   set hass(hass: Hass) {
@@ -233,7 +221,6 @@ export class ChartroomPanel extends HTMLElement {
       this.#plansRequested = true;
       void this.#refreshPlans();
     }
-    if (this.isConnected) this.#follow();
     // The tabs follow the floor registry, not states.
     if (this.#plans && hass.floors !== this.#tabsFloors) this.#renderTabs();
     this.#editor?.hassChanged();
@@ -264,23 +251,10 @@ export class ChartroomPanel extends HTMLElement {
   }
 
   /**
-   * Follow plans saved or deleted elsewhere (another tab or user) while on the page, as the card
-   * does, and catch up when Home Assistant reconnects, since saves meanwhile sent no event.
-   */
-  #follow(): void {
-    const api = this.#viewer.api;
-    if (this.#unsubscribe || !api) return;
-    this.#unsubscribe = api.subscribePlans((e) => this.#planSaved(e.plan_id)).catch(() => null);
-    this.#connection = this.#viewer.hass?.connection;
-    this.#connection?.addEventListener?.('ready', this.#onReady);
-  }
-
-  readonly #onReady = (): void => this.#planSaved(null);
-
-  /**
-   * Plan `planId` (null: any plan) was saved or deleted, maybe by this panel's own editor. The tabs
-   * follow, and the plan on screen loads again. An open editor keeps its own copy: the panel
-   * catches up at Done, and the editor's next save replaces the other one (the last save wins).
+   * Plan `planId` (null: any plan) was saved or deleted elsewhere (another tab or user), as the
+   * viewer hears it. The tabs follow, and the plan on screen loads again. An open editor keeps its
+   * own copy: the panel catches up at Done, and the editor's next save replaces the other one (the
+   * last save wins).
    */
   #planSaved(planId: string | null): void {
     if (this.#editor) {

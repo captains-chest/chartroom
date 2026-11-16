@@ -50,39 +50,24 @@ beforeEach(() => localStorage.clear());
 afterEach(() => vi.useRealTimers());
 
 describe('panel underlay and the editor (#36)', () => {
-  it("drops the panel's own load when the editor opens", async () => {
+  it("shares the panel's load with the editor instead of fetching the image twice", async () => {
     const t = await PanelHarness.mount({ home: withImage() });
-    const [panelLoad] = t.fetch.to(IMAGE);
     expect(t.fetch.to(IMAGE)).toHaveLength(1);
 
     await t.openEditor();
-    const [, editorLoad] = t.fetch.to(IMAGE);
-    expect(editorLoad).toBeDefined();
-    editorLoad!.respond(imageResponse());
+    expect(t.fetch.to(IMAGE)).toHaveLength(1);
+    t.fetch.to(IMAGE)[0]!.respond(imageResponse());
     await settle();
-    const editorImage = t.panel.view.underlayUrl;
-    expect(editorImage).toMatch(/^blob:/);
-
-    // The panel's fetch ends late: the editor's image stays.
-    panelLoad!.respond(imageResponse());
-    await settle();
-    expect(t.panel.view.underlayUrl).toBe(editorImage);
+    expect(t.panel.view.underlayUrl).toMatch(/^blob:/);
   });
 
-  it("loads the image again on close when the editor's load was dropped", async () => {
+  it('shows the image of a load still running when the editor closes', async () => {
     const t = await PanelHarness.mount({ home: withImage() });
     await t.openEditor();
     await t.closeEditor();
     const loads = t.fetch.to(IMAGE);
-    expect(loads).toHaveLength(3);
-
-    // The panel's first load and the editor's were both dropped.
+    expect(loads).toHaveLength(1);
     loads[0]!.respond(imageResponse());
-    loads[1]!.respond(imageResponse());
-    await settle();
-    expect(t.panel.view.underlayUrl).toBeNull();
-
-    loads[2]!.respond(imageResponse());
     await settle();
     expect(t.panel.view.underlayUrl).toMatch(/^blob:/);
   });

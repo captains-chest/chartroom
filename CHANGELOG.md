@@ -21,6 +21,9 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 - Dragging in the editor redraws the plan at most once a frame. While a wall, room, door or sensor
   is being dragged, the temperature and humidity fields keep their shape and are worked out again
   where the drag ends, instead of once per pointer move; the signal map still follows the drag.
+- The last three underlay images are kept in the browser: Undo and Redo across an image change no
+  longer download it again, and opening the editor while the panel is still loading the image
+  waits for that load instead of starting a second one.
 
 ### Fixed
 
@@ -30,7 +33,7 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ### Requirements
 
-- Frontend: 15.10 KB gzip for the card, 56.05 KB gzip in total.
+- Frontend: 15.45 KB gzip for the card, 55.94 KB gzip in total.
 
 ## 0.1.0 — 2026-11-14
 

@@ -298,19 +298,23 @@ describe('viewer controller', () => {
       await vi.waitFor(() => expect(reports[1]).toMatchObject({ kind: 'error' }));
     });
 
-    it('stops listening off the page and listens again on return', async () => {
+    it('stops listening off the page, and catches up on return and on reconnect', async () => {
       const { viewer, api, reports, lists } = follow();
-      viewer.hass = liveHass(recorder().c);
+      const { c, ready } = recorder();
+      viewer.hass = liveHass(c);
       await vi.waitFor(() => expect(reports).toHaveLength(1));
       viewer.disconnect();
       await settle();
       api.emit({ plan_id: 'home', deleted: false });
       await settle();
       expect(lists).toHaveBeenCalledOnce();
+      // Back on the page: the save meanwhile sent no event here.
       viewer.connect();
-      await settle();
-      api.emit({ plan_id: 'home', deleted: false });
       await vi.waitFor(() => expect(lists).toHaveBeenCalledTimes(2));
+      api.emit({ plan_id: 'home', deleted: false });
+      await vi.waitFor(() => expect(lists).toHaveBeenCalledTimes(3));
+      for (const fn of ready) fn();
+      await vi.waitFor(() => expect(lists).toHaveBeenCalledTimes(4));
     });
   });
 

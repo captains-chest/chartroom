@@ -65,7 +65,13 @@ export class ViewerController {
     /** A plan has been shown for this rule. */
     shown: boolean;
   } | null = null;
+  /** Hears plan changes made elsewhere: see `watch`. */
+  #watch: ((planId: string | null) => void) | null = null;
   #subscription: Promise<Unsubscribe | null> | null = null;
+  /** The connection whose 'ready' (back after a drop) means events may have been missed. */
+  #connection: HassConnection | undefined;
+  /** Was listening before it left the page: events may have been missed meanwhile. */
+  #away = false;
   /** Saves of ours per plan whose change event has not come back yet. */
   readonly #ownSaves = new Map<string, number>();
 
@@ -144,11 +150,23 @@ export class ViewerController {
   }
 
   /**
+   * Hear plans saved or deleted elsewhere (another tab or user, not `save` here) while on the page,
+   * until `watch` or `follow` is called again: the plan's id, or null when changes may have been
+   * missed (Home Assistant reconnected, or the element is back on the page).
+   */
+  watch(changed: (planId: string | null) => void): void {
+    this.#watch = changed;
+  }
+
+  /**
    * Show the plan `rule` picks, now and whenever the stored plans change (saved or deleted here or
-   * anywhere else), until `follow` is called again. `report` hears each outcome.
+   * anywhere else), until `follow` or `watch` is called again. `report` hears each outcome.
    */
   follow(rule: FollowRule, report: (r: FollowResult) => void): void {
     this.#follow = { rule, report, loaded: false, shown: false };
+    this.watch((id) => {
+      if (id === null || rule.planId === undefined || id === rule.planId) void this.#reload();
+    });
     if (this.#hass?.connection) void this.#reload();
   }
 
@@ -223,7 +241,10 @@ export class ViewerController {
     this.notice.dispose();
     const unsubscribe = this.#subscription;
     this.#subscription = null;
+    this.#away ||= unsubscribe !== null;
     void unsubscribe?.then((u) => u?.());
+    this.#connection?.removeEventListener?.('ready', this.#missed);
+    this.#connection = undefined;
   }
 
   #watchNotice(): void {
@@ -231,12 +252,20 @@ export class ViewerController {
     if (c) this.notice.watch(c, this.#api(c));
   }
 
-  /** Listen for plan changes while following one and on the page. */
+  /** Listen for plan changes while watching them and on the page, and catch up on return. */
   #subscribe(): void {
     const api = this.api;
-    if (!this.#follow || this.#subscription || !api) return;
+    if (!this.#watch || this.#subscription || !api) return;
     this.#subscription = api.subscribePlans((e) => this.#changed(e)).catch(() => null);
+    this.#connection = this.#hass?.connection;
+    this.#connection?.addEventListener?.('ready', this.#missed);
+    if (this.#away) {
+      this.#away = false;
+      this.#missed();
+    }
   }
+
+  readonly #missed = (): void => this.#watch?.(null);
 
   /** Whether `e` is the echo of a save made here (and counts it off). */
   #ownSave(planId: string): boolean {
@@ -249,11 +278,7 @@ export class ViewerController {
 
   #changed(e: PlanEvent): void {
     if (!e.deleted && this.#ownSave(e.plan_id)) return;
-    const follow = this.#follow;
-    if (!follow) return;
-    const named = follow.rule.planId;
-    if (named !== undefined && e.plan_id !== named) return;
-    void this.#reload();
+    this.#watch?.(e.plan_id);
   }
 
   /** List the plans, pick one with the rule and load it. */

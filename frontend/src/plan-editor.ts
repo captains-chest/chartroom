@@ -251,6 +251,11 @@ export class PlanEditor {
     return this.#history.present;
   }
 
+  /** A change is not stored yet (after close: its last save failed). */
+  get unsaved(): boolean {
+    return this.#saver.unsaved;
+  }
+
   /** Save any pending change now, without closing (the panel left the page). */
   flush(): Promise<void> {
     return this.#saver.flush();

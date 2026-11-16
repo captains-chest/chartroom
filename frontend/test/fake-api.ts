@@ -43,6 +43,11 @@ export class FakeApi implements ChartroomApi {
     return { version: this.version };
   }
 
+  /** How many plan subscriptions are open. */
+  get subscribers(): number {
+    return this.#listeners.size;
+  }
+
   emit(e: PlanEvent): void {
     for (const cb of this.#listeners) cb(e);
   }

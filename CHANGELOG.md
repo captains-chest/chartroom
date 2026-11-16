@@ -2,6 +2,16 @@
 
 All notable changes to Chartroom. Versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- An open panel now follows plans saved elsewhere (another tab or user), as the card does: the
+  plan on screen and its floor tabs update without a reload, and catch up after Home Assistant
+  reconnects or the panel comes back on the page. While the editor is open it keeps its own copy;
+  Done shows what is stored, and an edit made after a save elsewhere replaces it (the last save
+  wins) (#78). Frontend: 14.78 KB gzip for the card, 55.30 KB gzip in total.
+
 ## 0.1.0 — 2026-11-14
 
 The first release.

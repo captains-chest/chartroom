@@ -196,3 +196,68 @@ describe('a plan import and closing the editor (#19, #50)', () => {
     expect(t.panel.plan!.name).toBe('Imported');
   });
 });
+
+describe('following plan saves made elsewhere (#78)', () => {
+  const named = (name: string): Plan => ({ ...home(), name });
+
+  it('shows a save made in another tab', async () => {
+    const t = await PanelHarness.mount({ home: home() });
+    await t.saveElsewhere('home', named('Ground'));
+    expect(t.panel.plan!.name).toBe('Ground');
+    expect(t.panel.view.plan!.name).toBe('Ground');
+  });
+
+  it('adds the tab of a plan created elsewhere', async () => {
+    const t = await PanelHarness.mount({ home: home() });
+    expect(t.find((el) => el.getAttribute('data-plan') === 'attic')).toBeUndefined();
+    await t.saveElsewhere('attic', named('Attic'));
+    expect(t.find((el) => el.getAttribute('data-plan') === 'attic')).toBeDefined();
+    expect(t.panel.plan!.name).toBe('Home');
+  });
+
+  it('stops listening off the page, and catches up when it is back', async () => {
+    const t = await PanelHarness.mount({ home: home() });
+    expect(t.api.subscribers).toBe(1);
+    await t.remove();
+    expect(t.api.subscribers).toBe(0);
+
+    await t.saveElsewhere('home', named('Meanwhile'));
+    expect(t.panel.plan!.name).toBe('Home');
+    await t.attach();
+    expect(t.api.subscribers).toBe(1);
+    expect(t.panel.plan!.name).toBe('Meanwhile');
+  });
+
+  it('loads the plan again when Home Assistant reconnects', async () => {
+    const t = await PanelHarness.mount({ home: home() });
+    // Saved while the connection was down: no event reached the panel.
+    t.api.plans.set('home', named('Offline'));
+    await t.reconnect();
+    expect(t.panel.plan!.name).toBe('Offline');
+  });
+
+  it("keeps an open editor's copy, and shows the stored plan at Done", async () => {
+    const t = await PanelHarness.mount({ home: home() });
+    await t.openEditor();
+    await t.saveElsewhere('home', named('Elsewhere'));
+    expect(t.panel.plan!.name).toBe('Home');
+    expect(t.panel.view.plan!.name).toBe('Home');
+
+    await t.closeEditor();
+    expect(t.panel.plan!.name).toBe('Elsewhere');
+    expect(t.panel.view.plan!.name).toBe('Elsewhere');
+  });
+
+  it("saves an editor's later change over one made elsewhere", async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const t = await PanelHarness.mount({ home: home() });
+    await t.openEditor();
+    await t.saveElsewhere('home', named('Elsewhere'));
+    t.pickPlanFiles([new File([planFileJson(emptyPlan('Mine'))], 'mine.json')]);
+    await settle();
+
+    await t.closeEditor();
+    expect(t.api.plans.get('home')!.name).toBe('Mine');
+    expect(t.panel.plan!.name).toBe('Mine');
+  });
+});

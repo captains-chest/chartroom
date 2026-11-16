@@ -239,3 +239,23 @@ describe('editor image upload while leaving', () => {
     expect(saved.at(-1)?.underlay?.url).toBe(STORED);
   });
 });
+
+describe('editor inspector and Home Assistant states', () => {
+  const byName = (name: string) => (n: Node) => n.getAttribute?.('name') === name;
+
+  it('keeps a field being typed in when a state it does not show changes', () => {
+    const hass: Hass = { states: {}, floors: {} };
+    const ed = editor(emptyPlan('Home'), false, hass);
+    const input = find(ed.inspector as unknown as Node, byName('plan-name'));
+    expect(input).not.toBeNull();
+
+    hass.states = { 'light.x': { entity_id: 'light.x', state: 'on', attributes: {} } };
+    ed.hassChanged();
+    expect(find(ed.inspector as unknown as Node, byName('plan-name'))).toBe(input);
+
+    // The floor picker lists the floors: a new floor registry rebuilds the plan panel.
+    hass.floors = { up: { floor_id: 'up', name: 'Up', level: 1 } };
+    ed.hassChanged();
+    expect(find(ed.inspector as unknown as Node, byName('plan-name'))).not.toBe(input);
+  });
+});

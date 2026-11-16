@@ -31,13 +31,16 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   drops the upload, closes the editor and says so in the status line (#65).
 - When the last change can't be saved as the editor closes (on **Done** or switching floors), the
   status line now says so, instead of the failure going away with the editor's toolbar (#66).
+- The editor's inspector no longer replaces its fields whenever any Home Assistant state changes,
+  which could drop a value still being typed in (say, a room name) before it was taken. Each panel
+  is redrawn only when what it shows changes.
 - A stored plan with a damaged list (say, walls that are not a list) opens without the parts
   nothing can draw, instead of failing somewhere in the drawing code; what was wrong is logged in
   the browser console.
 
 ### Requirements
 
-- Frontend: 16.64 KB gzip for the card, 56.22 KB gzip in total.
+- Frontend: 16.64 KB gzip for the card, 56.56 KB gzip in total.
 
 ## 0.1.0 — 2026-11-14
 

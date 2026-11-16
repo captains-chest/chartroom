@@ -207,6 +207,18 @@ describe('following plan saves made elsewhere (#78)', () => {
     expect(t.panel.view.plan!.name).toBe('Ground');
   });
 
+  it('shows a save that moved the plan to another floor', async () => {
+    const t = await PanelHarness.mount({ home: home() });
+    // Its tab changes from the plan's own to the floor's.
+    (t.hass as { floors?: unknown }).floors = {
+      upstairs: { floor_id: 'upstairs', name: 'Upstairs', level: 1 },
+    };
+    await t.saveElsewhere('home', { ...named('Moved'), floor_id: 'upstairs' });
+    expect(t.find((el) => el.getAttribute('data-tab') === 'floor:upstairs')).toBeDefined();
+    expect(t.panel.plan!.name).toBe('Moved');
+    expect(t.panel.view.plan!.name).toBe('Moved');
+  });
+
   it('adds the tab of a plan created elsewhere', async () => {
     const t = await PanelHarness.mount({ home: home() });
     expect(t.find((el) => el.getAttribute('data-plan') === 'attic')).toBeUndefined();

@@ -2,7 +2,7 @@
 
 All notable changes to Chartroom. Versions follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.3.0 — 2026-11-17
 
 ### Added
 
@@ -91,6 +91,15 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   variable `CHARTROOM_TEST_HOOKS` set (#20).
 - The card now catches up on plans saved while it was off the page (another dashboard view) or
   while Home Assistant was reconnecting, as the panel does; it kept showing the old plan (#81).
+- A plan nobody has panned or zoomed is fitted again when the panel or card changes size (a shorter
+  window, the sidebar, a status line or more floor tabs); it kept the first fit and could be cut
+  off at the top and bottom (#112).
+- A fitted plan stays clear of the heat legend and the layer buttons, in the panel, on a phone
+  and on a card; a taller legend or the card's buttons covered rooms (#128, #130).
+- An open device menu stays open and follows its marker when the panel changes size, instead of
+  closing by itself (#114).
+- The mesh note and the Underlay controls no longer sit under each other or under the History
+  time bar (#119, #121).
 
 ### Performance
 
@@ -101,6 +110,10 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   per heatmap (plus a throwaway one each time the panel opened), and reads the mesh topology once a
   minute per Home Assistant connection instead of once per mesh layer. The poll stops when the last
   mesh layer is switched off or leaves the page (#80).
+
+### Requirements
+
+- Home Assistant 2026.10 or newer. Frontend: 20.94 KB gzip for the card, 68.32 KB gzip in total.
 
 ## 0.2.0 — 2026-11-16
 

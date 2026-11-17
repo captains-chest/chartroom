@@ -5,7 +5,7 @@ from typing import Final
 
 DOMAIN: Final = "chartroom"
 NAME: Final = "Chartroom"
-VERSION: Final = "0.2.0"
+VERSION: Final = "0.3.0"
 
 # A plan id: also its underlay's file name, so nothing that could leave the folder.
 # frontend/src/plan/constants.ts (PLAN_ID_PATTERN) holds the same rule; tests/fixtures/contract.json

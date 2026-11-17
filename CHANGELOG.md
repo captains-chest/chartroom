@@ -2,6 +2,26 @@
 
 All notable changes to Chartroom. Versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- A device's radial menu is now a wheel: an opaque, frosted disc in the theme's colours around the
+  marker, a segment per choice with its icon and value, hover, focus and pressed states, and a hub
+  in the middle with the device's name (closes it) or, a level down, Back. Every entity of the
+  device is a segment showing its state ("23.9 °C · Temperature", "59 % · Humidity"), the one the
+  marker shows included; one that can do something opens the next level with what it can do and
+  its Details, grown out of that segment (Brightness and Colour of a light with swatches, a
+  level further). A device with one entity goes straight to what it can do, as before. Esc,
+  Backspace or the hub go back a level, then close. A hold can rest on a segment with options to
+  open their level and slide on to pick one, or slide back to the hub and lift to go back. Levels
+  past 8 segments put the rest behind More. Motion is skipped with reduced motion (#138).
+
+- A tap on a marker no longer opens one sensor's details: what a device controls still toggles
+  (locks ask), and a device with nothing to control (a temperature and humidity sensor, a door
+  or motion sensor) or that is unavailable opens its wheel, with all its readings. In the History
+  slider's past a tap opens the wheel too, each entity opening its details (#138).
+
 ## 0.3.0 — 2026-11-17
 
 ### Added

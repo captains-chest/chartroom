@@ -41,6 +41,13 @@ export interface EntityState {
     max_color_temp_kelvin?: number;
     preset_modes?: string[];
     oscillating?: boolean;
+    /** A light's brightness, 0–255 (while on). */
+    brightness?: number | null;
+    /** A fan's speed (%) and preset. */
+    percentage?: number | null;
+    preset_mode?: string | null;
+    /** A cover's position (%). */
+    current_position?: number | null;
   };
   last_changed?: string;
   last_updated?: string;

@@ -189,7 +189,8 @@ windows with a sensor block heat and signal as they did then. Play runs through 
   that keep statistics (those with a `state_class`), with raw history for everything else.
   Only the plan's placed sensors, sources and devices, and its doors' and windows' sensors, are
   fetched.
-- While you look at the past, tapping a marker opens its details instead of toggling it.
+- While you look at the past, tapping a marker opens its wheel (states as they were, each
+  opening its details) instead of toggling it.
 - The history code is loaded only when you first open it (1.8 KB gzip).
 - What you can go back to depends on your recorder settings (`purge_keep_days`, 10 days by
   default); long-term statistics are kept beyond that.
@@ -229,19 +230,26 @@ Markers follow Home Assistant live, in the panel and in the card:
 | Dashed, faded disc with a red slash | Unavailable (unknown: dashed, no slash)                   |
 | Dashed ring                         | Waiting for Home Assistant to confirm the change you made |
 
-- **Tap** (or Enter/Space on a focused marker) toggles lights, switches, fans and input booleans,
-  opens or closes a cover (stops it while it moves) and locks or unlocks a lock after you confirm.
-  Sensors and unavailable devices open their details instead.
-- **Hold** (half a second), right-click, the context-menu key or Shift+F10 opens a radial menu
-  around the marker with what the device can do: Toggle, Brightness (10–100 %) and Colour (whites
-  and a few colours) for a light, Speed and Oscillate for a fan, Open / Stop / Close and Position
-  for a cover, Lock or Unlock (after you confirm) for a lock, an item per other entity of the
-  device, and **Details** (Home Assistant's more-info dialog). Only what the device supports is
-  offered; an unavailable device has Details only. An item with more options (Brightness) opens a
-  second ring further out without acting. Arrow keys move around a ring, Enter chooses, Esc or
-  Backspace goes back a ring or closes it; a click outside, a pan or a zoom closes it too.
+- **Tap** (or Enter/Space on a focused marker) does what the device is there to control: it
+  toggles lights, switches, fans and input booleans, opens or closes a cover (stops it while it
+  moves) and locks or unlocks a lock after you confirm. A device with nothing to control (a
+  temperature and humidity sensor, a door or motion sensor) or that is unavailable opens its
+  **wheel** instead, so no one sensor is "the click": all of its readings are on the wheel.
+- **Hold** (half a second), right-click, the context-menu key or Shift+F10 opens the wheel on any
+  device: a disc around the marker with a segment per entity of the device, each with its icon
+  and state ("23.9 °C · Temperature", "59 % · Humidity"), and Route when the Mesh layer knows the
+  device. A segment that can do something opens the next level with what it can do and its
+  **Details** (Home Assistant's more-info dialog); a sensor's segment opens its Details. A device
+  with a single entity goes straight to what it can do: Toggle, Brightness (10–100 %) and Colour
+  (whites and a few colours) for a light, Speed and Oscillate for a fan, Open / Stop / Close and
+  Position for a cover, Lock or Unlock (after you confirm) for a lock, then Details. Only what the
+  device supports is offered. A level grows out of the segment that opened it; the hub in the
+  middle names the device (and closes the wheel) or, a level down, is **Back**. Arrow keys move
+  around a level, Enter chooses, Esc or Backspace goes back a level, then closes. A hold can slide
+  to a segment and lift there to pick it, rest on one with options to open their level and slide
+  on, or slide back to the hub and lift to go back. A click outside, a pan or a zoom closes it.
 - A device's marker shows its entity you can control (a light, a switch…), else its binary sensor,
-  else its temperature or humidity sensor; a tap acts on that entity.
+  else its temperature or humidity sensor; a tap acts on that entity when it is one you control.
 - Markers keep the same size on screen at any zoom. Each one is a button with its entity's name
   and state as its label, for screen readers.
 - The glyphs are Chartroom's own small SVG line drawings. Home Assistant's `ha-state-icon` would
@@ -305,7 +313,7 @@ mesh: true # optional: draw mesh links
 history: true # optional: a History button that opens the time slider
 ```
 
-The card shows the plan with live device markers (tap to toggle, hold for the device's menu) and, with
+The card shows the plan with live device markers (tap to toggle or open a sensor's wheel, hold for the device's wheel) and, with
 `layer`, a heatmap. It does not pan or zoom, so the dashboard still scrolls over it; open the panel
 to explore a plan. When a plan is edited, open cards update straight away. With `history: true`
 the card gets the same History slider as the panel (loaded on first use); while you scrub, marker
@@ -385,7 +393,7 @@ for the phone layout) and `history`, which runs after the desktop tests because 
 readings far from the others' on the shared instance.
 
 The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
-(with what it shares) 21 KB gzip and everything together 68.5 KB gzip. The heatmap renderer, editor,
+(with what it shares) 21 KB gzip and everything together 71.5 KB gzip. The heatmap renderer, editor,
 mesh layer, history bar and device menu are separate chunks loaded when first used. The build squeezes the CSS,
 GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
 byte for byte.

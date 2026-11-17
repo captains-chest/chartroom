@@ -2,28 +2,9 @@
 // classes for the state (active, unavailable…) that the styles below colour.
 import { itemPrimary } from './device-entities';
 import type { Hass } from './ha-types';
-import { deviceLook, type Glyph } from './devices';
+import { deviceLook, GLYPHS } from './devices';
 import type { Device, Plan } from './plan/models';
 import { s } from './ui';
-
-/** Our own line glyphs on a 24-unit grid (no icon library). */
-export const GLYPHS: Record<Glyph, string> = {
-  light: 'M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3zM9.5 19h5M10.5 21.5h3',
-  switch: 'M7 7h10a5 5 0 0 1 0 10H7A5 5 0 0 1 7 7zM16 10a2 2 0 1 0 0 4a2 2 0 1 0 0-4z',
-  plug: 'M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4',
-  fan: 'M12 10.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3zM12 10.5C11 6 12 3 15 3.5s1 5-3 7zM13.5 12.5c4.5-1 7.5 0 7 3s-5 1-7-3zM10.5 12.5c-3 3.5-6 4.5-7.5 2s2.5-4.5 7.5-2z',
-  toggle: 'M5 5h14v14H5zM9 12l2 2 4-4',
-  cover: 'M4 4h16M6 4v12h12V4M6 8h12M6 12h12M12 16v4',
-  lock: 'M8 11V8a4 4 0 0 1 8 0v3M6 11h12v10H6zM12 15v2',
-  door: 'M6 21V3h12v18M3 21h18M14.5 12h.5',
-  window: 'M5 4h14v16H5zM12 4v16M5 12h14',
-  garage: 'M3 21V9l9-5 9 5v12M7 21v-9h10v9M7 15h10M7 18h10',
-  motion:
-    'M13.5 3.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3zM9 21l2.5-6 2.5 2.5V21M7 12l3-3.5 3.5 1.5 2 3h2.5M11.5 15l1-6',
-  thermometer: 'M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0zM12 9v7',
-  humidity: 'M12 3.5s-6 6.5-6 10.5a6 6 0 0 0 12 0c0-4-6-10.5-6-10.5z',
-  sensor: 'M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16zM12 10a2 2 0 1 0 0 4a2 2 0 1 0 0-4z',
-};
 
 /** A marker on the page: the item it shows, and the entity (of the item's device) it shows. */
 interface Marker {

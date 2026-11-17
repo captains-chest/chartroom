@@ -2,9 +2,8 @@
 // entity with its state and when it changed. Mouse and keyboard only: on touch a hold has its own
 // job. `popoverContent` is the pure part; `DevicePopover` shows it next to an element of the view.
 import { primaryEntity } from './device-entities';
-import { deviceLook, deviceName, entityName, type Glyph } from './devices';
+import { deviceLook, deviceName, entityName, GLYPHS, type Glyph } from './devices';
 import type { Hass } from './ha-types';
-import { GLYPHS } from './markers';
 import { entityArea } from './model';
 import { h, s } from './ui';
 

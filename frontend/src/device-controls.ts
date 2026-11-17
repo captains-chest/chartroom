@@ -1,6 +1,7 @@
-// Tapping and holding device markers outside the editor: tap toggles (locks ask first); a hold,
-// right-click or the context-menu key opens the radial menu of what the device can do (Details
-// among it: Home Assistant's more-info dialog). Hovering a marker or source with the mouse, or
+// Tapping and holding device markers outside the editor: a tap does what the device is there to
+// control (toggles; locks ask first), and on a device with nothing to control (sensors) opens its
+// wheel; a hold, right-click or the context-menu key opens the wheel on any device: each of its
+// entities, what each can do and its Details (Home Assistant's more-info dialog). Hovering a marker or source with the mouse, or
 // focusing a marker from the keyboard, shows what it is (a popover). With the Mesh layer on, the
 // menu's Route shows the popover and the route until the next press (touch has no hover).
 import { itemEntities } from './device-entities';
@@ -12,7 +13,7 @@ import {
 } from './device-popover';
 import type { MenuAction } from './device-actions';
 import type { DeviceMenu } from './device-menu';
-import { deviceName, tapAction } from './devices';
+import { deviceName, glyphOf, tapAction } from './devices';
 import type { Hass } from './ha-types';
 import type { Point } from './plan/types';
 import type { PlanView, PointerDelegate } from './plan-view';
@@ -33,8 +34,6 @@ const TICK_MS = 30_000;
 
 interface Press {
   el: SVGElement;
-  entity: string;
-  id: string;
   x: number;
   y: number;
   timer: ReturnType<typeof setTimeout>;
@@ -277,11 +276,8 @@ export class DeviceControls implements PointerDelegate {
       return !!el;
     }
     if (!el) return false;
-    const entity = el.dataset['entity']!;
     const press: Press = {
       el,
-      entity,
-      id: el.dataset['id']!,
       x: e.clientX,
       y: e.clientY,
       held: false,
@@ -297,11 +293,13 @@ export class DeviceControls implements PointerDelegate {
 
   move(_p: Point, e: PointerEvent): void {
     const p = this.#press;
-    if (!p || p.moved) return;
-    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > SLOP_PX) {
+    if (!p) return;
+    if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) > SLOP_PX) {
       p.moved = true;
       clearTimeout(p.timer);
     }
+    // A hold sliding over the wheel lights up the segment under it (and resting opens its level).
+    if (p.held && p.moved && this.#menu?.anchor === p.el) this.#menu.track(e.clientX, e.clientY);
   }
 
   cancel(): void {
@@ -314,7 +312,7 @@ export class DeviceControls implements PointerDelegate {
     const p = this.#press;
     if (!p) return;
     clearTimeout(p.timer);
-    if (!p.held && !p.moved) void this.tap(p.id, p.entity);
+    if (!p.held && !p.moved) void this.tap(p.el, [e.clientX, e.clientY]);
     else if (p.held) {
       // A hold slid to a menu item and released there picks it. One released in place does not,
       // even over an item (a menu moved in from the view's edge can put one over the marker).
@@ -359,7 +357,7 @@ export class DeviceControls implements PointerDelegate {
     if (!el || !this.active) return;
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      void this.tap(el.dataset['id']!, el.dataset['entity']!);
+      void this.tap(el);
     } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
       e.preventDefault();
       void this.openMenu(el);
@@ -386,9 +384,15 @@ export class DeviceControls implements PointerDelegate {
     const entities = itemEntities(plan, hass).get(d.id) ?? [d.entity_id];
     const menu = (this.#menu ??= new DeviceMenu(this.view.el, (a, m) => this.#choose(a, m)));
     if (menu.anchor === el) return;
-    const name = deviceName(el.dataset['entity']!, d.device_id, hass);
+    const entity = el.dataset['entity']!;
+    const name = deviceName(entity, d.device_id, hass);
     const route = !!this.view.mesh?.info(entities, d.device_id)?.lines.length;
-    menu.open(el, name, deviceActions(entities, hass, route));
+    menu.open(
+      el,
+      name,
+      deviceActions(entities, hass, route),
+      glyphOf(entity, hass?.states?.[entity]),
+    );
   }
 
   #choose(action: MenuAction, marker: Element): void {
@@ -423,14 +427,21 @@ export class DeviceControls implements PointerDelegate {
     );
   }
 
-  async tap(id: string, entityId: string): Promise<void> {
+  /**
+   * A tap (click, Enter or Space) on marker `el`: acts on the entity it shows when that is what the
+   * device is there to control, else (a sensor, something unavailable, the History slider's past)
+   * opens the wheel. `at`: where a pointer lifted, so the click a browser sends after it does not
+   * land on the wheel now under it.
+   */
+  async tap(el: SVGElement, at?: [number, number]): Promise<void> {
     const hass = this.hass();
+    const entityId = el.dataset['entity']!;
     const action = tapAction(entityId, hass?.states?.[entityId]);
-    if (action.type === 'more-info' || !hass?.callService) {
-      this.#moreInfo(entityId);
-      return;
+    if (action.type === 'menu' || !hass?.callService) {
+      if (at) this.#swallowLift(...at);
+      return this.openMenu(el);
     }
-    await this.#call(id, entityId, action.domain, action.service, action);
+    await this.#call(el.dataset['id']!, entityId, action.domain, action.service, action);
   }
 
   /** Call a service on an entity of marker `id` (as a tap does), asking first with `confirm`. */

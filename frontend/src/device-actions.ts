@@ -1,13 +1,13 @@
-// What a device's radial menu offers (device-menu.ts): ring 1 with ring 2 inside its items, from
-// the device's entities, their domains and what they support. Pure; loaded with the menu.
+// What a device's wheel offers (device-menu.ts): a level per device with a segment per entity,
+// and below each segment what that entity can do. Pure; loaded with the menu.
 import { primaryEntity } from './device-entities';
-import { deviceName, entityName, tapAction, words } from './devices';
+import { deviceLook, deviceName, entityName, type Glyph, tapAction, words } from './devices';
 import type { EntityState, Hass } from './ha-types';
 
 const domainOf = (entityId: string): string => entityId.slice(0, entityId.indexOf('.'));
 
 /**
- * What choosing a radial-menu item does: call a service (maybe after confirming), show details, or
+ * What choosing a wheel segment does: call a service (maybe after confirming), show details, or
  * show the device's mesh route (never acts on it).
  */
 export type MenuAction =
@@ -22,22 +22,43 @@ export type MenuAction =
   | { type: 'more-info'; entity: string }
   | { type: 'route' };
 
-/** A radial-menu item: it acts, or (in ring 1 only) opens ring 2, whose items act. */
+/** A segment's icon: an entity's glyph, or an action's. */
+export type Icon =
+  | Glyph
+  | 'power'
+  | 'brightness'
+  | 'colour'
+  | 'info'
+  | 'route'
+  | 'up'
+  | 'down'
+  | 'stop'
+  | 'swing'
+  | 'more';
+
+/** A wheel segment: it acts, or opens a further level (`ring`) whose segments act or open one. */
 export interface MenuItem {
   label: string;
+  /** An entity's state ("21.4 °C"), or what an option is set to now ("75 %"): shown largest. */
+  value?: string;
+  icon?: Icon;
+  /** The entity is unavailable or unknown: its value is shown faded. */
+  unavailable?: boolean;
+  /** A CSS colour shown as a dot instead of an icon (a light's colours). */
+  swatch?: string;
   action?: MenuAction;
   ring?: readonly MenuItem[];
 }
 
-/** A ring of the radial menu, in order around the marker (clockwise from the top). */
+/** A level of the wheel, in order around it (clockwise from the top). */
 export type Ring = readonly MenuItem[];
 
-/** Ring 1 holds at most this many items; entities past it are left to Details. */
+/** A level holds at most this many segments; the rest go to a More segment's level. */
 export const MAX_RING = 8;
-const WHITES: [string, number][] = [
-  ['Warm white', 2700],
-  ['Neutral white', 4000],
-  ['Cool white', 6500],
+const WHITES: [string, number, string][] = [
+  ['Warm white', 2700, '#ffc58f'],
+  ['Neutral white', 4000, '#ffe4c4'],
+  ['Cool white', 6500, '#eef3ff'],
 ];
 const HUES: [string, number][] = [
   ['Red', 0],
@@ -63,12 +84,29 @@ function entityItems(entity: string, st: EntityState | undefined): MenuItem[] {
   const domain = domainOf(entity);
   const a = st.attributes;
   const f = a.supported_features ?? 0;
-  const call = (label: string, service: string, data?: Record<string, unknown>): MenuItem => ({
+  const call = (
+    label: string,
+    service: string,
+    data?: Record<string, unknown>,
+    look: Pick<MenuItem, 'icon' | 'swatch'> = {},
+  ): MenuItem => ({
     label,
+    ...look,
     action: { type: 'service', entity, domain, service, ...(data && { data }) },
   });
-  const steps = (label: string, values: number[], service: string, key: string): MenuItem => ({
+  const toggle = call('Toggle', 'toggle', undefined, { icon: 'power' });
+  /** Percent steps under `label`, its value the current one (`now`, 0–100) when known. */
+  const steps = (
+    label: string,
+    icon: Icon,
+    values: number[],
+    service: string,
+    key: string,
+    now?: number,
+  ): MenuItem => ({
     label,
+    icon,
+    ...(now !== undefined && { value: `${Math.round(now)} %` }),
     ring: values.map((v) => call(`${v} %`, service, { [key]: v })),
   });
   switch (domain) {
@@ -80,70 +118,107 @@ function entityItems(entity: string, st: EntityState | undefined): MenuItem[] {
             ([, k]) =>
               k >= (a.min_color_temp_kelvin ?? 0) && k <= (a.max_color_temp_kelvin ?? Infinity),
           )
-          .map(([label, k]) => call(label, 'turn_on', { color_temp_kelvin: k })),
+          .map(([label, k, swatch]) =>
+            call(label, 'turn_on', { color_temp_kelvin: k }, { swatch }),
+          ),
         ...(modes.some((m) => COLOUR_MODES.includes(m)) ? HUES : []).map(([label, hue]) =>
-          call(label, 'turn_on', { hs_color: [hue, 100] }),
+          call(label, 'turn_on', { hs_color: [hue, 100] }, { swatch: `hsl(${hue} 90% 55%)` }),
         ),
       ];
+      const on = st.state === 'on' && typeof a.brightness === 'number';
       return [
-        call('Toggle', 'toggle'),
+        toggle,
         ...(modes.some((m) => m !== 'onoff')
-          ? [steps('Brightness', [10, 25, 50, 75, 100], 'turn_on', 'brightness_pct')]
+          ? [
+              steps(
+                'Brightness',
+                'brightness',
+                [10, 25, 50, 75, 100],
+                'turn_on',
+                'brightness_pct',
+                on ? (a.brightness! / 255) * 100 : undefined,
+              ),
+            ]
           : []),
-        ...(colours.length ? [{ label: 'Colour', ring: colours }] : []),
+        ...(colours.length ? [{ label: 'Colour', icon: 'colour', ring: colours } as const] : []),
       ];
     }
     case 'switch':
     case 'input_boolean':
-      return [call('Toggle', 'toggle')];
+      return [toggle];
     case 'fan': {
       const presets = f & FAN_PRESET ? (a.preset_modes ?? []) : [];
+      const pct = a.percentage ?? undefined;
       return [
-        call('Toggle', 'toggle'),
+        toggle,
         ...(presets.length
           ? [
               {
                 label: 'Speed',
+                icon: 'fan',
+                ...(a.preset_mode && { value: words(a.preset_mode) }),
                 ring: presets.map((p) => call(words(p), 'set_preset_mode', { preset_mode: p })),
-              },
+              } as const,
             ]
           : f & FAN_SPEED
-            ? [steps('Speed', [25, 50, 75, 100], 'set_percentage', 'percentage')]
+            ? [steps('Speed', 'fan', [25, 50, 75, 100], 'set_percentage', 'percentage', pct)]
             : []),
         ...(f & FAN_OSCILLATE
           ? [
-              call(a.oscillating ? 'Stop oscillating' : 'Oscillate', 'oscillate', {
-                oscillating: !a.oscillating,
-              }),
+              call(
+                a.oscillating ? 'Stop oscillating' : 'Oscillate',
+                'oscillate',
+                { oscillating: !a.oscillating },
+                { icon: 'swing' },
+              ),
             ]
           : []),
       ];
     }
     case 'cover':
       return [
-        ...(f & COVER_OPEN ? [call('Open', 'open_cover')] : []),
-        ...(f & COVER_STOP ? [call('Stop', 'stop_cover')] : []),
-        ...(f & COVER_CLOSE ? [call('Close', 'close_cover')] : []),
+        ...(f & COVER_OPEN ? [call('Open', 'open_cover', undefined, { icon: 'up' })] : []),
+        ...(f & COVER_STOP ? [call('Stop', 'stop_cover', undefined, { icon: 'stop' })] : []),
+        ...(f & COVER_CLOSE ? [call('Close', 'close_cover', undefined, { icon: 'down' })] : []),
         ...(f & COVER_POSITION
-          ? [steps('Position', [0, 25, 50, 75, 100], 'set_cover_position', 'position')]
+          ? [
+              steps(
+                'Position',
+                'cover',
+                [0, 25, 50, 75, 100],
+                'set_cover_position',
+                'position',
+                a.current_position ?? undefined,
+              ),
+            ]
           : []),
       ];
     case 'lock': {
       // Lock or unlock, asking first as a tap does.
       const t = tapAction(entity, st);
-      return t.type === 'service' ? [{ label: words(t.service), action: { ...t, entity } }] : [];
+      return t.type === 'service'
+        ? [{ label: words(t.service), icon: 'lock', action: { ...t, entity } }]
+        : [];
     }
     default:
       return [];
   }
 }
 
+/** `items` as a level: past MAX_RING, the last segment is More, a level with the rest. */
+function fit(items: MenuItem[]): Ring {
+  if (items.length <= MAX_RING) return items;
+  const keep = items.slice(0, MAX_RING - 1);
+  return [...keep, { label: 'More', icon: 'more', ring: fit(items.slice(MAX_RING - 1)) }];
+}
+
 /**
- * The radial menu for a device item's `entities` (see `itemEntities`), ring 1 with ring 2 inside
- * its items: what the marker's entity can do, then an item per other entity (opening a ring with
- * what that one can do and its Details, or its Details alone), then Route when `route` (the Mesh
- * layer is on and knows the device), then Details. Items the entity does not support are left out;
- * an unavailable device has (Route and) Details only.
+ * The wheel for a device item's `entities` (see `itemEntities`): a segment per entity, the marker's
+ * first, each showing its state; one that can do something opens a level with what it can do and
+ * its Details, any other (a sensor, an unavailable entity) opens its Details. A device with a
+ * single entity skips that step: its level is what the entity can do, then its Details. Route
+ * comes last when `route` (the Mesh layer is on and knows the device). Without `hass.callService`
+ * (the History slider's past) nothing acts: every entity is a segment that opens its Details.
  */
 export function deviceActions(
   entities: readonly string[],
@@ -151,24 +226,30 @@ export function deviceActions(
   route = false,
 ): Ring {
   const primary = primaryEntity(entities, hass);
+  const ids = [primary, ...entities.filter((e) => e !== primary)];
+  const live = !!hass?.callService;
   const details = (entity: string): MenuItem => ({
     label: 'Details',
+    icon: 'info',
     action: { type: 'more-info', entity },
   });
-  const end: MenuItem[] = [
-    ...(route ? [{ label: 'Route', action: { type: 'route' } } as const] : []),
-    details(primary),
-  ];
-  const st = hass?.states?.[primary];
-  if (!st || st.state === 'unavailable' || st.state === 'unknown') return end;
-  const ring = entityItems(primary, st);
+  const routes: MenuItem[] = route
+    ? [{ label: 'Route', icon: 'route', action: { type: 'route' } }]
+    : [];
+  const can = (e: string): MenuItem[] => (live ? entityItems(e, hass?.states?.[e]) : []);
+  const own = ids.length === 1 ? can(primary) : [];
+  if (own.length) return fit([...own, ...routes, details(primary)]);
   const device = deviceName(primary, hass?.entities?.[primary]?.device_id, hass);
-  for (const e of entities) {
-    if (e === primary || ring.length >= MAX_RING - end.length) continue;
-    // Ring 2 only acts: what opens a further ring (brightness steps) is left to the entity's Details.
-    const own = entityItems(e, hass?.states?.[e]).filter((i) => !i.ring);
-    const label = entityName(e, device, hass);
-    ring.push(own.length ? { label, ring: [...own, details(e)] } : { ...details(e), label });
-  }
-  return [...ring, ...end];
+  const segments = ids.map((e): MenuItem => {
+    const look = deviceLook(e, hass?.states?.[e]);
+    const items = can(e);
+    return {
+      label: entityName(e, device, hass),
+      value: look.value,
+      icon: look.glyph,
+      ...((look.status === 'unavailable' || look.status === 'unknown') && { unavailable: true }),
+      ...(items.length ? { ring: fit([...items, details(e)]) } : { action: details(e).action }),
+    };
+  });
+  return fit([...segments, ...routes]);
 }

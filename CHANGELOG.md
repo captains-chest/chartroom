@@ -12,6 +12,15 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   stays while the mouse is over it, and hides on leave, blur, Esc, a pan or a zoom; not on touch,
   and not in the editor. Markers no longer carry a native tooltip, which would cover it (#85).
 
+- Right-clicking, holding or pressing the context-menu key (or Shift+F10) on a device marker opens
+  a radial menu with what the device can do: Toggle, Brightness and Colour for a light, Speed and
+  Oscillate for a fan, Open / Stop / Close and Position for a cover, Lock or Unlock for a lock, an
+  item per other entity of the device, and Details (Home Assistant's more-info dialog, which these
+  used to open directly). Brightness, Colour, Speed and Position open a second ring with steps.
+  Only what the device supports is offered, and an unavailable device has Details only. It works
+  with the mouse, touch and keyboard (arrow keys, Enter, Esc or Backspace) and closes on a click
+  outside, a pan or a zoom (#86).
+
 ### Changed
 
 - A Home Assistant device is one marker on the plan, not one per entity: a temperature and
@@ -27,8 +36,8 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ### Fixed
 
-- Right-clicking a device marker now opens Home Assistant's more-info dialog, as a hold or the
-  context-menu key does; it did nothing in the panel (#87).
+- Right-clicking a device marker now does what a hold or the context-menu key does (now the radial
+  menu); it did nothing in the panel (#87).
 - Releases no longer let an admin swap the real mesh for a made-up one: the e2e test hook
   `chartroom/mesh/test_source` is registered only when Home Assistant runs with the environment
   variable `CHARTROOM_TEST_HOOKS` set (#20).

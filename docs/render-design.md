@@ -372,8 +372,24 @@ not a source, and a device item stands for a Home Assistant device rather than o
   the marker's `aria-describedby` while shown (markers have no `<title>`, whose native tooltip
   would cover it), refreshes on every new `hass` (`PointerDelegate.statesChanged`) and every 30 s,
   follows the marker when the view moves, and hides on a press elsewhere, a wheel, blur or Esc.
-  Touch never shows it: a touch hold has its own job (more-info; the radial menu of #86). Sources (access points, radios) get it on
-  hover too.
+  Touch never shows it: a touch hold opens the radial menu. Sources (access points, radios) get it
+  on hover too.
+- A hold, right-click (the press's marker is remembered: the view captures the pointer, so the
+  `contextmenu` lands on the `<svg>`), the context-menu key or Shift+F10 opens the radial menu
+  (`device-menu.ts`, `.device-menu`, loaded on first use). `deviceActions` (`device-actions.ts`,
+  pure) builds it from the item's entities: ring 1 is what the primary entity can do (from its
+  domain, `supported_features`, `supported_color_modes`, color-temperature range, `preset_modes`),
+  an item per other entity (a ring 2 with what that one can do plus its Details, or its Details
+  alone) and Details; unsupported items are left out, an unavailable device has Details only.
+  Two rings at most: a ring-1 item acts or opens ring 2 (without acting), ring-2 items act. It is
+  HTML in the plan box (`role=menu`/`menuitem`), centred on the marker's screen box and moved in so
+  both rings stay inside the view, a constant size at any zoom, and hides the popover while open.
+  It closes on a press outside it (one on a marker does nothing else), a pan, zoom or resize
+  (`viewChanged`), a new plan or a released view (`reset`), the editor opening, Tab and Esc
+  (Backspace and Esc in ring 2 go back to ring 1); focus returns to the marker. Choosing calls the
+  service the way a tap does (`markPending`, a lock's confirm, errors as `hass-notification`).
+  History is not in the menu: the History slider shows the whole plan, so it has nothing to jump
+  to for one device yet.
 - `planInputs` (which states a plan reads) and the History slider's entity list resolve items the
   same way, so they take the registry along with the plan.
 - **Migration**: `normalizePlan` turns a version 1 plan's `sensor` sources into device items with

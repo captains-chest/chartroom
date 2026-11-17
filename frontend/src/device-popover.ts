@@ -2,7 +2,7 @@
 // entity with its state and when it changed. Mouse and keyboard only: on touch a hold has its own
 // job. `popoverContent` is the pure part; `DevicePopover` shows it next to an element of the view.
 import { primaryEntity } from './device-entities';
-import { deviceLook, type Glyph } from './devices';
+import { deviceLook, deviceName, entityName, type Glyph } from './devices';
 import type { Hass } from './ha-types';
 import { GLYPHS } from './markers';
 import { entityArea } from './model';
@@ -31,11 +31,6 @@ export interface PopoverContent {
 /** Lines shown at most; a device with more says how many are left out. */
 export const MAX_LINES = 8;
 
-const words = (s: string): string => {
-  const t = s.replace(/_/g, ' ').trim();
-  return t.charAt(0).toUpperCase() + t.slice(1);
-};
-
 /** "just now", "5 min ago", "3 h ago", "2 d ago". */
 export function ago(iso: string | undefined, now: number): string {
   const t = iso ? Date.parse(iso) : NaN;
@@ -59,23 +54,18 @@ export function popoverContent(
   now = Date.now(),
 ): PopoverContent {
   const primary = primaryEntity(entities, hass);
-  const dev = deviceId ? hass?.devices?.[deviceId] : undefined;
-  const title =
-    dev?.name_by_user || dev?.name || hass?.states?.[primary]?.attributes.friendly_name || primary;
-  const areaId = entityArea(hass, primary) ?? dev?.area_id ?? null;
+  const title = deviceName(primary, deviceId, hass);
+  const areaId =
+    entityArea(hass, primary) ?? (deviceId && hass?.devices?.[deviceId]?.area_id) ?? null;
   const ids = [primary, ...entities.filter((e) => e !== primary)];
   const lines = ids.slice(0, MAX_LINES).map((entity): PopoverLine => {
     const st = hass?.states?.[entity];
     const look = deviceLook(entity, st);
-    const full = st?.attributes.friendly_name ?? entity;
-    // Home Assistant names an entity "<device> <name>": keep the name.
-    const own = full.toLowerCase().startsWith(title.toLowerCase())
-      ? full.slice(title.length).trim()
-      : full;
     return {
       entity,
       glyph: look.glyph,
-      name: words(own || st?.attributes.device_class || entity.slice(0, entity.indexOf('.'))),
+      // Home Assistant names an entity "<device> <name>": keep the name.
+      name: entityName(entity, title, hass),
       value: look.value,
       changed: ago(st?.last_changed, now),
       unavailable: look.status === 'unavailable',

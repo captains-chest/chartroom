@@ -30,7 +30,18 @@ export interface DeviceEntry {
 export interface EntityState {
   entity_id: string;
   state: string;
-  attributes: { friendly_name?: string; device_class?: string; unit_of_measurement?: string };
+  attributes: {
+    friendly_name?: string;
+    device_class?: string;
+    unit_of_measurement?: string;
+    /** What the entity can do: a bit field of its domain's features. */
+    supported_features?: number;
+    supported_color_modes?: string[];
+    min_color_temp_kelvin?: number;
+    max_color_temp_kelvin?: number;
+    preset_modes?: string[];
+    oscillating?: boolean;
+  };
   last_changed?: string;
   last_updated?: string;
   last_reported?: string;

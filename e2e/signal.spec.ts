@@ -216,16 +216,24 @@ test.describe('signal and mesh', () => {
         (await api<{ state: string }>(token(), `/api/states/${ids[1]}`)).state;
       const before = await plugState();
       const plug = (await panel.locator(`g.device[data-entity="${ids[1]}"]`).boundingBox())!;
-      await page.mouse.click(plug.x + plug.width / 2, plug.y + plug.height / 2, {
-        button: 'right',
-      });
-      await panel.locator('.device-menu').getByRole('menuitem', { name: 'Route' }).click();
-      await page.mouse.move(1, 1);
-      await expect(pop).toHaveText(['Test router', 'Route: → Coordinator (LQI 240) · 1 hop']);
-      await expect(panel.locator('svg.plan g.mesh.focus line.on-path')).toHaveCount(1);
+      const route = async (): Promise<void> => {
+        await page.mouse.click(plug.x + plug.width / 2, plug.y + plug.height / 2, {
+          button: 'right',
+        });
+        await panel.locator('.device-menu').getByRole('menuitem', { name: 'Route' }).click();
+        await page.mouse.move(1, 1);
+        await expect(pop).toHaveText(['Test router', 'Route: → Coordinator (LQI 240) · 1 hop']);
+        await expect(panel.locator('svg.plan g.mesh.focus line.on-path')).toHaveCount(1);
+      };
+      await route();
       await page.keyboard.press('Escape');
       await expect(panel.locator('svg.plan g.mesh.focus')).toHaveCount(0);
       await expect(panel.locator('.device-popover')).toBeHidden();
+      // A tap on the marker only dismisses it: the plug is not toggled.
+      await route();
+      await page.mouse.click(plug.x + plug.width / 2, plug.y + plug.height / 2);
+      await expect(panel.locator('svg.plan g.mesh.focus')).toHaveCount(0);
+      await page.waitForTimeout(500);
       expect(await plugState()).toBe(before);
       // With the signal layer under it, built from the mesh's routers (one link with RSSI is too
       // few to fit a level), then remembered across a reload.

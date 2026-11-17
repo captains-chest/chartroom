@@ -50,9 +50,6 @@ const radius = (n: number): number => (n <= 4 ? 100 : n <= 6 ? 112 : 124);
 const largest = (ring: Ring): number =>
   Math.max(radius(ring.length), ...ring.map((i) => (i.ring ? largest(i.ring) : 0)));
 
-/** The longest word of `text`, in characters: past 10 the hub shows one line, cut with an ellipsis. */
-const longest = (text: string): number => Math.max(0, ...text.split(/\s+/).map((w) => w.length));
-
 const round = (v: number): number => Math.round(v * 10) / 10;
 
 /**
@@ -355,10 +352,16 @@ export class DeviceMenu {
     const text = deep ? this.#top!.label : this.#name;
     hub.setAttribute('aria-label', deep ? 'Back' : `Close ${this.#name}`);
     hub.classList.toggle('back', deep);
+    const name = h('span', {}, text);
     hub.replaceChildren(
       deep ? icon('back', 'dm-hub-icon') : this.#glyph ? icon(this.#glyph, 'dm-hub-icon') : '',
-      h('span', { class: longest(text) > 10 ? 'long' : null }, text),
+      name,
     );
+    // It wraps at spaces to two lines. A word wider than the hub takes a smaller font, and if it
+    // is still too wide, one line cut with an ellipsis (never a break inside the word).
+    const wide = (): boolean => name.scrollWidth > name.clientWidth;
+    if (wide()) name.classList.add('small');
+    if (wide()) name.classList.add('cut');
   }
 
   #segments(): HTMLElement[] {
@@ -477,7 +480,8 @@ const deviceMenuStyles = `
   .device-menu:not([hidden]) .dm-hub { animation: dm-pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
   .dm-hub span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden; max-width: ${2 * HUB - 14}px; overflow-wrap: normal; }
-  .dm-hub span.long { display: block; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+  .dm-hub span.small { font-size: 9.5px; }
+  .dm-hub span.cut { display: block; white-space: nowrap; text-overflow: ellipsis; }
   .dm-hub:is(:hover, .hot) { background: color-mix(in srgb, var(--dm-accent) 16%, var(--dm-bg)); }
   .dm-hub-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--dm-muted); stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round; }

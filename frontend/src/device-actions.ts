@@ -205,8 +205,10 @@ function entityItems(entity: string, st: EntityState | undefined): MenuItem[] {
   }
 }
 
-/** `items` as a level: past MAX_RING, the last segment is More, a level with the rest. */
-function fit(items: MenuItem[]): Ring {
+/** `all` as a level: past MAX_RING, the last segment is More, a level with the rest. */
+function fit(all: readonly MenuItem[]): Ring {
+  // Every level below too: a light's colours, a fan's presets.
+  const items = all.map((i) => (i.ring ? { ...i, ring: fit(i.ring) } : i));
   if (items.length <= MAX_RING) return items;
   const keep = items.slice(0, MAX_RING - 1);
   return [...keep, { label: 'More', icon: 'more', ring: fit(items.slice(MAX_RING - 1)) }];

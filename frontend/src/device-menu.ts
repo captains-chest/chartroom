@@ -172,10 +172,17 @@ export class DeviceMenu {
 
   /**
    * Open `ring` around `anchor`, the device named `label` (and drawn with `glyph`) in the hub, its
-   * first segment focused.
+   * first segment focused (with a ring when a `keyboard` key opened it).
    */
-  open(anchor: Element, label: string, ring: Ring, glyph: Glyph | null = null): void {
+  open(
+    anchor: Element,
+    label: string,
+    ring: Ring,
+    glyph: Glyph | null = null,
+    keyboard = false,
+  ): void {
     this.close(false);
+    this.el.classList.toggle('kbd', keyboard);
     this.#anchor = anchor;
     this.#name = label;
     this.#glyph = glyph;
@@ -195,7 +202,7 @@ export class DeviceMenu {
     if (!anchor) return;
     this.#anchor = null;
     this.#levels = [];
-    this.#endSlide();
+    this.endSlide();
     document.removeEventListener('pointerdown', this.#outside, true);
     for (const level of this.el.querySelectorAll('.dm-level')) level.remove();
     this.el.hidden = true;
@@ -210,13 +217,17 @@ export class DeviceMenu {
     if (!this.#anchor) return;
     this.#at = [x, y];
     const o = this.#opened;
-    if (o && Math.hypot(x - o[0], y - o[1]) > SLOP_PX) this.#opened = null;
+    // Moving off where a rest opened a level lets resting open one again, on the same segment too.
+    const freed = !!o && Math.hypot(x - o[0], y - o[1]) > SLOP_PX;
+    if (freed) this.#opened = null;
     const t = this.#hit(x, y);
-    if (t === this.#hot) return;
-    this.#hot?.classList.remove('hot');
+    if (t === this.#hot && !freed) return;
     clearTimeout(this.#dwell);
-    this.#hot = t;
-    t?.classList.add('hot');
+    if (t !== this.#hot) {
+      this.#hot?.classList.remove('hot');
+      this.#hot = t;
+      t?.classList.add('hot');
+    }
     if (t?.hasAttribute('aria-haspopup') && !this.#opened)
       this.#dwell = setTimeout(() => {
         if (this.#hot !== t) return;
@@ -235,7 +246,7 @@ export class DeviceMenu {
   pickAt(x: number, y: number): void {
     const o = this.#opened;
     const near = !!o && Math.hypot(x - o[0], y - o[1]) <= SLOP_PX;
-    this.#endSlide();
+    this.endSlide();
     if (this.#anchor && !near) this.#hit(x, y)?.click();
   }
 
@@ -261,7 +272,8 @@ export class DeviceMenu {
     return t && this.el.contains(t) ? t : null;
   }
 
-  #endSlide(): void {
+  /** A sliding hold ended (lifted or cancelled): nothing stays lit, no rest opens a level. */
+  endSlide(): void {
     clearTimeout(this.#dwell);
     this.#hot?.classList.remove('hot');
     this.#hot = null;

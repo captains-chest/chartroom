@@ -241,6 +241,16 @@ describe('deviceActions', () => {
     expect(ring[7]!.ring).toHaveLength(3);
   });
 
+  it('fits the levels below too: a fan with many presets', () => {
+    const presets = Array.from({ length: 10 }, (_, i) => `p${i}`);
+    const [, speed] = deviceActions(
+      ['fan.a'],
+      of([['fan.a', 'on', { supported_features: 8, preset_modes: presets }]]),
+    );
+    expect(speed!.ring).toHaveLength(8);
+    expect(speed!.ring![7]!.ring!.map((i) => i.label)).toEqual(['P7', 'P8', 'P9']);
+  });
+
   it('offers nothing that acts in the past: every entity opens its details', () => {
     const states: [string, string][] = [
       ['light.a', 'on'],

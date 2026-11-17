@@ -80,6 +80,11 @@ export class PlanView {
   #given: { plan: Plan | null; selected?: { kind: string; id: string } | null; preview: boolean } =
     { plan: null, preview: false };
   #fitted = false;
+  /**
+   * Panned or zoomed since the last fit: a resize then keeps that view instead of fitting again.
+   * The editor keeps its view too, so what is being drawn stays under the pointer.
+   */
+  #moved = false;
   #underlayUrl: string | null = null;
   readonly #pointers = new Map<number, { x: number; y: number }>();
   #gesture: 'pan' | 'delegate' | 'pinch' | null = null;
@@ -400,11 +405,13 @@ export class PlanView {
       return;
     }
     this.#fitted = true;
+    this.#moved = false;
     this.#setView(fitView(this.#plan ? planBounds(this.#plan) : null, w / h, 0.6));
   }
 
   zoom(factor: number, at?: Point): void {
     const c: Point = at ?? [this.#view.x + this.#view.w / 2, this.#view.y + this.#view.h / 2];
+    this.#moved = true;
     this.#setView(zoomAt(this.#view, c, factor));
   }
 
@@ -429,7 +436,7 @@ export class PlanView {
     const w = this.#svg.clientWidth;
     const h = this.#svg.clientHeight;
     if (w === 0 || h === 0) return;
-    if (!this.#fitted || this.fixed) this.fit();
+    if (!this.#fitted || this.fixed || !(this.#moved || this.#editing)) this.fit();
     else this.#setView(withAspect(this.#view, w / h));
   }
 
@@ -480,12 +487,14 @@ export class PlanView {
       this.#delegate?.move(this.toPlan(e), e);
     } else if (this.#gesture === 'pan' && this.#last) {
       const k = this.mpp;
+      this.#moved = true;
       this.#setView(
         panBy(this.#view, -(e.clientX - this.#last.x) * k, -(e.clientY - this.#last.y) * k),
       );
       this.#last = { x: e.clientX, y: e.clientY };
     } else if (this.#gesture === 'pinch' && this.#last && this.#pointers.size === 2) {
       const now = this.#pinchState();
+      this.#moved = true;
       const k = this.mpp;
       let v = panBy(this.#view, -(now.x - this.#last.x) * k, -(now.y - this.#last.y) * k);
       if (this.#last.d && now.d > 0) {

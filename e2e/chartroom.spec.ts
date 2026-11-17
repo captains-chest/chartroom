@@ -82,7 +82,19 @@ test('the panel switches floors and shows a plan with pan and zoom', async ({ pa
   const svg = panel.locator('svg.plan');
   const box = async (): Promise<number[]> =>
     ((await svg.getAttribute('viewBox')) ?? '').split(' ').map(Number);
+  // The panel is wider than the example plan, so a fit fills its height: the view's height is the
+  // plan's, whatever the panel's size. (Other tests add tabs meanwhile, which shortens the panel.)
   const fitted = await box();
+  // Until it is panned or zoomed, the plan is fitted again when the panel changes size.
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await expect
+    .poll(async () => {
+      const [, , w, h] = await box();
+      const r = (await svg.boundingBox())!;
+      return Math.abs(w! / h! - r.width / r.height) < 1e-3 ? h : null;
+    })
+    .toBeCloseTo(fitted[3]!, 3);
+  await page.setViewportSize({ width: 1280, height: 800 });
   await panel.getByRole('button', { name: 'Zoom in' }).click();
   const zoomed = await box();
   expect(zoomed[2]!).toBeLessThan(fitted[2]! * 0.8);
@@ -100,7 +112,7 @@ test('the panel switches floors and shows a plan with pan and zoom', async ({ pa
   expect(panned[0]!).toBeLessThan(before[0]!);
   expect(panned[2]!).toBeCloseTo(before[2]!, 6);
   await panel.getByRole('button', { name: 'Fit plan' }).click();
-  expect((await box())[2]!).toBeCloseTo(fitted[2]!, 3);
+  expect((await box())[3]!).toBeCloseTo(fitted[3]!, 3);
 
   // A floor without a plan offers to create one.
   const ground = tabs.filter({ hasText: 'Ground floor' });

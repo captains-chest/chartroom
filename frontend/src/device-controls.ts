@@ -19,6 +19,8 @@ import { button, h } from './ui';
 
 /** How long a press must last to count as a hold. */
 export const HOLD_MS = 500;
+/** How long after a hold's lift the mouse events a browser sends for it are ignored. */
+const LIFT_MS = 300;
 /** A press that moves further than this is a pan, not a tap. */
 const SLOP_PX = 8;
 /** How long the mouse rests on a marker before its popover shows. */
@@ -279,11 +281,28 @@ export class DeviceControls implements PointerDelegate {
     this.#press = null;
   }
 
-  up(): void {
+  up(_p: Point, e: PointerEvent): void {
     const p = this.#press;
     if (!p) return;
     clearTimeout(p.timer);
     if (!p.held && !p.moved) void this.tap(p.id, p.entity);
+    else if (p.held) {
+      // A hold dragged to a menu item and released there picks it.
+      if (this.#menu?.anchor === p.el) this.#menu.pickAt(e.clientX, e.clientY);
+      // The mousedown and click a browser may send after the lift neither pick an item again nor
+      // move focus out of the menu (which would close it).
+      const swallow = (c: Event): void => {
+        c.stopPropagation();
+        c.preventDefault();
+        if (c.type === 'click') stop();
+      };
+      const stop = (): void => {
+        for (const type of ['mousedown', 'click'])
+          document.removeEventListener(type, swallow, true);
+      };
+      for (const type of ['mousedown', 'click']) document.addEventListener(type, swallow, true);
+      setTimeout(stop, LIFT_MS);
+    }
     // Keep the press a moment so the contextmenu that follows a long touch is ignored.
     setTimeout(() => {
       if (this.#press === p) this.#press = null;

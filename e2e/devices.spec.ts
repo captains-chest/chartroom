@@ -210,15 +210,25 @@ test.describe('devices', () => {
       await restore(coffee, was);
       await expect(m).toHaveAttribute('data-status', was!);
 
-      // Hold opens the device's menu, whose Details is Home Assistant's more-info dialog.
+      // A touch hold opens the device's menu; sliding to Details and lifting there opens Home
+      // Assistant's more-info dialog.
       const box = (await m.boundingBox())!;
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await page.mouse.down();
-      await page.waitForTimeout(800);
-      await page.mouse.up();
+      const cdp = await page.context().newCDPSession(page);
+      const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', x: number, y: number) =>
+        cdp.send('Input.dispatchTouchEvent', {
+          type,
+          touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 0 }],
+        });
+      const [x0, y0] = [box.x + box.width / 2, box.y + box.height / 2];
+      await touch('touchStart', x0, y0);
       const menu = panel.locator('.device-menu');
       await expect(menu.getByRole('menuitem')).toHaveText(['Toggle', 'Details']);
-      await menu.getByRole('menuitem', { name: 'Details' }).click();
+      const d = (await menu.getByRole('menuitem', { name: 'Details' }).boundingBox())!;
+      const [x1, y1] = [d.x + d.width / 2, d.y + d.height / 2];
+      for (let k = 1; k <= 8; k++)
+        await touch('touchMove', x0 + ((x1 - x0) * k) / 8, y0 + ((y1 - y0) * k) / 8);
+      await touch('touchEnd', x1, y1);
+      await cdp.detach();
       await expect(menu).toBeHidden();
       const info = page.locator('ha-more-info-dialog');
       await expect(info).toBeAttached();

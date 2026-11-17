@@ -162,17 +162,17 @@ test.describe('signal and mesh', () => {
       await setTopology({
         nodes: [
           { id: 'z:c', name: 'Coordinator', role: 'coordinator', entities: [ids[0]] },
-          { id: 'z:p', name: 'Coffee plug', role: 'router', entities: [ids[1]] },
-          { id: 'z:d', name: 'Front door', role: 'end_device', entities: [ids[2]] },
-          { id: 'z:l', name: 'Lock', role: 'end_device', entities: [ids[3]] },
+          { id: 'z:p', name: 'Coffee plug', role: 'router', via: 'z:c', entities: [ids[1]] },
+          { id: 'z:d', name: 'Front door', role: 'end_device', via: 'z:p', entities: [ids[2]] },
+          { id: 'z:l', name: 'Lock', role: 'end_device', via: 'z:c', entities: [ids[3]] },
           { id: 'z:x', name: 'Not on this plan', role: 'router', entities: ['light.nowhere'] },
         ],
         links: [
-          { a: 'z:c', b: 'z:p', lqi: 240 },
-          { a: 'z:p', b: 'z:d', lqi: 90 },
-          { a: 'z:c', b: 'z:l', rssi: -84 },
+          { a: 'z:c', b: 'z:p', lqi: 240, relationship: 'route' },
+          { a: 'z:p', b: 'z:d', lqi: 90, relationship: 'parent' },
+          { a: 'z:c', b: 'z:l', rssi: -84, relationship: 'parent' },
           { a: 'z:d', b: 'z:l' },
-          { a: 'z:p', b: 'z:x', lqi: 200 },
+          { a: 'z:p', b: 'z:x', lqi: 200, relationship: 'sibling' },
         ],
       });
       const panel = await openPlan(page);
@@ -192,7 +192,23 @@ test.describe('signal and mesh', () => {
         0.12,
         null,
       ]);
-      await expect(lines.first().locator('title')).toHaveText('Coordinator – Coffee plug: LQI 240');
+      await expect(lines.first().locator('title')).toHaveText(
+        'Coordinator – Coffee plug: LQI 240 · route',
+      );
+      // The coordinator and the plug get a ring.
+      await expect(panel.locator('svg.plan g.mesh line.mesh-node')).toHaveCount(2);
+      // Hovering the door names its role and route, and highlights the route's two links.
+      const door = (await panel.locator(`g.device[data-entity="${ids[2]}"]`).boundingBox())!;
+      await page.mouse.move(door.x + door.width / 2, door.y + door.height / 2);
+      const pop = panel.locator('.device-popover .dp-mesh');
+      await expect(pop).toHaveText([
+        'Test end device',
+        'Route: → Coffee plug (LQI 90) → Coordinator (LQI 240) · 2 hops',
+      ]);
+      await expect(panel.locator('svg.plan g.mesh.focus line.on-path')).toHaveCount(2);
+      await shot(page, 'mesh-route.png');
+      await page.mouse.move(1, 1);
+      await expect(panel.locator('svg.plan g.mesh.focus')).toHaveCount(0);
       // With the signal layer under it, then remembered across a reload.
       await panel.getByRole('button', { name: 'Signal' }).click();
       await expect(panel.locator('.heat-legend .heat-title')).toContainText('Signal');

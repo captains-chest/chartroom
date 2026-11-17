@@ -26,6 +26,8 @@ export interface PopoverContent {
   lines: PopoverLine[];
   /** Entities left out past MAX_LINES. */
   more: number;
+  /** The device's mesh role and route, while the Mesh layer is on. */
+  mesh?: string[] | undefined;
 }
 
 /** Lines shown at most; a device with more says how many are left out. */
@@ -113,6 +115,7 @@ export class DevicePopover {
     this.el.replaceChildren(
       h('div', { class: 'dp-title' }, content.title),
       content.area ? h('div', { class: 'dp-area' }, content.area) : '',
+      ...(content.mesh ?? []).map((t) => h('div', { class: 'dp-mesh' }, t)),
       h(
         'ul',
         {},
@@ -181,6 +184,7 @@ export const devicePopoverStyles = `
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25); }
   .device-popover[hidden], svg.plan.editing ~ .device-popover { display: none; }
   .device-popover .dp-title { font-weight: 600; }
+  .device-popover .dp-mesh { font-size: 12px; }
   .device-popover .dp-area { color: var(--secondary-text-color, #727272); font-size: 12px; }
   .device-popover ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid;
     grid-template-columns: auto 1fr auto auto; gap: 2px 8px; align-items: center; }

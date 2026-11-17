@@ -51,6 +51,16 @@
         "relationship": "Child",
         "device_type": "EndDevice"
       }
+    ],
+    "routes": [
+      {
+        "dest_nwk": "0x0000",
+        "route_status": "Active",
+        "memory_constrained": false,
+        "many_to_one": true,
+        "route_record_required": false,
+        "next_hop": "0x0000"
+      }
     ]
   },
   {

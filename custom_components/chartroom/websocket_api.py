@@ -158,6 +158,7 @@ _TEST_NODE = vol.Schema(
         vol.Optional("role", default=None): vol.Any(
             None, vol.In(["coordinator", "router", "end_device"])
         ),
+        vol.Optional("via", default=None): vol.Any(None, str),
         vol.Optional("device_id", default=None): vol.Any(None, str),
         vol.Optional("entities", default=[]): [str],
     }
@@ -169,6 +170,9 @@ _TEST_LINK = vol.Schema(
         vol.Optional("source", default="test"): str,
         vol.Optional("lqi", default=None): vol.Any(None, vol.Coerce(float)),
         vol.Optional("rssi", default=None): vol.Any(None, vol.Coerce(float)),
+        vol.Optional("relationship", default=None): vol.Any(
+            None, vol.In(["route", "parent", "sibling", "neighbor"])
+        ),
     }
 )
 

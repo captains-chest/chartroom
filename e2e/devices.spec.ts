@@ -261,6 +261,13 @@ test.describe('devices', () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
       await expect(menu.getByRole('menuitem')).toHaveText(['Toggle', 'Brightness', 'Details']);
       await expect(item('Toggle')).toBeFocused();
+      // The panel's box changing size (a tab added elsewhere, the window) fits the plan again;
+      // the menu stays open on its marker.
+      const plan = panel.locator('svg.plan');
+      const fitted = await plan.getAttribute('viewBox');
+      await page.setViewportSize({ width: 1200, height: 760 });
+      await expect(plan).not.toHaveAttribute('viewBox', fitted!);
+      await expect(item('Toggle')).toBeFocused();
       await item('Brightness').click();
       await expect(menu.getByRole('menu', { name: 'Brightness' }).getByRole('menuitem')).toHaveText(
         ['10 %', '25 %', '50 %', '75 %', '100 %'],

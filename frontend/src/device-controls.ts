@@ -235,10 +235,14 @@ export class DeviceControls implements PointerDelegate {
     if (anchor) this.#show(anchor);
   }
 
-  /** The view moved (panned, zoomed, fitted, resized): the popover follows, the menu closes. */
-  viewChanged(): void {
+  /**
+   * The view moved (panned, zoomed, fitted, resized): the popover follows. The menu closes, unless
+   * only the box changed size (a tab added elsewhere, the window): then it follows its marker.
+   */
+  viewChanged(resized = false): void {
     this.popover.place();
-    this.#closeMenu();
+    if (resized) this.#menu?.place();
+    else this.#closeMenu();
   }
 
   down(_p: Point, e: PointerEvent): boolean {

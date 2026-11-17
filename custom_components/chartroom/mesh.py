@@ -319,6 +319,7 @@ def parse_zwave(nodes_in: list[dict[str, Any]]) -> Topology:
     controllers = {n.get("home_id"): nid for nid, n in present if n.get("is_controller")}
     links = _Links("zwave_js")
     via: dict[str, str] = {}
+    fallback: dict[str, str] = {}
     for nid, n in present:
         home = n.get("home_id")
         if n.get("is_controller") or home not in controllers:
@@ -338,7 +339,10 @@ def parse_zwave(nodes_in: list[dict[str, Any]]) -> Topology:
             links.add(hops[i], hops[i + 1], rssi=rssi if last else None, relationship=relationship)
         if relationship:
             via[nid] = hops[-2]
-    return _with_via(nodes, via), links.list()
+            # A repeater on the route goes the same way, unless its own route says otherwise.
+            for i in range(1, len(hops) - 1):
+                fallback.setdefault(hops[i], hops[i - 1])
+    return _with_via(nodes, fallback | via), links.list()
 
 
 def parse_z2m(networkmap: dict[str, Any]) -> Topology:

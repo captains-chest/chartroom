@@ -68,7 +68,8 @@ def test_parse_zha() -> None:
 
 
 def test_parse_zwave() -> None:
-    nodes, links = mesh.parse_zwave(_load("zwave_nodes.json"))
+    nodes_in = _load("zwave_nodes.json")
+    nodes, links = mesh.parse_zwave(nodes_in)
     by_id = {n.id: n for n in nodes}
     home = 3735928559
     assert by_id[f"zwave_js:{home}-1"].role == "coordinator"
@@ -90,6 +91,9 @@ def test_parse_zwave() -> None:
         (ctl, n4): None,
     }
     assert (by_id[attic].via, by_id[dimmer].via, by_id[n4].via) == (dimmer, ctl, None)
+    # A repeater without its own route goes the way of the routes through it.
+    nodes_in[1]["lwr"] = None
+    assert {n.id: n.via for n in mesh.parse_zwave(nodes_in)[0]}[dimmer] == ctl
 
 
 def test_parse_z2m() -> None:

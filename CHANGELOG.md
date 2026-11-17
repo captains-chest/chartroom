@@ -4,6 +4,19 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ## Unreleased
 
+### Changed
+
+- A Home Assistant device is one marker on the plan, not one per entity: a temperature and
+  humidity sensor is placed once (with **Device** in the editor, which now lists devices,
+  temperature and humidity sensors among them) and feeds both the Temperature and the Humidity map
+  from that spot, with one value label per map. Sensors are no longer sources; **Source** places
+  access points and radios. A marker shows the device's light, switch, cover or lock if it has one,
+  else its binary sensor, else its temperature or humidity. Entities without a device (helpers,
+  template sensors) are placed on their own. Plans move to schema version 2: older plans open with
+  their sensors as devices, those of one device placed within 1 m of each other as one marker
+  between them, and are stored that way on the next save. Auto-place by area places sensors too
+  (#84).
+
 ### Fixed
 
 - Right-clicking a device marker now opens Home Assistant's more-info dialog, as a hold or the

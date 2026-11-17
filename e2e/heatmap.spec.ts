@@ -55,8 +55,8 @@ test.beforeEach(({ page }) => useHeatDebug(page));
 
 test('the layer buttons switch between temperature, humidity and no heatmap', async ({ page }) => {
   const panel = await openExample(page);
-  const temperature = panel.getByRole('button', { name: 'Temperature' });
-  const humidity = panel.getByRole('button', { name: 'Humidity' });
+  const temperature = panel.getByRole('button', { name: 'Temperature', exact: true });
+  const humidity = panel.getByRole('button', { name: 'Humidity', exact: true });
   const legend = panel.locator('.heat-legend');
   const values = panel.locator('svg.plan text.heat-value:not(.excluded)');
   await expect(temperature).toHaveAttribute('aria-pressed', 'false');
@@ -76,7 +76,9 @@ test('the layer buttons switch between temperature, humidity and no heatmap', as
   // The sensor with a flat battery is unavailable: marked, and left out of the field.
   const excluded = panel.locator('svg.plan text.heat-value.excluded');
   await expect(excluded).toHaveCount(1);
-  await expect(panel.locator('svg.plan .source.heat-excluded')).toHaveCount(1);
+  await expect(
+    panel.locator('svg.plan g.device[data-entity="sensor.bath_temperature_2_dead_battery"]'),
+  ).toHaveAttribute('data-status', 'unavailable');
   let h = await heat(panel);
   expect(h.layer).toBe('temperature');
   expect(h.mode).toBe('mesh');
@@ -101,22 +103,21 @@ test('the layer buttons switch between temperature, humidity and no heatmap', as
 
   // The choice is remembered; pressing the active layer turns the heatmap off.
   await page.reload();
-  await expect(panel.getByRole('button', { name: 'Humidity' })).toHaveAttribute(
+  await expect(panel.getByRole('button', { name: 'Humidity', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
   await expect(legend).toBeVisible();
-  await panel.getByRole('button', { name: 'Humidity' }).click();
+  await panel.getByRole('button', { name: 'Humidity', exact: true }).click();
   await expect(humidity).toHaveAttribute('aria-pressed', 'false');
   await expect(legend).toBeHidden();
   await expect(panel.locator('.heat-box')).toBeHidden();
   await expect(values).toHaveCount(0);
-  await expect(panel.locator('svg.plan .source.heat-excluded')).toHaveCount(0);
 });
 
 test('WebGL2 and the Canvas2D fallback draw the same field', async ({ page }) => {
   const panel = await openExample(page);
-  await panel.getByRole('button', { name: 'Temperature' }).click();
+  await panel.getByRole('button', { name: 'Temperature', exact: true }).click();
   expect((await heat(panel)).renderer).toBe('webgl2');
   const r = await panel.evaluate((el) =>
     window.chartroomDebug.compareRenderers((el as WithView).view.heat),
@@ -176,7 +177,7 @@ test('WebGL2 and the Canvas2D fallback draw the same field', async ({ page }) =>
 
 test('a new reading moves the field smoothly', async ({ page }) => {
   const panel = await openExample(page);
-  await panel.getByRole('button', { name: 'Temperature' }).click();
+  await panel.getByRole('button', { name: 'Temperature', exact: true }).click();
   await heat(panel);
   const entity = 'input_number.kitchen_temp';
   const was = await numberState(entity);
@@ -203,11 +204,11 @@ test('the card shows a configured layer and its toggles', async ({ page }) => {
     await expect(card.locator('svg.plan')).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 60_000, intervals: [1_000, 2_000, 5_000] });
   await expect(card.locator('h2.title')).toHaveText('Climate');
-  const temperature = card.getByRole('button', { name: 'Temperature' });
+  const temperature = card.getByRole('button', { name: 'Temperature', exact: true });
   await expect(temperature).toHaveAttribute('aria-pressed', 'true');
   await expect(card.locator('.heat-legend')).toContainText('Temperature');
   await expect(card.locator('svg.plan text.heat-value:not(.excluded)')).toHaveCount(6);
-  await card.getByRole('button', { name: 'Humidity' }).click();
+  await card.getByRole('button', { name: 'Humidity', exact: true }).click();
   await expect(card.locator('.heat-legend .heat-title')).toContainText('Humidity');
   // The first card has no layer and no toggles.
   const plain = page.locator('chartroom-card[data-plan=example]').first();

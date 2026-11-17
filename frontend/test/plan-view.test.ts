@@ -138,7 +138,7 @@ describe('plan view and Home Assistant states', () => {
   const state = (entity_id: string, s: string) => ({ entity_id, state: s, attributes: {} });
   const sensorPlan = (entity_id: string) => {
     const p = emptyPlan('Home');
-    p.sources = [{ id: 't', kind: 'sensor', entity_id, position: [1, 1] }];
+    p.devices = [{ id: 't', entity_id, position: [1, 1] }];
     return p;
   };
 

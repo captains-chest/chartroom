@@ -1,5 +1,5 @@
 // SVG markup for a plan: walls with their openings cut out, doors with their swing, windows, room
-// names and areas, and source markers. Pure string output so it runs in Node (the docs preview) as
+// names and areas, and source markers (and, in a standalone SVG, device dots). Pure string output so it runs in Node (the docs preview) as
 // well as in the panel. Every element carries `data-kind` / `data-id` for hit testing. Only type
 // imports (plus geometry), so Node can load this file with type stripping.
 import { doorGeometry, frame, pointInPolygon, wallPieces, wallRect } from './geometry.ts';
@@ -11,7 +11,7 @@ export interface PlanSvgOptions {
   scale?: number;
   /** Margin around the outline, in metres. */
   margin?: number;
-  /** Draw source markers. */
+  /** Draw source markers (and, in a standalone SVG, devices as dots). */
   sources?: boolean;
   /** Accessible title; defaults to the plan name. */
   title?: string;
@@ -51,7 +51,7 @@ export const PLAN_STYLE =
   '.window{fill:#fff;stroke:#555;stroke-width:0.02}.door{fill:none;stroke:#555;stroke-width:0.02}' +
   '.swing{fill:none;stroke:#999;stroke-width:0.015;stroke-dasharray:0.06 0.04}' +
   '.name{font-size:0.32px;fill:#222;text-anchor:middle}.area{font-size:0.24px;fill:#666;text-anchor:middle}' +
-  '.source{fill:#03a9f4;stroke:#fff;stroke-width:0.03}.source.access_point{fill:#ff9800}.source.radio{fill:#9c27b0}';
+  '.source,.device{fill:#03a9f4;stroke:#fff;stroke-width:0.03}.source.access_point{fill:#ff9800}.source.radio{fill:#9c27b0}';
 
 /** The plan's groups (rooms, walls, windows, doors, labels, sources), without the <svg> wrapper. */
 export function planBody(plan: Plan, options: { sources?: boolean } = {}): string {
@@ -135,6 +135,17 @@ export function planToSvg(plan: Plan, options: PlanSvgOptions = {}): string {
       `<style>${PLAN_STYLE}</style>`,
       `<rect x="${f(minX)}" y="${f(minY)}" width="${f(w)}" height="${f(h)}" fill="#fff"/>`,
       planBody(plan, options),
+      // The live view draws devices as markers (markers.ts); a still image shows where they are.
+      ...(options.sources !== false && plan.devices?.length
+        ? [
+            '<g class="devices">',
+            ...plan.devices.map(
+              (d) =>
+                `<circle class="device" cx="${f(d.position[0])}" cy="${f(d.position[1])}" r="0.08"><title>${esc(d.entity_id)}</title></circle>`,
+            ),
+            '</g>',
+          ]
+        : []),
       '</svg>',
     ].join('\n') + '\n'
   );

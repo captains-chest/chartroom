@@ -41,7 +41,7 @@ export interface ToolState {
   readonly drag: Drag | null;
   /** The plan being dragged, not yet committed. */
   readonly preview: Plan | null;
-  /** The entity the Device tool places on the next click. */
+  /** The device the Device tool places on the next click, by the entity its marker shows. */
   readonly armed: string | null;
 }
 
@@ -51,6 +51,8 @@ export interface ToolContext {
   readonly radius: number;
   /** `plan` with a new source at `p`. */
   addSource(plan: Plan, p: Point): { plan: Plan; id: string };
+  /** The Home Assistant device of an entity, or null when it has none. */
+  deviceOf(entity: string): string | null;
 }
 
 /** A press on the plan. */

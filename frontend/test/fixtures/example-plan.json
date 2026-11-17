@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "Example flat (traced fixture)",
   "floor_id": null,
   "outline": [
@@ -466,136 +466,111 @@
       "thickness": 0.024
     }
   ],
-  "sources": [
+  "sources": [],
+  "devices": [
     {
       "id": "living_room_temperature",
-      "kind": "sensor",
       "entity_id": "sensor.living_room_temperature",
       "position": [
         5.119,
         2.77
-      ],
-      "area_id": "living_room"
+      ]
     },
     {
       "id": "living_room_humidity",
-      "kind": "sensor",
       "entity_id": "sensor.living_room_humidity",
       "position": [
         5.369,
         2.77
-      ],
-      "area_id": "living_room"
+      ]
     },
     {
       "id": "kitchen_temperature",
-      "kind": "sensor",
       "entity_id": "sensor.kitchen_temperature",
       "position": [
         5.533,
         5.959
-      ],
-      "area_id": "kitchen"
+      ]
     },
     {
       "id": "kitchen_humidity",
-      "kind": "sensor",
       "entity_id": "sensor.kitchen_humidity",
       "position": [
         5.783,
         5.959
-      ],
-      "area_id": "kitchen"
+      ]
     },
     {
       "id": "bedroom_temperature",
-      "kind": "sensor",
       "entity_id": "sensor.bedroom_temperature",
       "position": [
         1.556,
         2.358
-      ],
-      "area_id": "bedroom"
+      ]
     },
     {
       "id": "bedroom_humidity",
-      "kind": "sensor",
       "entity_id": "sensor.bedroom_humidity",
       "position": [
         1.806,
         2.358
-      ],
-      "area_id": "bedroom"
+      ]
     },
     {
       "id": "bath_temperature",
-      "kind": "sensor",
       "entity_id": "sensor.bath_temperature",
       "position": [
         1.726,
         5.358
-      ],
-      "area_id": "bath"
+      ]
     },
     {
       "id": "bath_humidity",
-      "kind": "sensor",
       "entity_id": "sensor.bath_humidity",
       "position": [
         1.976,
         5.358
-      ],
-      "area_id": "bath"
+      ]
     },
     {
       "id": "bath_temperature_2_dead_battery",
-      "kind": "sensor",
       "entity_id": "sensor.bath_temperature_2_dead_battery",
       "position": [
         2.226,
         5.358
-      ],
-      "area_id": "bath"
+      ]
     },
     {
       "id": "hall_temperature",
-      "kind": "sensor",
       "entity_id": "sensor.hall_temperature",
       "position": [
         1.303,
         7.301
-      ],
-      "area_id": "hall"
+      ]
     },
     {
       "id": "hall_humidity",
-      "kind": "sensor",
       "entity_id": "sensor.hall_humidity",
       "position": [
         1.553,
         7.301
-      ],
-      "area_id": "hall"
+      ]
     },
     {
       "id": "office_temperature",
-      "kind": "sensor",
       "entity_id": "sensor.office_temperature",
       "position": [
         8.885,
         6.395
-      ],
-      "area_id": "office"
+      ]
     },
     {
       "id": "office_humidity",
-      "kind": "sensor",
       "entity_id": "sensor.office_humidity",
       "position": [
         9.135,
         6.395
-      ],
-      "area_id": "office"
+      ]
     }
   ],
   "meta": {

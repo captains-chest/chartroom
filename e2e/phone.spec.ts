@@ -56,14 +56,14 @@ test('controls dock in a bottom sheet under the plan', async ({ page }) => {
   await expect(panel.getByRole('button', { name: 'Fit plan' })).toBeVisible();
 
   // Layers are a tap away; the legend sits in the plan's top-left corner, inside the screen.
-  await panel.getByRole('button', { name: 'Temperature' }).tap();
+  await panel.getByRole('button', { name: 'Temperature', exact: true }).tap();
   const legend = panel.locator('.heat-legend');
   await expect(legend).toBeVisible();
   const l = (await legend.boundingBox())!;
   expect(l.x).toBeLessThan(vp.width / 2);
   expect(l.x + l.width).toBeLessThanOrEqual(vp.width);
   // Buttons are big enough for a finger.
-  const b = (await panel.getByRole('button', { name: 'Humidity' }).boundingBox())!;
+  const b = (await panel.getByRole('button', { name: 'Humidity', exact: true }).boundingBox())!;
   expect(b.height).toBeGreaterThanOrEqual(36);
   // Markers and value labels still fit on a small screen.
   await expect(panel.locator('svg.plan text.heat-value:not(.excluded)').first()).toBeVisible();
@@ -115,7 +115,8 @@ test('the floors switch from the header', async ({ page }) => {
 test('one finger pans and two fingers pinch-zoom the plan', async ({ page }) => {
   const panel = await openExample(page);
   const box = (await panel.locator('svg.plan').boundingBox())!;
-  const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  // Along the top edge, clear of the markers: a touch on one is a tap on the device.
+  const c = { x: box.x + box.width / 2, y: box.y + 24 };
   const before = await viewBox(panel);
 
   await touch(page, [{ x: c.x - 20, y: c.y }], [{ x: c.x + 60, y: c.y + 40 }]);

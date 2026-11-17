@@ -3,7 +3,7 @@
 // shows the plan as it was at the chosen time by handing the view a `hass` whose states are the
 // recorded ones. Heatmaps, signal (a source that was unavailable) and markers follow from that.
 import type { EntityState, Hass, HassConnection } from './ha-types';
-import { planEntities } from './plan/functions';
+import { planEntities } from './device-entities';
 import type { Plan } from './plan/models';
 import { button, h } from './ui';
 
@@ -26,15 +26,16 @@ export const RANGES = [
 type Stats = Record<string, { start: number; mean?: number | null }[]>;
 type History = Record<string, { s: string; lu?: number; lc?: number }[]>;
 
-/** Fetch what the recorder has for `plan` between `start` and `end` (ms). */
+/** Fetch what the recorder has for `plan` between `start` and `end` (ms); `hass` for its registry. */
 export async function fetchTimeline(
   c: HassConnection,
   plan: Plan | null,
   start: number,
   end: number,
   period: string | null,
+  hass?: Hass,
 ): Promise<Timeline> {
-  const { sensors, others } = planEntities(plan);
+  const { sensors, others } = planEntities(plan, hass);
   const tl: Timeline = new Map();
   const iso = (ms: number): string => new Date(ms).toISOString();
   if (period && sensors.length) {
@@ -185,10 +186,11 @@ export class TimeBar {
       b.setAttribute('aria-pressed', String(RANGES[i] === this.#range));
     Object.assign(this.#slider, { min: start, max: end, disabled: true });
     this.#when.textContent = 'Loading…';
-    const c = this.#host.hass()?.connection;
+    const hass = this.#host.hass();
+    const c = hass?.connection;
     try {
       if (!c) throw new Error();
-      const tl = await fetchTimeline(c, this.#host.plan(), start, end, this.#range.period);
+      const tl = await fetchTimeline(c, this.#host.plan(), start, end, this.#range.period, hass);
       if (load !== this.#load) return;
       this.#tl = tl;
       this.#memo = new Map();

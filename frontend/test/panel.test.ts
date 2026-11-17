@@ -312,7 +312,7 @@ describe('dragging in the editor', () => {
     vi.stubGlobal('cancelAnimationFrame', (id: number) => void (frames[id - 1] = () => {}));
     try {
       const plan = home();
-      plan.sources = [{ id: 's', kind: 'sensor', entity_id: 'sensor.t', position: [1, 1] }];
+      plan.sources = [{ id: 's', kind: 'radio', entity_id: 'sensor.t', position: [1, 1] }];
       const t = await PanelHarness.mount({ home: plan });
       await t.openEditor();
       const view = t.panel.view;

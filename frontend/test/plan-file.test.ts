@@ -137,7 +137,7 @@ describe('plan import', () => {
 
   it('fills in missing lists, as for a stored plan', async () => {
     const r = await ok(read('{"name": "Bare"}'));
-    expect(r.plan).toMatchObject({ name: 'Bare', walls: [], devices: [], schema_version: 1 });
+    expect(r.plan).toMatchObject({ name: 'Bare', walls: [], devices: [], schema_version: 2 });
   });
 
   it('drops an embedded image with nothing to place it', async () => {
@@ -157,8 +157,8 @@ describe('plan import rejects', () => {
   });
 
   it('a schema version this build does not know', async () => {
-    expect(await problems(read(withKeys({ schema_version: 2 })))).toEqual([
-      'unsupported schema_version 2',
+    expect(await problems(read(withKeys({ schema_version: 3 })))).toEqual([
+      'unsupported schema_version 3',
     ]);
   });
 

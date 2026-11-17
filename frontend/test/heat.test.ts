@@ -13,7 +13,7 @@ import {
   staleAt,
 } from '../src/heat/functions';
 import { emptyPlan } from '../src/plan/functions';
-import type { Plan, Source } from '../src/plan/models';
+import type { Device, Plan } from '../src/plan/models';
 
 const NOW = Date.parse('2026-10-24T08:00:00Z');
 
@@ -30,16 +30,15 @@ const st = (
   last_reported,
 });
 
-const src = (id: string, entity_id: string, x: number, y: number): Source => ({
+const src = (id: string, entity_id: string, x: number, y: number): Device => ({
   id,
-  kind: 'sensor',
   entity_id,
   position: [x, y],
 });
 
 function setup(): { plan: Plan; hass: Hass } {
   const plan = emptyPlan('Test');
-  plan.sources = [
+  plan.devices = [
     src('a', 'sensor.a_temp', 0, 0),
     src('b', 'sensor.b_temp', 4, 0),
     src('c', 'sensor.c_temp_f', 2, 3),
@@ -48,8 +47,8 @@ function setup(): { plan: Plan; hass: Hass } {
     src('f', 'sensor.junk', 2, 2),
     src('h', 'sensor.hum', 1, 2),
     src('p', 'sensor.power', 3, 3),
-    { id: 'r', kind: 'radio', entity_id: 'sensor.a_temp', position: [0, 3] },
   ];
+  plan.sources = [{ id: 'r', kind: 'radio', entity_id: 'sensor.a_temp', position: [0, 3] }];
   const states: Record<string, EntityState> = {
     'sensor.a_temp': st('sensor.a_temp', '25', 'temperature', '°C'),
     'sensor.b_temp': st('sensor.b_temp', '30', 'temperature', '°C'),
@@ -90,6 +89,33 @@ describe('heat layers', () => {
     const h = layerData(plan, hass, 'humidity', NOW);
     expect(h.readings.map((r) => r.value)).toEqual([55]);
     expect(h.unit).toBe('%');
+  });
+
+  it('reads both layers from one device item, at its position', () => {
+    const plan = {
+      ...emptyPlan('Test'),
+      devices: [{ ...src('m', 'sensor.m_temp', 2, 1), device_id: 'm' }],
+    };
+    const hass = {
+      states: {
+        'sensor.m_temp': st('sensor.m_temp', '21', 'temperature', '°C'),
+        'sensor.m_hum': st('sensor.m_hum', '48', 'humidity', '%'),
+      },
+      entities: {
+        'sensor.m_temp': { entity_id: 'sensor.m_temp', device_id: 'm' },
+        'sensor.m_hum': { entity_id: 'sensor.m_hum', device_id: 'm' },
+      },
+    } as Hass;
+    const read = (layer: 'temperature' | 'humidity'): unknown[] =>
+      layerData(plan, hass, layer, NOW).readings.map((r) => [
+        r.id,
+        r.entity_id,
+        r.position,
+        r.value,
+      ]);
+    expect(read('temperature')).toEqual([['m', 'sensor.m_temp', [2, 1], 21]]);
+    expect(read('humidity')).toEqual([['m', 'sensor.m_hum', [2, 1], 48]]);
+    expect(layerCounts(plan, hass)).toEqual({ temperature: 1, humidity: 1, signal: 0 });
   });
 
   it('treats a reading as stale only past STALE_MS', () => {

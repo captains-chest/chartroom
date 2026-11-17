@@ -1,8 +1,9 @@
 // Device markers as SVG: a disc with a glyph, a constant size on screen whatever the zoom, and
 // classes for the state (active, unavailable…) that the styles below colour.
+import { itemPrimary } from './device-entities';
 import type { Hass } from './ha-types';
 import { deviceLook, type Glyph } from './devices';
-import type { Device } from './plan/models';
+import type { Device, Plan } from './plan/models';
 import { s } from './ui';
 
 /** Our own line glyphs on a 24-unit grid (no icon library). */
@@ -19,8 +20,20 @@ const GLYPHS: Record<Glyph, string> = {
   garage: 'M3 21V9l9-5 9 5v12M7 21v-9h10v9M7 15h10M7 18h10',
   motion:
     'M13.5 3.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3zM9 21l2.5-6 2.5 2.5V21M7 12l3-3.5 3.5 1.5 2 3h2.5M11.5 15l1-6',
+  thermometer: 'M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0zM12 9v7',
+  humidity: 'M12 3.5s-6 6.5-6 10.5a6 6 0 0 0 12 0c0-4-6-10.5-6-10.5z',
   sensor: 'M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16zM12 10a2 2 0 1 0 0 4a2 2 0 1 0 0-4z',
 };
+
+/** A marker on the page: the item it shows, and the entity (of the item's device) it shows. */
+interface Marker {
+  el: SVGGElement;
+  glyph: SVGElement;
+  title: SVGElement;
+  device: Device;
+  entity: string;
+  state: unknown;
+}
 
 /** Marker radius on screen, in pixels. */
 export const MARKER_PX = 13;
@@ -34,23 +47,25 @@ const GLYPH_TRANSFORM = `translate(${-GLYPH_PX / 2} ${-GLYPH_PX / 2}) scale(${GL
 
 export class MarkerLayer {
   readonly g: SVGGElement;
-  #els = new Map<string, { el: SVGGElement; device: Device; state: unknown }>();
+  #els = new Map<string, Marker>();
   #mpp = 0.01;
   #selected: string | null = null;
+  #plan: Plan | null = null;
 
   constructor() {
     this.g = s('g', { class: 'devices' });
   }
 
-  /** Draw `devices`; reuses markers whose device did not change and only restyles them. */
-  render(devices: readonly Device[], hass: Hass | undefined, selected: string | null = null): void {
+  /** Draw `plan`'s devices; reuses markers whose item did not change and only restyles them. */
+  render(plan: Plan | null, hass: Hass | undefined, selected: string | null = null): void {
     this.#selected = selected;
-    const next = new Map<string, { el: SVGGElement; device: Device; state: unknown }>();
+    this.#plan = plan;
+    const next = new Map<string, Marker>();
     const order: SVGGElement[] = [];
-    for (const d of devices) {
+    for (const d of plan?.devices ?? []) {
       let m = this.#els.get(d.id);
-      if (!m || m.device.entity_id !== d.entity_id) {
-        m = { el: this.#create(d), device: d, state: undefined };
+      if (!m || m.device.entity_id !== d.entity_id || m.device.device_id !== d.device_id) {
+        m = { ...this.#create(d), device: d, entity: d.entity_id, state: undefined };
       }
       m.device = d;
       this.#place(m.el, d);
@@ -84,8 +99,10 @@ export class MarkerLayer {
     setTimeout(() => el.classList.remove('pending'), PENDING_TIMEOUT_MS);
   }
 
-  #create(d: Device): SVGGElement {
-    return s(
+  #create(d: Device): Pick<Marker, 'el' | 'glyph' | 'title'> {
+    const glyph = s('path', { class: 'glyph', transform: GLYPH_TRANSFORM });
+    const title = s('title');
+    const el = s(
       'g',
       {
         class: 'device',
@@ -97,10 +114,11 @@ export class MarkerLayer {
       },
       s('circle', { class: 'ring', r: MARKER_PX + RING_GAP_PX }),
       s('circle', { class: 'disc', r: MARKER_PX }),
-      s('path', { class: 'glyph', transform: GLYPH_TRANSFORM }),
+      glyph,
       s('path', { class: 'slash', d: 'M-8 8L8 -8' }),
-      s('title'),
+      title,
     );
+    return { el, glyph, title };
   }
 
   #place(el: SVGGElement, d: Device): void {
@@ -110,15 +128,18 @@ export class MarkerLayer {
     );
   }
 
-  #style(m: { el: SVGGElement; device: Device; state: unknown }, hass: Hass | undefined): void {
-    const st = hass?.states?.[m.device.entity_id];
+  #style(m: Marker, hass: Hass | undefined): void {
+    const entity = this.#plan ? itemPrimary(this.#plan, hass, m.device) : m.device.entity_id;
+    const st = hass?.states?.[entity];
     const sel = this.#selected === m.device.id;
-    const key = `${st?.state}|${st?.attributes.friendly_name}|${st?.attributes.device_class}|${sel}`;
+    const key = `${entity}|${st?.state}|${st?.attributes.friendly_name}|${st?.attributes.device_class}|${sel}`;
     if (m.state === st && m.el.dataset['key'] === key) return;
-    const changed = m.state !== st;
+    const changed = m.state !== st || m.entity !== entity;
     m.state = st;
+    m.entity = entity;
     m.el.dataset['key'] = key;
-    const look = deviceLook(m.device.entity_id, st);
+    m.el.dataset['entity'] = entity;
+    const look = deviceLook(entity, st);
     const el = m.el;
     // A tap waits for HA: the pending ring clears on the entity's next state change.
     const pending = el.classList.contains('pending') && !changed;
@@ -132,8 +153,8 @@ export class MarkerLayer {
     el.classList.toggle('pending', pending);
     el.dataset['status'] = look.status;
     el.setAttribute('aria-label', look.label);
-    el.querySelector('title')!.textContent = look.label;
-    el.querySelector('.glyph')!.setAttribute('d', GLYPHS[look.glyph]);
+    m.title.textContent = look.label;
+    m.glyph.setAttribute('d', GLYPHS[look.glyph]);
   }
 }
 

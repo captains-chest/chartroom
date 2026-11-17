@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vite-plus/test';
 import type { EntityState, Hass, HassConnection } from '../src/ha-types';
 import { layerData } from '../src/heat/functions';
 import { planInputs, hassChanged } from '../src/plan-inputs';
-import { emptyPlan, planEntities } from '../src/plan/functions';
+import { planEntities } from '../src/device-entities';
+import { emptyPlan } from '../src/plan/functions';
 import type { Plan } from '../src/plan/models';
 import { fetchTimeline, hassAt, statesAt, type Timeline } from '../src/time-bar';
 import { squeeze } from '../../scripts/minify-literals';
@@ -10,14 +11,13 @@ import { squeeze } from '../../scripts/minify-literals';
 function plan(): Plan {
   const p = emptyPlan('History');
   p.sources = [
-    { id: 't', kind: 'sensor', entity_id: 'sensor.t', position: [1, 1] },
-    { id: 'u', kind: 'sensor', entity_id: 'sensor.u', position: [2, 1] },
     { id: 'ap', kind: 'access_point', entity_id: 'device_tracker.ap', position: [1, 2] },
     { id: 'r', kind: 'radio', entity_id: '', position: [2, 2] },
   ];
   p.devices = [
+    { id: 't', entity_id: 'sensor.t', position: [1, 1] },
+    { id: 'u', entity_id: 'sensor.u', position: [2, 1] },
     { id: 'w', entity_id: 'binary_sensor.w', position: [3, 1] },
-    { id: 'dup', entity_id: 'sensor.t', position: [3, 2] },
   ];
   const opening = { wall: 'none', offset: 0, width: 1, material: 'wood', thickness: 0.04 };
   p.doors = [
@@ -47,11 +47,11 @@ const hass = (): Hass => ({
 
 describe('history entities', () => {
   it('splits sensors (for statistics) from everything else, once each', () => {
-    expect(planEntities(plan())).toEqual({
+    expect(planEntities(plan(), undefined)).toEqual({
       sensors: ['sensor.t', 'sensor.u'],
-      others: ['device_tracker.ap', 'binary_sensor.w', 'binary_sensor.door', 'cover.window'],
+      others: ['binary_sensor.w', 'device_tracker.ap', 'binary_sensor.door', 'cover.window'],
     });
-    expect(planEntities(null)).toEqual({ sensors: [], others: [] });
+    expect(planEntities(null, undefined)).toEqual({ sensors: [], others: [] });
   });
 });
 
@@ -93,7 +93,7 @@ describe('states at a time', () => {
   it('keeps the recorded view unchanged for the plan-inputs gate until the shown time moves', () => {
     const tl2: Timeline = new Map([['sensor.t', { t: [0, 10], s: ['31', '32'] }]]);
     const memo = new Map<string, EntityState>();
-    const ids = planInputs(plan());
+    const ids = planInputs(plan(), undefined);
     const live = hass();
     const before = hassAt(live, tl2, 5, memo);
     // A new live reading of a recorded sensor, and a light the plan does not use.
@@ -138,8 +138,8 @@ describe('fetching the timeline', () => {
     expect(sent[0]).toMatchObject({ statistic_ids: ['sensor.t', 'sensor.u'], period: 'hour' });
     expect(sent[1]!['entity_ids']).toEqual([
       'sensor.u',
-      'device_tracker.ap',
       'binary_sensor.w',
+      'device_tracker.ap',
       'binary_sensor.door',
       'cover.window',
     ]);

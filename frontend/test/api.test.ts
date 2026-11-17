@@ -67,7 +67,7 @@ describe('websocket api', () => {
   });
 
   it('rejects a plan of an unknown schema version', async () => {
-    const { c } = connection({ 'chartroom/plans/get': { name: 'Next', schema_version: 2 } });
+    const { c } = connection({ 'chartroom/plans/get': { name: 'Next', schema_version: 3 } });
     await expect(wsApi(c).getPlan('next')).rejects.toThrow('schema_version');
   });
 

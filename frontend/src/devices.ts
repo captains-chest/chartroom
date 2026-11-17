@@ -1,22 +1,14 @@
-// Device markers: what state an entity is in, what tapping it does, which entities can go on a
+// Device markers: what state an entity is in, what tapping it does, which devices can go on a
 // plan and where auto-placement puts them. Pure functions, shared by the panel, card and editor.
+import { entitiesOfDevice, isPlaceable, primaryEntity } from './device-entities';
 import { pointInPolygon, polygonArea, polygonCentroid } from './geometry';
 import type { EntityState, Hass } from './ha-types';
 import { entityArea } from './model';
-import type { Plan } from './plan/models';
+import type { Device, Plan } from './plan/models';
 import type { Point } from './plan/types';
 import { labelPoint } from './plan-svg';
 
-/** Domains that can go on the plan as device markers. */
-export const DEVICE_DOMAINS = [
-  'light',
-  'switch',
-  'fan',
-  'input_boolean',
-  'cover',
-  'lock',
-  'binary_sensor',
-] as const;
+export { DEVICE_DOMAINS } from './device-entities';
 
 /** binary_sensor and cover classes that read as open / closed rather than on / off. */
 const OPENINGS = new Set(['door', 'window', 'garage_door', 'opening', 'gate', 'garage']);
@@ -30,6 +22,8 @@ export type Status =
   | 'closing'
   | 'locked'
   | 'unlocked'
+  /** A sensor's value. */
+  | 'reading'
   | 'unavailable'
   | 'unknown';
 
@@ -46,6 +40,8 @@ export type Glyph =
   | 'window'
   | 'garage'
   | 'motion'
+  | 'thermometer'
+  | 'humidity'
   | 'sensor';
 
 export interface DeviceLook {
@@ -81,6 +77,8 @@ export function glyphOf(entityId: string, st: EntityState | undefined): Glyph {
       if (cls === 'lock') return 'lock';
       if (cls === 'motion' || cls === 'occupancy' || cls === 'presence') return 'motion';
       return 'sensor';
+    case 'sensor':
+      return cls === 'temperature' ? 'thermometer' : cls === 'humidity' ? 'humidity' : 'sensor';
     default:
       return 'sensor';
   }
@@ -110,6 +108,10 @@ export function deviceLook(entityId: string, st: EntityState | undefined): Devic
       raw === 'locked' ? 'locked' : raw === 'unlocked' || raw === 'open' ? 'unlocked' : 'unknown';
     active = status === 'unlocked';
     if (status === 'unknown') word = raw;
+  } else if (domain === 'sensor') {
+    status = 'reading';
+    const unit = st?.attributes.unit_of_measurement;
+    word = unit ? `${raw} ${unit}` : raw;
   } else if (raw === 'on' || raw === 'off') {
     active = raw === 'on';
     if (domain === 'binary_sensor' && cls === 'lock') {
@@ -163,33 +165,58 @@ export function tapAction(entityId: string, st: EntityState | undefined): TapAct
 }
 
 export interface DeviceChoice {
+  /** The entity its marker shows (primaryEntity); the item is placed by it. */
   entity_id: string;
+  /** The Home Assistant device, or null for an entity without one (a helper, a template sensor). */
+  device_id: string | null;
   name: string;
   area_id: string | null;
 }
 
 /**
- * Entities that can be placed on a plan: device domains, not hidden or config/diagnostic. On a
- * plan with a floor, only those in that floor's areas.
+ * What can be placed on a plan: Home Assistant devices with an entity worth a marker (a light,
+ * switch, fan, cover, lock, binary sensor, or a temperature or humidity sensor; not hidden or
+ * config/diagnostic), and such entities that have no device. On a plan with a floor, only those
+ * in that floor's areas.
  */
 export function deviceChoices(hass: Hass | undefined, floorId: string | null): DeviceChoice[] {
   const areas = hass?.areas ?? {};
-  const domains = new Set<string>(DEVICE_DOMAINS);
   const out: DeviceChoice[] = [];
+  const seen = new Set<string>();
   for (const st of Object.values(hass?.states ?? {})) {
-    if (!domains.has(domainOf(st.entity_id))) continue;
     const reg = hass?.entities?.[st.entity_id];
-    if (reg?.hidden || reg?.entity_category) continue;
-    const area = entityArea(hass, st.entity_id);
+    if (reg?.hidden || reg?.entity_category || !isPlaceable(st.entity_id, hass)) continue;
+    const device_id = reg?.device_id || null;
+    if (device_id && seen.has(device_id)) continue;
+    if (device_id) seen.add(device_id);
+    const entity_id = device_id
+      ? primaryEntity(
+          entitiesOfDevice(hass, device_id).filter((e) => isPlaceable(e, hass)),
+          hass,
+        )
+      : st.entity_id;
+    const area = entityArea(hass, entity_id);
     if (floorId && (area === null || areas[area]?.floor_id !== floorId)) continue;
+    const dev = device_id ? hass?.devices?.[device_id] : undefined;
     out.push({
-      entity_id: st.entity_id,
-      name: st.attributes.friendly_name ?? st.entity_id,
+      entity_id,
+      device_id,
+      name:
+        dev?.name_by_user ||
+        dev?.name ||
+        hass?.states?.[entity_id]?.attributes.friendly_name ||
+        entity_id,
       area_id: area,
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name) || a.entity_id.localeCompare(b.entity_id));
 }
+
+/** Whether `choice` is on the plan already: its device, or (without one) its entity. */
+export const isPlaced = (devices: readonly Device[], choice: DeviceChoice): boolean =>
+  devices.some((d) =>
+    choice.device_id ? d.device_id === choice.device_id : d.entity_id === choice.entity_id,
+  );
 
 /** Spacing between auto-placed markers, in metres. */
 const GAP = 0.45;
@@ -229,22 +256,22 @@ export function spotsInRoom(
 const round = (v: number): number => Math.round(v * 1000) / 1000;
 
 /**
- * Where auto-placement puts each entity not on the plan yet: in the room linked to its area (a room
- * can link several). Entities whose area has no room are left out.
+ * Where auto-placement puts each device not on the plan yet: in the room linked to its area (a room
+ * can link several). Devices whose area has no room are left out.
  */
 export function autoPlace(
   plan: Plan,
   choices: readonly DeviceChoice[],
-): { entity_id: string; position: Point }[] {
-  const placed = new Set((plan.devices ?? []).map((d) => d.entity_id));
+): { choice: DeviceChoice; position: Point }[] {
+  const devices = plan.devices ?? [];
   const taken: Point[] = [
     ...(plan.devices ?? []).map((d) => d.position),
     ...plan.sources.map((s) => s.position),
   ];
-  const out: { entity_id: string; position: Point }[] = [];
+  const out: { choice: DeviceChoice; position: Point }[] = [];
   const byArea = new Map<string, DeviceChoice[]>();
   for (const c of choices) {
-    if (placed.has(c.entity_id) || !c.area_id) continue;
+    if (isPlaced(devices, c) || !c.area_id) continue;
     byArea.set(c.area_id, [...(byArea.get(c.area_id) ?? []), c]);
   }
   for (const [area, list] of byArea) {
@@ -255,7 +282,7 @@ export function autoPlace(
     if (!room) continue;
     const spots = spotsInRoom(room.polygon, list.length, taken, labelPoint(room));
     list.forEach((c, i) => {
-      out.push({ entity_id: c.entity_id, position: spots[i]! });
+      out.push({ choice: c, position: spots[i]! });
       taken.push(spots[i]!);
     });
   }

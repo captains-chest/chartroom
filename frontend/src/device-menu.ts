@@ -50,6 +50,9 @@ const radius = (n: number): number => (n <= 4 ? 100 : n <= 6 ? 112 : 124);
 const largest = (ring: Ring): number =>
   Math.max(radius(ring.length), ...ring.map((i) => (i.ring ? largest(i.ring) : 0)));
 
+/** The longest word of `text`, in characters: past 10 the hub shows one line, cut with an ellipsis. */
+const longest = (text: string): number => Math.max(0, ...text.split(/\s+/).map((w) => w.length));
+
 const round = (v: number): number => Math.round(v * 10) / 10;
 
 /**
@@ -153,6 +156,10 @@ export class DeviceMenu {
       this.#hub,
     );
     this.el.addEventListener('keydown', (e) => this.#key(e));
+    // Focus shows as a ring only while the keyboard drives the wheel (opened with a key, or moved
+    // around with one), not after a tap, click or hold put focus on its first segment.
+    box.addEventListener('keydown', () => this.el.classList.add('kbd'), true);
+    box.addEventListener('pointerdown', () => this.el.classList.remove('kbd'), true);
     // Tabbing away closes it; a click outside, a pan or a zoom is the controls' to tell.
     this.el.addEventListener('focusout', (e) => {
       const to = e.relatedTarget as Node | null;
@@ -345,11 +352,12 @@ export class DeviceMenu {
   #hubShows(): void {
     const deep = this.#levels.length > 1;
     const hub = this.#hub;
+    const text = deep ? this.#top!.label : this.#name;
     hub.setAttribute('aria-label', deep ? 'Back' : `Close ${this.#name}`);
     hub.classList.toggle('back', deep);
     hub.replaceChildren(
       deep ? icon('back', 'dm-hub-icon') : this.#glyph ? icon(this.#glyph, 'dm-hub-icon') : '',
-      h('span', {}, deep ? this.#top!.label : this.#name),
+      h('span', { class: longest(text) > 10 ? 'long' : null }, text),
     );
   }
 
@@ -446,13 +454,13 @@ const deviceMenuStyles = `
     stroke: transparent; stroke-width: 5; transition: fill 0.12s; }
   .dm-seg:is(:hover, .hot) path { fill: color-mix(in srgb, var(--dm-accent) 16%, var(--dm-bg)); }
   .dm-seg:active path, .dm-seg.hot:hover path { fill: color-mix(in srgb, var(--dm-accent) 30%, var(--dm-bg)); }
-  .dm-seg:focus-visible path { stroke: var(--dm-accent); }
+  .kbd .dm-seg:focus path { stroke: var(--dm-accent); }
   .dm-face { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column;
     align-items: center; gap: 2px; text-align: center; pointer-events: none; }
   .dm-face > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dm-icon { width: 22px; height: 22px; fill: none; stroke: var(--dm-muted); stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round; transition: stroke 0.12s; }
-  .dm-seg:is(:hover, :focus-visible, .hot) .dm-icon { stroke: var(--dm-accent); }
+  .dm-seg:is(:hover, .hot) .dm-icon, .kbd .dm-seg:focus .dm-icon { stroke: var(--dm-accent); }
   .dm-face .dm-swatch { width: 20px; height: 20px; border-radius: 50%;
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
   .dm-value { font-size: 13px; font-weight: 600; }
@@ -468,7 +476,8 @@ const deviceMenuStyles = `
     transition: background 0.12s; }
   .device-menu:not([hidden]) .dm-hub { animation: dm-pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
   .dm-hub span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden; max-width: ${2 * HUB - 14}px; overflow-wrap: anywhere; }
+    overflow: hidden; max-width: ${2 * HUB - 14}px; overflow-wrap: normal; }
+  .dm-hub span.long { display: block; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
   .dm-hub:is(:hover, .hot) { background: color-mix(in srgb, var(--dm-accent) 16%, var(--dm-bg)); }
   .dm-hub-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--dm-muted); stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round; }

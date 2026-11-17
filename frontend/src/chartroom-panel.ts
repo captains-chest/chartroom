@@ -566,6 +566,8 @@ const panelStyles = `
     background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent); }
   .zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
   .zoom button { width: 36px; height: 36px; padding: 0; font-size: 1.1rem; }
+  /* The open device wheel is on top: the zoom buttons step aside rather than show through it. */
+  .stage:has(.device-menu:not([hidden])) > .zoom { visibility: hidden; }
   .underlay-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 8px;
     padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent); }
   .underlay-controls input { width: 120px; }

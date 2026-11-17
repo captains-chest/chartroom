@@ -107,6 +107,8 @@ export class PlanEditor {
   readonly #view: PlanView;
   /** The plan's history, saving, imports running and closing (no DOM). */
   readonly #session: EditSession;
+  /** The entity registry the plan was last folded with (foldDevices). */
+  #foldedWith: Hass['entities'];
   #s: ToolState = initialState;
   readonly #saveState: HTMLElement;
   readonly #hint: HTMLElement;
@@ -140,6 +142,7 @@ export class PlanEditor {
   constructor(host: EditorHost) {
     this.#host = host;
     this.#view = host.view;
+    this.#foldedWith = host.hass()?.entities;
     this.#session = new EditSession({
       // Sensors of one device placed apart (older plans) as one item: the next save stores it so.
       plan: foldDevices(host.plan, host.hass()),
@@ -227,7 +230,12 @@ export class PlanEditor {
    */
   hassChanged(): void {
     // The entity registry may have come after the editor opened: fold the plan as the view does.
+    // Only then: a state change folding an item left on its own by a delete would change the plan
+    // with nobody editing it, and drop a drag in progress.
     const hass = this.#host.hass();
+    const entities = hass?.entities;
+    if (entities === this.#foldedWith) return this.#renderInspector();
+    this.#foldedWith = entities;
     if (this.#session.migrate((plan) => foldDevices(plan, hass))) {
       // A drag in progress started from the unfolded plan: drop it rather than save that back.
       this.#s = { ...this.#s, drag: null, preview: null };

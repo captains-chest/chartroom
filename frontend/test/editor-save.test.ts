@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import type { HassConnection } from '../src/ha-types';
+import type { Hass, HassConnection } from '../src/ha-types';
 import { emptyPlan } from '../src/plan/functions';
 import type { Plan } from '../src/plan/models';
 import { PlanEditor } from '../src/plan-editor';
@@ -123,5 +123,52 @@ describe('editor saving', () => {
     c.reconnect();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(lost.saves).toHaveLength(1);
+  });
+
+  it('folds its plan when the entity registry comes, not on every state change', () => {
+    const hood = (entity_id: string) => ({ entity_id, device_id: 'hood' });
+    const entities = {
+      'sensor.t': hood('sensor.t'),
+      'sensor.h': hood('sensor.h'),
+      'sensor.b': hood('sensor.b'),
+    };
+    let hass: Hass = { entities };
+    const view = new PlanView(true);
+    const plan = emptyPlan('Home');
+    plan.devices = [
+      { id: 'a', entity_id: 'sensor.t', position: [0, 0] },
+      { id: 'b', entity_id: 'sensor.h', position: [3, 0] },
+      { id: 'c', entity_id: 'sensor.b', position: [6, 0] },
+    ];
+    const e = new PlanEditor({
+      view,
+      hass: () => hass,
+      underlay: new UnderlayStore(
+        () => undefined,
+        () => {},
+      ),
+      save: async () => {},
+      planId: 'home',
+      plan,
+    });
+    expect(e.plan.devices!.map((d) => d.device_id)).toEqual(['hood', undefined, undefined]);
+    // Delete the folded item: no item names the device now.
+    const marker = {
+      closest: (q: string) =>
+        q === '[data-kind]' ? { dataset: { kind: 'device', id: 'a' } } : null,
+    };
+    const press = { button: 0, clientX: 0, clientY: 0, target: marker };
+    view.delegate!.down([0, 0], press as unknown as PointerEvent);
+    view.delegate!.up([0, 0], click(0));
+    const del = { key: 'Delete', composedPath: () => [], preventDefault: () => {} };
+    e.key(del as unknown as KeyboardEvent);
+    const left = e.plan;
+    expect(left.devices!.map((d) => d.id)).toEqual(['b', 'c']);
+    hass = { ...hass, states: {} };
+    e.hassChanged();
+    expect(e.plan).toBe(left);
+    hass = { ...hass, entities: { ...entities } };
+    e.hassChanged();
+    expect(e.plan.devices!.map((d) => d.device_id)).toEqual(['hood', undefined]);
   });
 });

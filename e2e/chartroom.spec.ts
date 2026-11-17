@@ -82,18 +82,28 @@ test('the panel switches floors and shows a plan with pan and zoom', async ({ pa
   const svg = panel.locator('svg.plan');
   const box = async (): Promise<number[]> =>
     ((await svg.getAttribute('viewBox')) ?? '').split(' ').map(Number);
-  // The panel is wider than the example plan, so a fit fills its height: the view's height is the
-  // plan's, whatever the panel's size. (Other tests add tabs meanwhile, which shortens the panel.)
   const fitted = await box();
-  // Until it is panned or zoomed, the plan is fitted again when the panel changes size.
+  // Until it is panned or zoomed, the plan is fitted again when the panel changes size: not just
+  // reshaped (same width in metres), and still whole and clear of the layer buttons.
   await page.setViewportSize({ width: 1280, height: 600 });
   await expect
     .poll(async () => {
       const [, , w, h] = await box();
       const r = (await svg.boundingBox())!;
-      return Math.abs(w! / h! - r.width / r.height) < 1e-3 ? h : null;
+      return Math.abs(w! / h! - r.width / r.height) < 1e-3 && Math.abs(w! - fitted[2]!) > 0.01;
     })
-    .toBeCloseTo(fitted[3]!, 3);
+    .toBe(true);
+  const clear = await panel.evaluate((p) => {
+    const root = p.shadowRoot!;
+    const s = root.querySelector('svg.plan')!.getBoundingClientRect();
+    const b = root.querySelector('.layers')!.getBoundingClientRect();
+    return [...root.querySelectorAll('svg.plan [data-kind=wall]')].every((e) => {
+      const r = e.getBoundingClientRect();
+      const offButtons = r.top >= b.bottom || r.left >= b.right;
+      return offButtons && r.left >= s.left && r.right <= s.right && r.bottom <= s.bottom;
+    });
+  });
+  expect(clear).toBe(true);
   await page.setViewportSize({ width: 1280, height: 800 });
   await panel.getByRole('button', { name: 'Zoom in' }).click();
   const zoomed = await box();

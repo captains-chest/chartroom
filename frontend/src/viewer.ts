@@ -104,6 +104,7 @@ export class ViewerController {
       title: 'Show the plan at an earlier time',
     });
     this.layers.el.append(this.timeButton);
+    view.keepClear(this.layers.el);
     view.onPlan(() => this.#renderLayers());
     view.setApi(() => this.api);
   }

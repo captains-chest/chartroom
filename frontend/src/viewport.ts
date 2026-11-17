@@ -23,22 +23,22 @@ export interface Box {
 }
 
 /**
- * A view that shows `b` with `margin` metres around it in a `width`×`height` element. `cover`: a box
- * in one corner (the legend) the plan stays clear of, beside it or above/below it, whichever shows
- * the plan larger.
+ * A view that shows `b` with `margin` metres around it in a `width`×`height` element. `covers`:
+ * boxes along the edges (the legend, the layer buttons) the plan stays clear of, each beside it or
+ * above/below it, whichever shows the plan larger.
  */
 export function fitView(
   b: Bounds | null,
   width: number,
   height: number,
   margin = 0.5,
-  cover?: Box | null,
+  covers: Box[] = [],
 ): View {
   const box = b ?? { minX: 0, minY: 0, maxX: 10, maxY: 8 };
   const cx = (box.minX + box.maxX) / 2;
   const cy = (box.minY + box.maxY) / 2;
   // The plan centred in the element less `l`, `t`, `r`, `btm` pixels at its edges.
-  const at = (l: number, t: number, r: number, btm: number): View & { k: number } => {
+  const at = ([l = 0, t = 0, r = 0, btm = 0]: number[]): View & { k: number } => {
     const aw = Math.max(1, width - l - r);
     const ah = Math.max(1, height - t - btm);
     const k = Math.max(
@@ -47,16 +47,14 @@ export function fitView(
     );
     return { x: cx - (l + aw / 2) * k, y: cy - (t + ah / 2) * k, w: width * k, h: height * k, k };
   };
-  let v = at(0, 0, 0, 0);
-  if (cover) {
-    const side =
-      cover.left + cover.right > width ? at(0, 0, width - cover.left, 0) : at(cover.right, 0, 0, 0);
-    const end =
-      cover.top + cover.bottom > height
-        ? at(0, 0, 0, height - cover.top)
-        : at(0, cover.bottom, 0, 0);
-    v = side.k < end.k ? side : end;
+  // Every way of keeping clear of each cover (beside or above/below it), as edge insets.
+  let insets = [[0, 0, 0, 0]];
+  for (const c of covers) {
+    const side = c.left + c.right > width ? [0, 0, width - c.left, 0] : [c.right, 0, 0, 0];
+    const end = c.top + c.bottom > height ? [0, 0, 0, height - c.top] : [0, c.bottom, 0, 0];
+    insets = insets.flatMap((i) => [side, end].map((o) => i.map((x, j) => Math.max(x, o[j]!))));
   }
+  const v = insets.map(at).reduce((a, c) => (c.k < a.k ? c : a));
   return { x: v.x, y: v.y, w: v.w, h: v.h };
 }
 

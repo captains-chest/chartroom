@@ -52,6 +52,8 @@ export class DeviceControls implements PointerDelegate {
   /** The radial menu, once it has opened (its code loads then). */
   #menu: DeviceMenu | null = null;
   #menuLoad: Promise<typeof import('./device-menu')> | null = null;
+  /** Bumped by each opening and dismissal: an opening still loading the menu then gives up. */
+  #menuTicket = 0;
   #lastInfo = 0;
   readonly #confirmText: HTMLElement;
   readonly #confirmButton: HTMLButtonElement;
@@ -98,7 +100,7 @@ export class DeviceControls implements PointerDelegate {
       // A press on the marker shown keeps it (a tap's new state shows); a pan hides it.
       if (this.#target(e.target) !== this.popover.anchor) this.#hide();
       // Any press outside the menu closes it.
-      if (this.#menu && !this.#menu.el.contains(e.target as Node)) this.#menu.close(false);
+      if (!this.#menu?.el.contains(e.target as Node)) this.#closeMenu();
       const el = e.button === 2 ? this.#marker(e.target) : null;
       this.#rightPress = el ? { el, x: e.clientX, y: e.clientY } : null;
     });
@@ -201,6 +203,13 @@ export class DeviceControls implements PointerDelegate {
   /** The plan was replaced, the view released or the editor opens: popover and menu are stale. */
   reset(): void {
     this.#hide();
+    this.cancel();
+    this.#closeMenu();
+  }
+
+  /** Close the menu, and drop an opening still loading it. */
+  #closeMenu(): void {
+    this.#menuTicket++;
     this.#menu?.close(false);
   }
 
@@ -217,7 +226,7 @@ export class DeviceControls implements PointerDelegate {
 
   /** New states (or the History slider moved): an open popover follows them. */
   statesChanged(): void {
-    if (!this.active) this.#menu?.close(false);
+    if (!this.active) this.#closeMenu();
     const anchor = this.popover.anchor;
     if (anchor) this.#show(anchor);
   }
@@ -225,14 +234,14 @@ export class DeviceControls implements PointerDelegate {
   /** The view moved (panned, zoomed, fitted, resized): the popover follows, the menu closes. */
   viewChanged(): void {
     this.popover.place();
-    this.#menu?.close(false);
+    this.#closeMenu();
   }
 
   down(_p: Point, e: PointerEvent): boolean {
     const el = e.button === 0 ? this.#marker(e.target) : null;
     // A press that closes the menu does nothing else on a marker (elsewhere it may pan).
     if (this.#menu?.anchor) {
-      this.#menu.close(false);
+      this.#closeMenu();
       this.#press = null;
       return !!el;
     }
@@ -296,11 +305,12 @@ export class DeviceControls implements PointerDelegate {
   /** Open the radial menu on marker `el` (its code loads the first time). */
   async openMenu(el: SVGElement): Promise<void> {
     this.#hide();
+    const ticket = ++this.#menuTicket;
     const load = (this.#menuLoad ??= import('./device-menu'));
     const { DeviceMenu, deviceActions } = await load;
     const plan = this.view.plan;
     const d = plan?.devices?.find((x) => x.id === el.dataset['id']);
-    if (!d || !el.isConnected || !this.active) return;
+    if (ticket !== this.#menuTicket || !d || !el.isConnected || !this.active) return;
     const hass = this.hass();
     const entities = itemEntities(plan, hass).get(d.id) ?? [d.entity_id];
     const menu = (this.#menu ??= new DeviceMenu(this.view.el, (a, m) => this.#choose(a, m)));

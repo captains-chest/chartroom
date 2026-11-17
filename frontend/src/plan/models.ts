@@ -67,7 +67,7 @@ export interface Room {
   area_ids?: string[];
 }
 
-/** Something that feeds a layer: a temperature/humidity sensor, an access point, a radio. */
+/** Something the signal layer traces from: an access point or a radio. */
 export interface Source {
   id: string;
   kind: SourceKind;
@@ -97,10 +97,21 @@ export interface Underlay {
   opacity: number;
 }
 
-/** A Home Assistant entity shown as a live marker on the plan. Its name and icon come from HA. */
+/**
+ * A Home Assistant device shown as one live marker on the plan: a light, a door sensor, a
+ * temperature and humidity sensor. With `device_id`, the item stands for that device's entities
+ * (as the registry has them, without hidden and config/diagnostic ones) and feeds every layer one
+ * of them fits; without it, for `entity_id` alone (helpers and template sensors have no device).
+ * Its name, icon and state come from Home Assistant (device-entities.ts).
+ */
 export interface Device {
   id: string;
+  /**
+   * The entity it was placed by: always one of its entities, and the one it shows while the
+   * registry does not know the device.
+   */
   entity_id: string;
+  device_id?: string | null;
   position: Point;
 }
 
@@ -114,8 +125,9 @@ export interface Plan {
   rooms: Room[];
   doors: Door[];
   windows: Window[];
+  /** Access points and radios. */
   sources: Source[];
-  /** Live device markers (Phase 2). Older plans have none. */
+  /** Live device markers, sensors among them. Plans from before markers have none. */
   devices?: Device[];
   /** Materials added to or overriding DEFAULT_MATERIALS. */
   materials?: Material[];

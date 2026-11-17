@@ -14,11 +14,11 @@ const st = (entity_id: string, state: string): EntityState => ({
 function plan(): Plan {
   const p = emptyPlan('Home');
   p.walls = [{ id: 'w', a: [0, 0], b: [4, 0], thickness: 0.1, material: 'brick' }];
-  p.sources = [
-    { id: 't', kind: 'sensor', entity_id: 'sensor.temp', position: [1, 1] },
-    { id: 'ap', kind: 'access_point', entity_id: 'sensor.ap', position: [2, 1] },
+  p.sources = [{ id: 'ap', kind: 'access_point', entity_id: 'sensor.ap', position: [2, 1] }];
+  p.devices = [
+    { id: 't', entity_id: 'sensor.temp', position: [1, 1] },
+    { id: 'l', entity_id: 'light.lamp', position: [3, 1] },
   ];
-  p.devices = [{ id: 'l', entity_id: 'light.lamp', position: [3, 1] }];
   p.doors = [
     {
       id: 'd',
@@ -68,26 +68,28 @@ const withState = (h: Hass, id: string, state: string): Hass => ({
 
 describe('plan inputs', () => {
   it('lists every entity a layer reads: sensors, signal sources, devices, doors and windows', () => {
-    expect([...planInputs(plan())].sort()).toEqual([...IDS].sort());
-    expect(planInputs(null)).toEqual([]);
+    expect([...planInputs(plan(), undefined)].sort()).toEqual([...IDS].sort());
+    expect(planInputs(null, undefined)).toEqual([]);
   });
 
   it('works the list out once per plan object', () => {
     const p = plan();
-    expect(planInputs(p)).toBe(planInputs(p));
-    expect(planInputs({ ...p })).not.toBe(planInputs(p));
+    expect(planInputs(p, undefined)).toBe(planInputs(p, undefined));
+    expect(planInputs({ ...p }, undefined)).not.toBe(planInputs(p, undefined));
   });
 
   it('ignores a state change of an entity the plan does not read', () => {
     const h = hass();
-    expect(hassChanged(h, withState(h, 'light.elsewhere', 'off'), planInputs(plan()))).toBe(false);
+    expect(
+      hassChanged(h, withState(h, 'light.elsewhere', 'off'), planInputs(plan(), undefined)),
+    ).toBe(false);
     expect(hassChanged(h, h, [])).toBe(false);
     expect(hassChanged(h, { ...h }, IDS)).toBe(false);
   });
 
   it.each(IDS)('passes a state change of %s', (id) => {
     const h = hass();
-    expect(hassChanged(h, withState(h, id, 'off'), planInputs(plan()))).toBe(true);
+    expect(hassChanged(h, withState(h, id, 'off'), planInputs(plan(), undefined))).toBe(true);
   });
 
   it.each(['entities', 'devices', 'areas', 'floors', 'connection', 'user'] as const)(

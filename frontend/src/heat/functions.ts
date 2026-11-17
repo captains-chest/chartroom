@@ -1,5 +1,6 @@
 // Heatmap layers: which sensors feed each layer, their values, the colour ramps and the value
 // range. Pure functions (no DOM), shared by the panel, the card and the tests.
+import { itemEntities } from '../device-entities';
 import type { EntityState, Hass } from '../ha-types';
 import { DEFAULT_TX_DBM } from '../plan/constants';
 import { isSignalSource } from '../plan/functions';
@@ -24,6 +25,36 @@ const toUnit = (v: number, from: string, to: string): number => {
   const c = from === '°F' ? ((v - 32) * 5) / 9 : from === 'K' ? v - 273.15 : v;
   return to === '°F' ? (c * 9) / 5 + 32 : to === 'K' ? c + 273.15 : c;
 };
+
+interface LayerEntity {
+  id: string;
+  entity_id: string;
+  position: Point;
+  st: EntityState;
+}
+
+/**
+ * The entity that feeds `layer` for each device item that has one (the first of its entities whose
+ * class fits), by item id: a temperature and humidity sensor feeds both layers from one spot.
+ */
+function layerEntities(
+  plan: Plan | null,
+  hass: Hass | undefined,
+  layer: HeatLayerId,
+): LayerEntity[] {
+  const items = itemEntities(plan, hass);
+  const out: LayerEntity[] = [];
+  for (const d of plan?.devices ?? []) {
+    for (const entity_id of items.get(d.id) ?? []) {
+      const st = hass?.states?.[entity_id];
+      if (st && layerOfState(st) === layer) {
+        out.push({ id: d.id, entity_id, position: d.position, st });
+        break;
+      }
+    }
+  }
+  return out;
+}
 
 /** The sensors on `plan` that feed `layer`, with numeric values in one unit. */
 export function layerData(
@@ -50,10 +81,8 @@ export function layerData(
   }
   let unit = '';
   const raw: { s: LayerReading; unit: string }[] = [];
-  for (const src of plan?.sources ?? []) {
-    if (src.kind !== 'sensor' || !src.entity_id) continue;
-    const st = hass?.states?.[src.entity_id];
-    if (!st || layerOfState(st) !== layer) continue;
+  for (const src of layerEntities(plan, hass, layer)) {
+    const st = src.st;
     const u = st.attributes.unit_of_measurement ?? '';
     const value = Number(st.state);
     const reported = st.last_reported ? Date.parse(st.last_reported) : NaN;
@@ -140,20 +169,16 @@ export const layoutKey = (readings: readonly LayerReading[], outline: readonly P
   '|' +
   outline.map((p) => p.join(',')).join(';');
 
-/** Placed sources per layer (whatever their state), to enable the layer buttons. */
+/** Placed sensors and sources per layer (whatever their state), to enable the layer buttons. */
 export function layerCounts(
   plan: Plan | null,
   hass: Hass | undefined,
 ): Record<HeatLayerId, number> {
-  const out: Record<HeatLayerId, number> = { temperature: 0, humidity: 0, signal: 0 };
-  for (const src of plan?.sources ?? []) {
-    if (isSignalSource(src)) out.signal++;
-    if (src.kind !== 'sensor' || !src.entity_id) continue;
-    const st = hass?.states?.[src.entity_id];
-    const layer = st ? layerOfState(st) : null;
-    if (layer) out[layer]++;
-  }
-  return out;
+  return {
+    temperature: layerEntities(plan, hass, 'temperature').length,
+    humidity: layerEntities(plan, hass, 'humidity').length,
+    signal: (plan?.sources ?? []).filter(isSignalSource).length,
+  };
 }
 
 export const isHeatLayer = (v: unknown): v is HeatLayerId => HEAT_LAYERS.includes(v as HeatLayerId);

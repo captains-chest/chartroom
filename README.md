@@ -34,19 +34,24 @@ under **Settings → Areas, labels & zones** and assign your areas to them.
 - **Room**: click the corners, double-click to close, then link the room to a Home Assistant area.
   An open-plan room can link several areas (say _Kitchen_ and _Living room_): its devices are
   auto-placed in it, and a room with its default name takes the areas' names.
-- **Source**: place a temperature/humidity sensor, a Wi-Fi access point or a radio (Zigbee,
-  Z-Wave, Thread…). Sensors are picked from the Home Assistant temperature and humidity sensors in
-  the plan's floor's areas; access points and radios take any entity and a level at 1 m. Drag to
-  move, Delete to remove.
+- **Source**: place a Wi-Fi access point or a radio (Zigbee, Z-Wave, Thread…) for the signal map.
+  It takes any entity (whose state says whether it is up) and a level at 1 m. Drag to move, Delete
+  to remove. Temperature and humidity sensors are devices: see **Device**.
 - **Underlay**: import a PNG, JPEG, WebP or SVG drawing to trace over, then calibrate the scale
   with **Measure** (two points and their real distance) or by a room's known area. In the panel
   outside the editor, the **Underlay** button and slider hide the drawing or change its opacity
   (just for you, not saved in the plan).
-- **Device**: put lights, switches, fans, input booleans, covers, locks and binary sensors (doors,
-  windows, motion…) on the plan. **Auto-place by area** drops every device whose area is linked to
-  a room into that room; drag the rest from the list onto the plan (or pick one and click where it
-  goes), then drag markers to where the devices really are. The inspector changes a marker's
-  entity or deletes it. On a plan for a floor, the list only offers that floor's areas.
+- **Device**: put Home Assistant devices on the plan: lights, switches, fans, input booleans,
+  covers, locks, binary sensors (doors, windows, motion…) and temperature and humidity sensors. A
+  device is one marker, whatever entities it has: a multisensor placed once feeds the Temperature
+  and Humidity maps from that spot. Entities without a device (helpers, template sensors) are
+  placed on their own. **Auto-place by area** drops every device whose area is linked to a room
+  into that room; drag the rest from the list onto the plan (or pick one and click where it goes),
+  then drag markers to where the devices really are. The inspector changes which device a marker
+  shows or deletes it. On a plan for a floor, the list only offers that floor's areas. Plans saved
+  by earlier versions placed each sensor of a device on its own: they open with the sensors of one device
+  that sit within 1 m of each other as one marker, between them, and are saved that way after
+  your next edit.
 - **Undo** / **Redo**: Ctrl+Z and Ctrl+Shift+Z. Undo brings back a replaced underlay image too:
   the previous images are kept until Home Assistant restarts.
 - **Plan file**: **Export** downloads the plan as `.json` (the plan as stored); **Export with
@@ -76,7 +81,9 @@ under **Settings → Areas, labels & zones** and assign your areas to them.
 ## Heatmaps
 
 The **Temperature**, **Humidity** and **Signal** buttons at the top left of the panel show a live
-field built from the sources placed on the plan (with **Source** in the editor). Press the active
+field built from the sensors placed on the plan as devices (Temperature and Humidity, with
+**Device** in the editor) and the access points and radios (Signal, with **Source**). A device's
+temperature sensor feeds Temperature and its humidity sensor Humidity. Press the active
 button again to hide it. Your choice is remembered on this device.
 
 - **Linear between sensors.** Two sensors at 25 °C and 30 °C give exactly 27.5 °C halfway between
@@ -191,7 +198,7 @@ Markers follow Home Assistant live, in the panel and in the card:
 | Blue disc                           | Motion detected                                           |
 | Purple disc                         | A cover is open, opening or closing                       |
 | Red disc / green outline            | A lock is unlocked / locked                               |
-| White disc                          | Off, closed or clear                                      |
+| White disc                          | Off, closed or clear; a sensor's reading                  |
 | Dashed, faded disc with a red slash | Unavailable (unknown: dashed, no slash)                   |
 | Dashed ring                         | Waiting for Home Assistant to confirm the change you made |
 
@@ -200,6 +207,8 @@ Markers follow Home Assistant live, in the panel and in the card:
   Sensors and unavailable devices open their details instead.
 - **Hold** (half a second), right-click, the context-menu key or Shift+F10 opens Home Assistant's
   more-info dialog.
+- A device's marker shows its entity you can control (a light, a switch…), else its binary sensor,
+  else its temperature or humidity sensor; a tap acts on that entity.
 - Markers keep the same size on screen at any zoom. Each one is a button with its entity's name
   and state as its label, for screen readers.
 - The glyphs are Chartroom's own small SVG line drawings. Home Assistant's `ha-state-icon` would
@@ -343,7 +352,7 @@ for the phone layout) and `history`, which runs after the desktop tests because 
 readings far from the others' on the shared instance.
 
 The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
-(with what it shares) 20 KB gzip and everything together 58 KB gzip. The heatmap renderer, editor,
+(with what it shares) 20 KB gzip and everything together 60 KB gzip. The heatmap renderer, editor,
 mesh layer and history bar are separate chunks loaded when first used. The build squeezes the CSS,
 GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
 byte for byte.

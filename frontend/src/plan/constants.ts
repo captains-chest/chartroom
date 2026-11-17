@@ -2,10 +2,12 @@
 import type { Material } from './models';
 
 /**
- * Bump when a stored plan needs migrating; readers reject versions they don't know. The integration
- * rejects saves of any other version: bump PLAN_SCHEMA_VERSION in const.py with it.
+ * Bump when a stored plan needs migrating (normalizePlan in schema.ts migrates older ones); readers
+ * reject versions they don't know. The integration rejects saves of any other version: bump
+ * PLAN_SCHEMA_VERSION in const.py with it. 2: temperature and humidity sensors moved from
+ * `sources` to `devices`, and a device item may name its Home Assistant device.
  */
-export const PLAN_SCHEMA_VERSION = 1;
+export const PLAN_SCHEMA_VERSION = 2;
 
 /**
  * A plan's storage id, as the integration accepts it (PLAN_ID_RE in const.py): it is also its

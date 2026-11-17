@@ -1,6 +1,7 @@
 // The plan as live SVG: underlay image (its own SVG, under the heatmap canvas), the plan body, and
 // an overlay group the editor draws handles into. Handles pan (drag), zoom (wheel, pinch, buttons) and keeps the viewBox in metres.
 import type { ChartroomApi } from './api';
+import { foldDevices } from './device-entities';
 import { planBounds } from './geometry';
 import type { Hass } from './ha-types';
 import type { LayerData } from './heat/models';
@@ -65,7 +66,11 @@ export class PlanView {
   #hass: Hass | undefined;
   #selectedDevice: string | null = null;
   #view: View = { x: 0, y: 0, w: 10, h: 6 };
+  /** The plan shown: the one given, with its devices folded (foldDevices) once the registry is in. */
   #plan: Plan | null = null;
+  /** The plan as given to `setPlan`, and the selection given with it. */
+  #given: { plan: Plan | null; selected?: { kind: string; id: string } | null; preview: boolean } =
+    { plan: null, preview: false };
   #fitted = false;
   #underlayUrl: string | null = null;
   readonly #pointers = new Map<number, { x: number; y: number }>();
@@ -177,13 +182,17 @@ export class PlanView {
 
   /**
    * Show `plan`. `preview`: a drag in the editor is under way, so layers that are slow to follow
-   * (the temperature and humidity layout) may wait for the drag to end.
+   * (the temperature and humidity layout) may wait for the drag to end. Sensors of one Home
+   * Assistant device placed apart (plans from before items named devices) show as one: `plan` is
+   * the plan shown (which a save stores) once the editor opens it.
    */
   setPlan(
-    plan: Plan | null,
+    given: Plan | null,
     selected?: { kind: string; id: string } | null,
     preview = false,
   ): void {
+    this.#given = { plan: given, selected, preview };
+    const plan = given && foldDevices(given, this.#hass);
     this.#plan = plan;
     this.#body.innerHTML = plan ? planBody(plan) : '';
     if (selected) {
@@ -195,7 +204,7 @@ export class PlanView {
       if (room?.area_ids) el.classList.add('linked');
     }
     this.#selectedDevice = selected?.kind === 'device' ? selected.id : null;
-    this.markers.render(plan?.devices ?? [], this.#hass, this.#selectedDevice);
+    this.markers.render(plan, this.#hass, this.#selectedDevice);
     this.#renderUnderlay();
     if (!this.#fitted) this.fit();
     // The layers may hold an older hass, skipped as unchanged for the previous plan.
@@ -308,9 +317,16 @@ export class PlanView {
    * changed (plan-inputs.ts); returns whether it did.
    */
   setHass(hass: Hass | undefined): boolean {
-    const changed = hassChanged(this.#hass, hass, planInputs(this.#plan));
+    const changed = hassChanged(this.#hass, hass, planInputs(this.#plan, this.#hass));
+    const registry = hass?.entities !== this.#hass?.entities;
     this.#hass = hass;
     if (!changed) return false;
+    // A new entity registry may fold the plan's devices (or change what they are).
+    const { plan, selected, preview } = this.#given;
+    if (registry && plan && foldDevices(plan, hass) !== this.#plan) {
+      this.setPlan(plan, selected, preview);
+      return true;
+    }
     this.markers.update(hass);
     this.#heat?.setHass(hass);
     this.#mesh?.setHass(hass);
@@ -519,8 +535,8 @@ export const planViewStyles = `
   .heat-on .name, .heat-on .area { stroke-width: 0.06px; }
   .heat-value { font-size: calc(var(--mpp, 0.01) * 12px); font-weight: 600; fill: var(--primary-text-color, #222);
     text-anchor: middle; pointer-events: none; }
-  .heat-value { transform: translateY(calc(var(--mpp, 0.01) * -10px)); }
-  .heat-value.below { transform: translateY(calc(var(--mpp, 0.01) * 22px)); }
+  .heat-value { transform: translateY(calc(var(--mpp, 0.01) * -20px)); }
+  .heat-value.below { transform: translateY(calc(var(--mpp, 0.01) * 27px)); }
   .heat-value.crowded, .area.crowded { display: none; }
   .heat-value.excluded { fill: var(--secondary-text-color, #777); pointer-events: auto; }
   .source.heat-excluded { fill: none; stroke: var(--secondary-text-color, #777); stroke-width: 1.5px; stroke-dasharray: 2 2; }

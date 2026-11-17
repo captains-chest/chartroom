@@ -239,7 +239,7 @@ that still overlaps (small cards) is hidden; the marker keeps its accessible nam
   an error. `chartroom/mesh/get` returns `{nodes, links, sources}`; nodes carry the Home
   Assistant device id and entities when known.
 - The panel layer (`mesh-layer.ts`, its own lazy chunk, loaded on first use) places a node where a
-  device marker or source shows one of its entities or another entity of its device, and draws a
+  device marker shows its device (or one of its entities) or a source one of its entities, and draws a
   line for each link with both ends on the plan: hue from red (bad) to green (good) by LQI/255, or
   by RSSI from -90 to -40 dBm; dashed grey when unknown. It re-reads every 60 s while on.
 - `chartroom/mesh/test_source` (admin) swaps in a fake topology, in memory only, for e2e. It is
@@ -350,6 +350,34 @@ changes sharply at a wall instead of smearing across it.
   when sensors, walls or door states change. The throttled e2e check at the soft caps is under
   "Old-wall-tablet check".
 
+## Devices feed the heatmaps
+
+Since plan schema version 2 a temperature or humidity sensor is a **device item** (`plan.devices`),
+not a source, and a device item stands for a Home Assistant device rather than one entity:
+
+- An item has `entity_id` (the entity it was placed by, shown while the registry does not know the
+  device) and, for an entity that has a device, `device_id`. Its entities are its own `entity_id`
+  and the rest of the device's in `hass.entities`, without hidden and config/diagnostic ones, less
+  any placed as items of their own (`itemEntities` in `device-entities.ts`, cached per plan and
+  registry object). Helpers and template sensors have no device: their item is the one entity.
+- `layerData` takes, for each item, the first of its entities whose class fits the layer
+  (`layerOfState`): a multisensor's temperature feeds Temperature and its humidity Humidity, both
+  at the item's position, with the item's id as the reading id. So there is one value label per
+  active layer per device, drawn above its marker (`VALUE_OFFSET_PX` in `labels.ts`).
+- The marker shows the item's primary entity (`primaryEntity`): one it can control, else a binary
+  sensor, else a temperature, then humidity, then other sensor.
+- `planInputs` (which states a plan reads) and the History slider's entity list resolve items the
+  same way, so they take the registry along with the plan.
+- **Migration**: `normalizePlan` turns a version 1 plan's `sensor` sources into device items with
+  the same id and position (no registry needed, so a plan still loads before `hass` has one). The
+  registry part, `foldDevices`, runs where the plan meets `hass`: `PlanView.setPlan` (and again
+  when the registry changes) for what is shown, and the editor when it opens a plan or imports a
+  file, so the next save stores it. Items that name an entity of a device but not the device get
+  `device_id`; those of one device within 1 m (`FOLD_M`) become one item at their mean position
+  (the first one's id and entity); one near an item that already names the device folds into it,
+  and one far from the rest of its device stays on its own as a single-entity item. Folding a
+  folded plan returns it unchanged.
+
 ## What Phase 1 must provide
 
 - Plan coordinates in **metres**, from the plan scale.
@@ -358,7 +386,9 @@ changes sharply at a wall instead of smearing across it.
 - **Openings** (doors, windows) attached to a wall with their own material and an optional entity
   for open/closed state.
 - **Sources** placed on the plan with a floor: entity id, position, kind (`sensor`,
-  `access_point`, `radio`), and for radios a transmit power / reference loss.
+  `access_point`, `radio`), and for radios a transmit power / reference loss. Since schema version
+  2, temperature and humidity sensors are **device items** instead (see "Devices feed the
+  heatmaps"); `sources` holds access points and radios.
 - A **plan outline** (exterior polygon) so the outside fade knows what is inside.
 - Stable ids for walls and sources so the GPU buffers can be updated in place.
 

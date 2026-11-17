@@ -33,15 +33,20 @@ function worstCase(layer: 'signal' | 'temperature' = 'signal'): Record<string, u
     add([x + 0.2, y + 0.2], [x + 0.8, y + 0.8], 'partition', 0.08);
   }
   // For the temperature check the same spots hold temperature sensors (the example's, reused).
-  const temps = (FIXTURE.sources as { entity_id?: string }[])
-    .map((s) => s.entity_id ?? '')
+  const temps = (FIXTURE.devices as { entity_id: string }[])
+    .map((d) => d.entity_id)
     .filter((e) => /temperature/.test(e));
-  const sources = Array.from({ length: APS }, (_, i) => ({
+  const spots = Array.from({ length: APS }, (_, i) => ({
     id: `ap${i}`,
-    kind: layer === 'signal' ? (i % 2 ? 'radio' : 'access_point') : 'sensor',
-    entity_id: layer === 'signal' ? '' : temps[i % temps.length],
     position: [0.5 + ((i * 5) % 16), 0.5 + ((i * 3) % 12)] as Pt,
   }));
+  // Access points and radios are sources; temperature sensors are devices.
+  const sources =
+    layer === 'signal'
+      ? spots.map((s, i) => ({ ...s, kind: i % 2 ? 'radio' : 'access_point', entity_id: '' }))
+      : [];
+  const devices =
+    layer === 'signal' ? [] : spots.map((s, i) => ({ ...s, entity_id: temps[i % temps.length] }));
   walls.length = Math.min(walls.length, WALLS);
   return {
     ...FIXTURE,
@@ -58,7 +63,7 @@ function worstCase(layer: 'signal' | 'temperature' = 'signal'): Record<string, u
     doors: [],
     windows: [],
     sources,
-    devices: [],
+    devices,
   };
 }
 
@@ -84,7 +89,9 @@ async function measure(panel: Locator, renderer: 'webgl2' | 'canvas'): Promise<T
       heat.setRenderer(renderer as string);
       await heat.idle();
       const base = view.plan;
-      const sources = base['sources'] as { position: [number, number] }[];
+      // What moves: an access point, or a temperature sensor (a device).
+      const list = (base['sources'] as unknown[]).length ? 'sources' : 'devices';
+      const sources = base[list] as { position: [number, number] }[];
       const times: number[] = [];
       for (let i = 0; i <= (runs as number); i++) {
         // Move one access point a little: the whole field is traced again.
@@ -92,7 +99,7 @@ async function measure(panel: Locator, renderer: 'webgl2' | 'canvas'): Promise<T
           j === 0 ? { ...s, position: [s.position[0] + 0.01 * (i + 1), s.position[1]] } : s,
         );
         const t0 = performance.now();
-        heat.setPlan({ ...base, sources: moved });
+        heat.setPlan({ ...base, [list]: moved });
         await heat.idle();
         await window.chartroomDebug.readField(heat); // makes the GPU finish (readPixels)
         if (i) times.push(performance.now() - t0);

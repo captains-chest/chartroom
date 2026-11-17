@@ -125,8 +125,8 @@ async def test_save_refuses_a_bad_plan_id(
         ({}, "required key not provided at 'plan.name'. Got None"),
         ({"name": "Up", "floor_id": 3}, "expected str or None at 'plan.floor_id'. Got 3"),
         (
-            {"name": "Up", "schema_version": 2},
-            "unsupported schema_version 2 at 'plan.schema_version'. Got 2",
+            {"name": "Up", "schema_version": 1},
+            "unsupported schema_version 1 at 'plan.schema_version'. Got 1",
         ),
         (
             {"name": "Up", "schema_version": 0},

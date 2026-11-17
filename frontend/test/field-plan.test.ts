@@ -248,8 +248,8 @@ describe('example plan', () => {
       ),
     };
     const walls = barrierSegments(shut, hass as never);
-    const pts = plan.sources
-      .filter((s) => /temperature/.test(s.entity_id ?? '') && !drop.includes(s.id))
+    const pts = plan
+      .devices!.filter((s) => /temperature/.test(s.entity_id ?? '') && !drop.includes(s.id))
       .map((s) => s.position);
     return { walls, ...planField(pts, g, plan.outline, walls, rooms) };
   }

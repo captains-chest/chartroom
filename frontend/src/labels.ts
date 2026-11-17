@@ -24,9 +24,12 @@ export const AREA_SIZE = 0.24;
 
 /** Area labels go when they would be smaller than this on screen (px). */
 export const MIN_AREA_PX = 7;
-/** Value label offset from the sensor, and font size, in screen pixels. */
-export const VALUE_OFFSET_PX = 10;
-export const VALUE_BELOW_PX = 22;
+/**
+ * Value label offset from the sensor, and font size, in screen pixels: clear of its marker
+ * (MARKER_PX and its ring in markers.ts). plan-view.ts's styles hold the same offsets.
+ */
+export const VALUE_OFFSET_PX = 20;
+export const VALUE_BELOW_PX = 27;
 export const VALUE_FONT_PX = 12;
 
 interface Box {

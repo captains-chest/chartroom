@@ -89,8 +89,10 @@ export function validatePlan(plan: Plan): string[] {
     unique('device', d.id);
     if (!/^[a-z_]+\.[a-z0-9_]+$/.test(d.entity_id))
       problems.push(`device ${d.id}: bad entity_id ${d.entity_id}`);
-    if (placed.has(d.entity_id)) problems.push(`device ${d.id}: ${d.entity_id} is placed twice`);
-    placed.add(d.entity_id);
+    for (const key of [d.entity_id, d.device_id ? `device ${d.device_id}` : ''].filter(Boolean)) {
+      if (placed.has(key)) problems.push(`device ${d.id}: ${key} is placed twice`);
+      placed.add(key);
+    }
   }
   if (plan.outline.length < 3 && plan.walls.length > 0) {
     problems.push('outline has fewer than 3 corners');
@@ -101,22 +103,6 @@ export function validatePlan(plan: Plan): string[] {
 /** Access points and radios: the sources the signal layer traces rays from. */
 export const isSignalSource = (s: Source): boolean =>
   s.kind === 'access_point' || s.kind === 'radio';
-
-/**
- * The entities a plan reads: its sources', devices' and doors' and windows' (open or closed).
- * Sensors come first, apart, so history can fetch them as statistics.
- */
-export const planEntities = (plan: Plan | null): { sensors: string[]; others: string[] } => {
-  const sensors = new Set<string>();
-  const others = new Set<string>();
-  for (const s of plan?.sources ?? [])
-    if (s.entity_id) (s.kind === 'sensor' ? sensors : others).add(s.entity_id);
-  for (const d of plan?.devices ?? []) others.add(d.entity_id);
-  for (const o of [...(plan?.doors ?? []), ...(plan?.windows ?? [])])
-    if (o.entity_id) others.add(o.entity_id);
-  for (const id of sensors) others.delete(id);
-  return { sensors: [...sensors], others: [...others] };
-};
 
 /** Warnings for a plan (one floor) that is over the soft limits. */
 export function limitWarnings(plan: Plan): string[] {

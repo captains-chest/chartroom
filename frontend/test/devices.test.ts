@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { pointInPolygon } from '../src/geometry';
 import type { EntityState, Hass } from '../src/ha-types';
+import { foldDevices, itemEntities, itemPrimary } from '../src/device-entities';
 import { autoPlace, deviceChoices, deviceLook, spotsInRoom, tapAction } from '../src/devices';
 import { LIMITS } from '../src/plan/constants';
 import { emptyPlan, limitWarnings, validatePlan } from '../src/plan/functions';
@@ -122,8 +123,18 @@ const hass: Hass = {
       entity_category: 'config',
     },
     'light.hidden': { entity_id: 'light.hidden', area_id: 'kitchen', hidden: true },
+    'sensor.hood_temperature': { entity_id: 'sensor.hood_temperature', device_id: 'hood' },
+    'sensor.hood_humidity': { entity_id: 'sensor.hood_humidity', device_id: 'hood' },
+    'sensor.hood_battery': {
+      entity_id: 'sensor.hood_battery',
+      device_id: 'hood',
+      entity_category: 'diagnostic',
+    },
   },
-  devices: { dev1: { id: 'dev1', area_id: 'kitchen' } },
+  devices: {
+    dev1: { id: 'dev1', area_id: 'kitchen' },
+    hood: { id: 'hood', area_id: 'kitchen', name: 'Kitchen hood' },
+  },
   states: Object.fromEntries(
     [
       st('light.kitchen', 'on', undefined, 'Kitchen light'),
@@ -133,16 +144,30 @@ const hass: Hass = {
       st('switch.kitchen_identify', 'off'),
       st('light.hidden', 'off'),
       st('sensor.kitchen_temperature', '21', 'temperature'),
+      st('sensor.hood_humidity', '48', 'humidity'),
+      st('sensor.hood_temperature', '21.4', 'temperature'),
+      st('sensor.hood_battery', '90', 'battery'),
     ].map((x) => [x.entity_id, x]),
   ),
 };
 
 describe('deviceChoices', () => {
-  it('offers device domains on the floor, by name, skipping hidden and config entities', () => {
+  it('offers devices on the floor once each, by name, skipping hidden and config entities', () => {
     expect(deviceChoices(hass, 'ground')).toEqual([
-      { entity_id: 'binary_sensor.front_door', name: 'Front door', area_id: 'hall' },
-      { entity_id: 'switch.kettle', name: 'Kettle', area_id: 'kitchen' },
-      { entity_id: 'light.kitchen', name: 'Kitchen light', area_id: 'kitchen' },
+      {
+        entity_id: 'binary_sensor.front_door',
+        device_id: null,
+        name: 'Front door',
+        area_id: 'hall',
+      },
+      { entity_id: 'switch.kettle', device_id: 'dev1', name: 'Kettle', area_id: 'kitchen' },
+      {
+        entity_id: 'sensor.hood_temperature',
+        device_id: 'hood',
+        name: 'Kitchen hood',
+        area_id: 'kitchen',
+      },
+      { entity_id: 'light.kitchen', device_id: null, name: 'Kitchen light', area_id: 'kitchen' },
     ]);
   });
 
@@ -173,17 +198,18 @@ describe('autoPlace', () => {
   it('puts each device inside the room of its area, apart from each other', () => {
     const plan = roomsPlan();
     const spots = autoPlace(plan, deviceChoices(hass, 'ground'));
-    expect(spots.map((s) => s.entity_id).sort()).toEqual([
+    expect(spots.map((s) => s.choice.entity_id).sort()).toEqual([
       'binary_sensor.front_door',
       'light.kitchen',
+      'sensor.hood_temperature',
       'switch.kettle',
     ]);
     for (const s of spots) {
-      const area = hass.entities![s.entity_id]!.area_id ?? 'kitchen';
+      const area = hass.entities![s.choice.entity_id]!.area_id ?? 'kitchen';
       const room = plan.rooms.find((r) => r.area_ids?.includes(area))!;
       expect(pointInPolygon(s.position, room.polygon)).toBe(true);
     }
-    const [a, b] = spots.filter((s) => s.entity_id !== 'binary_sensor.front_door');
+    const [a, b] = spots.filter((s) => s.choice.entity_id !== 'binary_sensor.front_door');
     expect(
       Math.hypot(a!.position[0] - b!.position[0], a!.position[1] - b!.position[1]),
     ).toBeGreaterThan(0.3);
@@ -198,9 +224,10 @@ describe('autoPlace', () => {
       ],
     };
     const spots = autoPlace(plan, deviceChoices(hass, 'ground'));
-    expect(spots.map((s) => s.entity_id).sort()).toEqual([
+    expect(spots.map((s) => s.choice.entity_id).sort()).toEqual([
       'binary_sensor.front_door',
       'light.kitchen',
+      'sensor.hood_temperature',
       'switch.kettle',
     ]);
     for (const s of spots) expect(pointInPolygon(s.position, plan.rooms[0]!.polygon)).toBe(true);
@@ -219,16 +246,16 @@ describe('autoPlace', () => {
     });
     expect(
       autoPlace(plan, deviceChoices(hass, 'ground'))
-        .map((s) => s.entity_id)
+        .map((s) => s.choice.entity_id)
         .sort(),
-    ).toEqual(['light.kitchen', 'switch.kettle']);
+    ).toEqual(['light.kitchen', 'sensor.hood_temperature', 'switch.kettle']);
   });
 
   it('skips devices already on the plan and areas without a room', () => {
     const plan = addDevice(roomsPlan(), 'light.kitchen', [1, 1]).plan;
     const spots = autoPlace(plan, deviceChoices(hass, null));
-    expect(spots.map((s) => s.entity_id)).not.toContain('light.kitchen');
-    expect(spots.map((s) => s.entity_id)).not.toContain('light.attic');
+    expect(spots.map((s) => s.choice.entity_id)).not.toContain('light.kitchen');
+    expect(spots.map((s) => s.choice.entity_id)).not.toContain('light.attic');
   });
 
   it('keeps off the room name and area label', () => {
@@ -241,6 +268,56 @@ describe('autoPlace', () => {
     const spots = spotsInRoom(square(0, 0, 3), 5, [[1.5, 1.5]]);
     expect(spots).toHaveLength(5);
     for (const p of spots) expect(Math.hypot(p[0] - 1.5, p[1] - 1.5)).toBeGreaterThan(0.3);
+  });
+});
+
+describe('plans from before items named devices', () => {
+  it('fold the sensors of one device placed side by side into one item at their middle', () => {
+    const v1 = {
+      schema_version: 1,
+      name: 'Old',
+      outline: [],
+      walls: [],
+      rooms: [],
+      doors: [],
+      windows: [],
+      sources: [
+        {
+          id: 'hood_t',
+          kind: 'sensor',
+          entity_id: 'sensor.hood_temperature',
+          position: [4.51, 0.35],
+        },
+        { id: 'hood_h', kind: 'sensor', entity_id: 'sensor.hood_humidity', position: [4.71, 0.35] },
+        { id: 'loose', kind: 'sensor', entity_id: 'sensor.kitchen_temperature', position: [1, 1] },
+        { id: 'ap', kind: 'access_point', entity_id: '', position: [2, 2], tx_dbm: -40 },
+      ],
+      devices: [{ id: 'lamp', entity_id: 'light.kitchen', position: [3, 3] }],
+    };
+    const plan = normalizePlan(v1);
+    expect(plan.schema_version).toBe(2);
+    expect(plan.sources.map((x) => x.id)).toEqual(['ap']);
+    // Without the registry the sensors are items of their own, where they were.
+    expect(plan.devices!.map((d) => d.id)).toEqual(['lamp', 'hood_t', 'hood_h', 'loose']);
+    const folded = foldDevices(plan, hass);
+    expect(folded.devices).toEqual([
+      { id: 'lamp', entity_id: 'light.kitchen', position: [3, 3] },
+      {
+        id: 'hood_t',
+        entity_id: 'sensor.hood_temperature',
+        device_id: 'hood',
+        position: [4.61, 0.35],
+      },
+      { id: 'loose', entity_id: 'sensor.kitchen_temperature', position: [1, 1] },
+    ]);
+    // The diagnostic battery is not one of the item's entities; the marker shows the temperature.
+    expect(itemEntities(folded, hass).get('hood_t')).toEqual([
+      'sensor.hood_temperature',
+      'sensor.hood_humidity',
+    ]);
+    expect(itemPrimary(folded, hass, folded.devices![1]!)).toBe('sensor.hood_temperature');
+    expect(foldDevices(folded, hass)).toBe(folded);
+    expect(validatePlan(folded)).toEqual([]);
   });
 });
 

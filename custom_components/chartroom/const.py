@@ -18,9 +18,10 @@ PLAN_ID_RE: Final = re.compile(rf"\A{_PLAN_ID}\Z")
 STORAGE_KEY: Final = f"{DOMAIN}.plans"
 STORAGE_VERSION: Final = 1
 # The plan schema_version this build accepts on save. The plan schema and its migrations live in
-# the frontend (frontend/src/plan/schema.ts); a plan without the field predates it and counts as
-# this version.
-PLAN_SCHEMA_VERSION: Final = 1
+# the frontend (frontend/src/plan/schema.ts): stored plans of older versions are served as they are,
+# and the frontend migrates them on load and saves them back at this version. A plan without the
+# field is stored as sent (the frontend reads it as version 1).
+PLAN_SCHEMA_VERSION: Final = 2
 
 PANEL_URL_PATH: Final = "chartroom"
 PANEL_ELEMENT: Final = "chartroom-panel"

@@ -3,7 +3,8 @@
 // plan and a plan file both come in through `parsePlan`; `validatePlan` (functions.ts) then checks
 // what holds across items (references, ranges) and trusts the types checked here.
 //
-// To add a field: its type in models.ts, its check below.
+// To add a field: its type in models.ts, its check below. A change older plans need migrating for
+// bumps PLAN_SCHEMA_VERSION and adds a step to `migrate`.
 import { PLAN_SCHEMA_VERSION } from './constants';
 import { uniqueIds } from './functions';
 import type { Plan, Room } from './models';
@@ -62,7 +63,7 @@ export const PLAN_LISTS: Readonly<Record<string, ListSpec>> = {
   sources: {
     fields: {
       id: str,
-      kind: (v) => v === 'sensor' || v === 'access_point' || v === 'radio',
+      kind: (v) => v === 'access_point' || v === 'radio',
       entity_id: str,
       position: pt,
       area_id: optStr,
@@ -70,7 +71,10 @@ export const PLAN_LISTS: Readonly<Record<string, ListSpec>> = {
     },
   },
   // Plans from before device markers have none: an empty list.
-  devices: { fields: { id: str, entity_id: str, position: pt }, optional: 'fill' },
+  devices: {
+    fields: { id: str, entity_id: str, device_id: optStr, position: pt },
+    optional: 'fill',
+  },
   materials: { fields: { id: str, name: str, db_per_cm: num }, optional: 'leave' },
 };
 
@@ -84,15 +88,40 @@ const UNDERLAY: Readonly<Record<string, Check>> = {
 };
 
 /**
- * A stored plan as the panel uses it: missing lists filled in, legacy forms folded in, the storage
- * `id` and any extra keys kept as they are. Values of the wrong type are kept for `shapeProblems`
- * to report. Throws on something that is not a plan, or a schema version this build does not know.
+ * Version 1 to 2: temperature and humidity sensors were `sources` of kind `sensor`; they become
+ * device items, after the plan's devices, with the same id and position. One without an entity
+ * showed nothing and goes, as does one whose entity is already placed. Items of a damaged list are
+ * left for `shapeProblems`. Sensors of one Home Assistant device stay apart here: folding them into
+ * one item needs the entity registry (foldDevices in device-entities.ts).
  */
-export function normalizePlan(raw: unknown): Plan {
-  if (!isObject(raw)) throw new Error('not a plan');
-  const version = raw['schema_version'] ?? PLAN_SCHEMA_VERSION;
-  if (version !== PLAN_SCHEMA_VERSION)
+function migrateV1(raw: Record<string, unknown>): Record<string, unknown> {
+  const sources = raw['sources'];
+  if (!Array.isArray(sources)) return raw;
+  const isSensor = (s: unknown): s is Record<string, unknown> =>
+    isObject(s) && s['kind'] === 'sensor';
+  const devices = Array.isArray(raw['devices']) ? [...(raw['devices'] as unknown[])] : [];
+  const placed = new Set(devices.map((d) => (isObject(d) ? d['entity_id'] : undefined)));
+  for (const s of sources.filter(isSensor)) {
+    const entity = s['entity_id'];
+    if (typeof entity !== 'string' || entity === '' || placed.has(entity)) continue;
+    placed.add(entity);
+    devices.push({ id: s['id'], entity_id: entity, position: s['position'] });
+  }
+  return { ...raw, sources: sources.filter((s) => !isSensor(s)), devices };
+}
+
+/**
+ * A stored plan as the panel uses it: migrated to this schema version, missing lists filled in,
+ * legacy forms folded in, the storage `id` and any extra keys kept as they are. Values of the
+ * wrong type are kept for `shapeProblems` to report. Throws on something that is not a plan, or a
+ * schema version this build does not know. A plan without a version predates versions: version 1.
+ */
+export function normalizePlan(input: unknown): Plan {
+  if (!isObject(input)) throw new Error('not a plan');
+  const version = input['schema_version'] ?? 1;
+  if (version !== 1 && version !== PLAN_SCHEMA_VERSION)
     throw new Error(`unsupported schema_version ${JSON.stringify(version)}`);
+  const raw = version === 1 ? migrateV1(input) : input;
   const out: Record<string, unknown> = {
     ...raw,
     schema_version: PLAN_SCHEMA_VERSION,

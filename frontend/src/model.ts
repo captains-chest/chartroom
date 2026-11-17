@@ -1,5 +1,4 @@
 import type { AreaEntry, Hass, PlanSummary } from './ha-types';
-import type { SourceKind } from './plan/types';
 
 export interface FloorGroup {
   id: string | null;
@@ -116,32 +115,16 @@ export interface EntityChoice {
   area_id: string | null;
 }
 
-/** Device classes each kind of source is picked from (empty: any entity). */
-const SOURCE_CLASSES: Record<SourceKind, readonly string[]> = {
-  sensor: ['temperature', 'humidity'],
-  access_point: [],
-  radio: [],
-};
-
 /**
- * Entities to place as a source: temperature and humidity sensors for `sensor`, any entity for
- * access points and radios. On a plan with a floor, only entities in that floor's areas.
+ * Entities to place as an access point or radio: any entity (its state says whether it is up). On a
+ * plan with a floor, only entities in that floor's areas.
  */
-export function sourceChoices(
-  hass: Hass | undefined,
-  kind: SourceKind,
-  floorId: string | null,
-): EntityChoice[] {
-  const classes = SOURCE_CLASSES[kind];
+export function sourceChoices(hass: Hass | undefined, floorId: string | null): EntityChoice[] {
   const areas = hass?.areas ?? {};
   const onFloor = (area: string | null): boolean =>
     !floorId || (area !== null && areas[area]?.floor_id === floorId);
   const out: EntityChoice[] = [];
   for (const st of Object.values(hass?.states ?? {})) {
-    if (classes.length > 0) {
-      if (!st.entity_id.startsWith('sensor.')) continue;
-      if (!classes.includes(st.attributes.device_class ?? '')) continue;
-    }
     const area = entityArea(hass, st.entity_id);
     if (!onFloor(area)) continue;
     out.push({

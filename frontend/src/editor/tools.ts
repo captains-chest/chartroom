@@ -84,8 +84,15 @@ export function closeRoom(s: ToolState, plan: Plan): ToolResult {
     : { state: { ...s, draft: [] } };
 }
 
-export const placeDevice = (s: ToolState, plan: Plan, entity: string, p: Point): ToolResult => {
-  const r = addDevice(plan, entity, p);
+/** Place the device `entity` is the marker entity of (`device_id`; null: an entity without one). */
+export const placeDevice = (
+  s: ToolState,
+  plan: Plan,
+  entity: string,
+  p: Point,
+  device_id: string | null,
+): ToolResult => {
+  const r = addDevice(plan, entity, p, device_id);
   return { state: { ...s, armed: null, selection: { kind: 'device', id: r.id } }, commit: r.plan };
 };
 
@@ -152,7 +159,9 @@ export function down(s: ToolState, ctx: ToolContext, ptr: Pointer): ToolResult {
     }
     case 'device':
       if (ptr.hit?.kind === 'device') return selectDown(s, ctx, ptr);
-      return s.armed ? placeDevice(s, plan, s.armed, p) : { state: s, pass: true };
+      return s.armed
+        ? placeDevice(s, plan, s.armed, p, ctx.deviceOf(s.armed))
+        : { state: s, pass: true };
     case 'measure': {
       const q = snapped(s, plan, radius, p, true).point;
       const state: ToolState =

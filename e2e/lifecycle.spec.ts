@@ -105,7 +105,7 @@ test('a re-attached panel still draws its heatmap and mesh', async ({ page }) =>
     const panel = page.locator('chartroom-panel');
     await panel.locator('[role=tab][data-plan=example]').click();
     await expect(panel.locator('svg.plan [data-kind=room]')).toHaveCount(5);
-    await panel.getByRole('button', { name: 'Temperature' }).click();
+    await panel.getByRole('button', { name: 'Temperature', exact: true }).click();
     await panel.getByRole('button', { name: 'Mesh' }).click();
     const settled = (): Promise<number> =>
       panel.evaluate(async (el) => {

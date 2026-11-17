@@ -1,6 +1,7 @@
 // The plan editor: the controller that wires the editing session (editor/session.ts), the tools
 // (editor/tools.ts), the inspector's panels (editor/panels/) and plan files (editor/file-actions.ts)
 // to the plan view, pointer and keyboard. Loaded on demand by the panel (its own chunk).
+import { foldDevices, itemPrimary } from './device-entities';
 import { autoPlace, deviceChoices } from './devices';
 import { download, exportFiles, type ExportMode, readImport } from './editor/file-actions';
 import { Inspector, type Part } from './editor/inspector';
@@ -31,7 +32,7 @@ import {
 } from './editor/tools';
 import type { Kind, Tool } from './editor/types';
 import type { Hass } from './ha-types';
-import { entityArea, sourceChoices } from './model';
+import { sourceChoices } from './model';
 import type { Plan } from './plan/models';
 import type { Point, SourceKind } from './plan/types';
 import { addDevice, addSource } from './plan/ops';
@@ -76,12 +77,12 @@ const TOOLS: { tool: Tool; key: string; hint: string }[] = [
   {
     tool: 'source',
     key: 's',
-    hint: 'Click to place a sensor, access point or radio; pick its entity on the right.',
+    hint: 'Click to place an access point or radio; pick its entity on the right.',
   },
   {
     tool: 'device',
     key: 'e',
-    hint: 'Drag an entity from the list onto the plan, or pick it and click. Auto-place uses areas.',
+    hint: 'Drag a device or sensor from the list onto the plan, or pick it and click. Auto-place uses areas.',
   },
   {
     tool: 'measure',
@@ -118,7 +119,7 @@ export class PlanEditor {
   /** A drag's render waiting for the next frame (#renderSoon). */
   #frame = 0;
   /** What the Source tool places next. */
-  #sourceKind: SourceKind = 'sensor';
+  #sourceKind: SourceKind = 'access_point';
   #note = '';
   /** What the last plan import or export said: problems (`error`) or notes. */
   #fileReport: { error: boolean; lines: string[] } | null = null;
@@ -131,14 +132,17 @@ export class PlanEditor {
     const entity = e.dataTransfer?.getData(ENTITY_MIME);
     if (!entity) return;
     e.preventDefault();
-    this.#apply(placeDevice(this.#s, this.plan, entity, this.#view.toPlan(e)));
+    this.#apply(
+      placeDevice(this.#s, this.plan, entity, this.#view.toPlan(e), this.#deviceOf(entity)),
+    );
   };
 
   constructor(host: EditorHost) {
     this.#host = host;
     this.#view = host.view;
     this.#session = new EditSession({
-      plan: host.plan,
+      // Sensors of one device placed apart (older plans) as one item: the next save stores it so.
+      plan: foldDevices(host.plan, host.hass()),
       save: (plan) => host.save(plan),
       status: (text, error) => this.#setSaveState(text, error),
       connection: host.hass()?.connection,
@@ -248,6 +252,7 @@ export class PlanEditor {
       plan: this.plan,
       radius: SNAP_PX * this.#view.mpp,
       addSource: (plan, p) => this.#addSource(plan, p),
+      deviceOf: (entity) => this.#deviceOf(entity),
     };
   }
 
@@ -485,8 +490,7 @@ export class PlanEditor {
       case 'room':
         return [hass?.areas];
       case 'source': {
-        const src = plan.sources.find((x) => x.id === sel.id);
-        const choices = src ? sourceChoices(hass, src.kind, plan.floor_id ?? null) : [];
+        const choices = sourceChoices(hass, plan.floor_id ?? null);
         return [
           hass?.areas,
           hass?.entities,
@@ -501,7 +505,8 @@ export class PlanEditor {
           hass?.entities,
           hass?.devices,
           this.#deviceListKey(),
-          dev && hass?.states?.[dev.entity_id],
+          dev && itemPrimary(plan, hass, dev),
+          dev && hass?.states?.[itemPrimary(plan, hass, dev)],
         ];
       }
       default:
@@ -550,7 +555,7 @@ export class PlanEditor {
     // Drop the old plan's selection, drafts and measurement, keeping the tool.
     this.#s = { ...initialState, tool: this.#s.tool };
     if (r.image) this.#underlay.put(r.image.url, r.image.blob);
-    this.#commit(r.plan);
+    this.#commit(foldDevices(r.plan, this.#host.hass()));
     this.#report(false, [`Imported ${r.file.name}.`, ...r.notes]);
     this.#view.fit();
     return null;
@@ -569,18 +574,13 @@ export class PlanEditor {
     }
   }
 
-  /** A new source at `p`: a sensor takes the first one on this floor not placed yet. */
+  /** A new access point or radio at `p`, its entity picked afterwards. */
   #addSource(plan: Plan, p: Point): { plan: Plan; id: string } {
-    const kind = this.#sourceKind;
-    let entity = '';
-    if (kind === 'sensor') {
-      const placed = new Set(plan.sources.map((x) => x.entity_id));
-      entity =
-        sourceChoices(this.#host.hass(), kind, plan.floor_id ?? null).find(
-          (c) => !placed.has(c.entity_id),
-        )?.entity_id ?? '';
-    }
-    return addSource(plan, kind, p, entity, entity ? entityArea(this.#host.hass(), entity) : null);
+    return addSource(plan, this.#sourceKind, p);
+  }
+
+  #deviceOf(entity: string): string | null {
+    return this.#host.hass()?.entities?.[entity]?.device_id ?? null;
   }
 
   // ---- devices ----
@@ -590,7 +590,7 @@ export class PlanEditor {
   }
 
   #deviceListKey(): string {
-    const placed = (this.plan.devices ?? []).map((d) => d.entity_id).join();
+    const placed = (this.plan.devices ?? []).map((d) => `${d.entity_id}/${d.device_id}`).join();
     const choices = this.#deviceChoices()
       .map((c) => `${c.entity_id}=${c.name}@${c.area_id}`)
       .join();
@@ -600,7 +600,8 @@ export class PlanEditor {
   #autoPlace(): void {
     const spots = autoPlace(this.plan, this.#deviceChoices());
     let plan = this.plan;
-    for (const s of spots) plan = addDevice(plan, s.entity_id, s.position).plan;
+    for (const s of spots)
+      plan = addDevice(plan, s.choice.entity_id, s.position, s.choice.device_id).plan;
     this.#note =
       spots.length > 0
         ? `Placed ${count(spots.length, 'device')} in their rooms. Drag them where they really are.`

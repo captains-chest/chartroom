@@ -157,12 +157,12 @@ export function boundsOf(points: Iterable<Point>): Bounds | null {
   return b;
 }
 
-/** Everything drawn: walls (with thickness), rooms, outline, sources and the underlay. */
+/** Everything drawn: walls (with thickness), rooms, outline, sources, devices and the underlay. */
 export function planBounds(plan: Plan): Bounds | null {
   const pts: Point[] = [...plan.outline];
   for (const w of plan.walls) pts.push(...wallRect(w, 0, frame(w).length, true, true));
   for (const r of plan.rooms) pts.push(...r.polygon);
-  for (const s of plan.sources) pts.push(s.position);
+  for (const s of [...plan.sources, ...(plan.devices ?? [])]) pts.push(s.position);
   const u = plan.underlay;
   if (u) {
     pts.push(u.origin, add(u.origin, [u.width_px * u.scale, u.height_px * u.scale]));

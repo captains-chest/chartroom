@@ -60,7 +60,7 @@ export const qualityColour = (q: number | null): string =>
 
 /**
  * The links whose two ends are both on the plan. A node is placed where a device marker or source
- * shows one of its entities, or any entity of its Home Assistant device.
+ * shows one of its entities, or its Home Assistant device (named by the marker, or an entity's).
  */
 export function placeLinks(topology: Topology, plan: Plan, hass: Hass | undefined): PlacedLink[] {
   const byEntity = new Map<string, Point>();
@@ -68,7 +68,7 @@ export function placeLinks(topology: Topology, plan: Plan, hass: Hass | undefine
   for (const p of [...(plan.devices ?? []), ...plan.sources]) {
     if (!p.entity_id) continue;
     if (!byEntity.has(p.entity_id)) byEntity.set(p.entity_id, p.position);
-    const dev = hass?.entities?.[p.entity_id]?.device_id;
+    const dev = ('device_id' in p && p.device_id) || hass?.entities?.[p.entity_id]?.device_id;
     if (dev && !byDevice.has(dev)) byDevice.set(dev, p.position);
   }
   const at = new Map<string, Point>();

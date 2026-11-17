@@ -50,8 +50,8 @@ function setup(): { plan: Plan; hass: Hass } {
       tx_dbm: -30,
     },
     { id: 'r', kind: 'radio', entity_id: '', position: [1, 0.5] },
-    { id: 's', kind: 'sensor', entity_id: 'sensor.t', position: [2, 2] },
   ];
+  plan.devices = [{ id: 's', entity_id: 'sensor.t', position: [2, 2] }];
   const hass: Hass = {
     states: {
       'binary_sensor.door': { entity_id: 'binary_sensor.door', state: 'off', attributes: {} },

@@ -255,7 +255,8 @@ const rooms = ROOMS.map((r) => ({
   area_ids: SAMPLE.filter((s) => s.room === r.id).map((s) => s.area),
 }));
 
-const sources = SAMPLE.flatMap((s, i) => {
+// Template sensors have no Home Assistant device, so each is a device item of its own.
+const devices = SAMPLE.flatMap((s) => {
   const pts = roomPx.get(s.room);
   const xs = pts.map((p) => p[0]);
   const ys = pts.map((p) => p[1]);
@@ -269,16 +270,13 @@ const sources = SAMPLE.flatMap((s, i) => {
   // Sensors of one area sit side by side, 0.25 m apart, so markers don't overlap.
   return s.entities.map((e, j) => ({
     id: e,
-    kind: 'sensor',
     entity_id: `sensor.${e}`,
     position: m([base[0] + (j - (s.entities.length - 1) / 2) * 0.25 * PX_PER_M, base[1]]),
-    area_id: s.area,
-    order: i,
   }));
-}).map(({ order: _order, ...s }) => s);
+});
 
 const plan = {
-  schema_version: 1,
+  schema_version: 2,
   name: 'Example flat (traced fixture)',
   floor_id: null,
   outline: OUTLINE.map(m),
@@ -286,7 +284,8 @@ const plan = {
   rooms,
   doors,
   windows,
-  sources,
+  sources: [],
+  devices,
   // Not part of the plan model: provenance and the stated areas the fixture test checks against.
   meta: {
     traced_px_per_m: mm(PX_PER_M),

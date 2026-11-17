@@ -33,7 +33,7 @@ const RECORDED = '15';
 
 function sensorPlan(name = 'Home'): Plan {
   const p = emptyPlan(name);
-  p.sources = [{ id: 't', kind: 'sensor', entity_id: 'sensor.t', position: [1, 1] }];
+  p.devices = [{ id: 't', entity_id: 'sensor.t', position: [1, 1] }];
   return p;
 }
 

@@ -15,7 +15,7 @@ function plan(): Plan {
     [4, 0],
     [4, 3],
   ]).plan;
-  p = addSource(p, 'sensor', [1, 1], 'sensor.t').plan;
+  p = addSource(p, 'radio', [1, 1], 'sensor.t').plan;
   return addDevice(p, 'light.a', [2, 2]).plan;
 }
 
@@ -24,7 +24,7 @@ const IDS: Record<Kind, string> = {
   room: 'room_1',
   door: 'door_1',
   window: 'window_1',
-  source: 'sensor_1',
+  source: 'radio_1',
   device: 'device_1',
 };
 

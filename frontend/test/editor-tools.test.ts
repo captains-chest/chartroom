@@ -24,7 +24,8 @@ const RADIUS = 0.1;
 const ctx = (plan: Plan): ToolContext => ({
   plan,
   radius: RADIUS,
-  addSource: (p, at) => addSource(p, 'sensor', at, 'sensor.t'),
+  addSource: (p, at) => addSource(p, 'radio', at, 'sensor.t'),
+  deviceOf: () => null,
 });
 
 /** A 4 x 3 m box of 20 cm exterior walls. */
@@ -198,7 +199,7 @@ describe('device tool', () => {
   });
 
   it('places a dropped entity', () => {
-    const r = placeDevice(tool('device'), box(), 'light.b', [2, 2]);
+    const r = placeDevice(tool('device'), box(), 'light.b', [2, 2], null);
     expect(r.commit?.devices?.[0]).toMatchObject({ entity_id: 'light.b', position: [2, 2] });
   });
 

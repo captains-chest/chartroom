@@ -64,7 +64,10 @@ test('the history slider shows readings and devices as they were, then returns t
     ...FIXTURE,
     name: 'E2E history',
     floor_id: null,
-    devices: [{ id: 'win', entity_id: 'binary_sensor.kitchen_window', position: [6.4, 1.2] }],
+    devices: [
+      ...FIXTURE.devices,
+      { id: 'win', entity_id: 'binary_sensor.kitchen_window', position: [6.4, 1.2] },
+    ],
   });
   const wasTemp = Number(await state(TEMP));
   const wasWindow = (await state(WINDOW)) === 'on';
@@ -85,8 +88,8 @@ test('the history slider shows readings and devices as they were, then returns t
     const panel = page.locator('chartroom-panel');
     await panel.locator(`[role=tab][data-plan="${PLAN}"]`).click();
     await expect(panel).toHaveAttribute('data-plan', PLAN);
-    await panel.getByRole('button', { name: 'Temperature' }).click();
-    const marker = panel.locator('svg.plan .device');
+    await panel.getByRole('button', { name: 'Temperature', exact: true }).click();
+    const marker = panel.locator('svg.plan g.device[data-entity="binary_sensor.kitchen_window"]');
     await expect(marker).toHaveClass(/\boff\b/);
 
     const open = panel.getByRole('button', { name: 'History' });

@@ -287,7 +287,6 @@ test.describe('plan editor', () => {
 test.describe('sources', () => {
   const PLAN_ID = 'e2e-sources';
   test.beforeEach(async () => {
-    // On the ground floor, so the sensor list is filtered to its areas.
     await savePlan(token(), PLAN_ID, {
       ...FIXTURE,
       name: 'E2E sources',
@@ -299,27 +298,27 @@ test.describe('sources', () => {
     await deletePlan(token(), PLAN_ID);
   });
 
-  test('sensors and access points are placed, moved, deleted and saved', async ({ page }) => {
+  test('radios and access points are placed, moved, deleted and saved', async ({ page }) => {
     const panel = await openPlan(page, PLAN_ID);
     await startEditing(panel);
     const inspector = panel.locator('.inspector');
 
-    // A sensor: only temperature and humidity sensors in the floor's areas are offered.
+    // A radio: any entity, its area from Home Assistant, a default level at 1 m.
     await page.keyboard.press('s');
     await expect(inspector.locator('section[data-panel=new-source]')).toBeVisible();
+    const kinds = await inspector
+      .locator('select[name=source-kind] option')
+      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
+    // Temperature and humidity sensors are devices now (the Device tool).
+    expect(kinds).toEqual(['access_point', 'radio']);
+    await inspector.locator('select[name=source-kind]').selectOption('radio');
     await clickAt(page, panel, [2, 2]);
     await expect(inspector.locator('section[data-panel=source]')).toBeVisible();
-    const entity = inspector.locator('select[name=entity]');
-    const offered = await entity
-      .locator('option')
-      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
-    expect(offered).toContain('sensor.kitchen_temperature');
-    expect(offered).toContain('sensor.kitchen_humidity');
-    expect(offered).not.toContain('sensor.bedroom_temperature');
-    expect(offered).not.toContain('sensor.hall_sensor_rssi');
-    await entity.selectOption('sensor.kitchen_temperature');
-    await expect(inspector.locator('[data-area]')).toHaveAttribute('data-area', 'kitchen');
-    const sensorId = (await livePlan(panel)).sources[0]!.id;
+    await expect(inspector.locator('input[name=tx-dbm]')).toHaveValue('-45');
+    await inspector.locator('input[name=entity]').fill('sensor.hall_sensor_rssi');
+    await inspector.locator('input[name=entity]').press('Enter');
+    await expect(inspector.locator('[data-area]')).toHaveAttribute('data-area', 'hall');
+    const radioId = (await livePlan(panel)).sources[0]!.id;
 
     // Drag it a metre right and down.
     const [sx, sy] = await toScreen(panel, [2, 2]);
@@ -336,13 +335,10 @@ test.describe('sources', () => {
     await inspector.locator('select[name=source-kind]').selectOption('access_point');
     await clickAt(page, panel, [5, 2]);
     await expect(inspector.locator('input[name=tx-dbm]')).toHaveValue('-40');
-    await inspector.locator('input[name=entity]').fill('sensor.hall_sensor_rssi');
-    await inspector.locator('input[name=entity]').press('Enter');
     await expect
       .poll(async () => (await livePlan(panel)).sources.map((s) => s.kind))
-      .toEqual(['sensor', 'access_point']);
+      .toEqual(['radio', 'access_point']);
     await expect(panel.locator('svg.plan .source.access_point')).toHaveCount(1);
-    await expect(inspector.locator('[data-area]')).toHaveAttribute('data-area', 'hall');
     await shot(page, 'editor-sources.png');
 
     // Select it on the plan and delete it.
@@ -355,11 +351,12 @@ test.describe('sources', () => {
     const stored = await getPlan<PlanLike>(token(), PLAN_ID);
     expect(stored.sources).toEqual([
       {
-        id: sensorId,
-        kind: 'sensor',
-        entity_id: 'sensor.kitchen_temperature',
+        id: radioId,
+        kind: 'radio',
+        entity_id: 'sensor.hall_sensor_rssi',
         position: [3, 3],
-        area_id: 'kitchen',
+        area_id: 'hall',
+        tx_dbm: -45,
       },
     ]);
   });

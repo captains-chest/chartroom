@@ -15,7 +15,7 @@ import {
 } from '../geometry';
 import { DEFAULT_TX_DBM } from './constants';
 import { uniqueIds } from './functions';
-import type { Door, Material, Opening, Plan, Room, Source, Wall } from './models';
+import type { Device, Door, Material, Opening, Plan, Room, Source, Wall } from './models';
 import type { OpeningKind, Point, SourceKind, Window } from './types';
 
 /** What new walls, doors and windows start with (metres). */
@@ -345,7 +345,7 @@ export function setMaterial(plan: Plan, material: Material): Plan {
   };
 }
 
-/** Place a source; access points and radios get a default reference level. */
+/** Place an access point or radio, with the default reference level. */
 export function addSource(
   plan: Plan,
   kind: SourceKind,
@@ -353,10 +353,10 @@ export function addSource(
   entity_id = '',
   area_id: string | null = null,
 ): { plan: Plan; id: string } {
-  const id = nextId(plan, kind === 'sensor' ? 'sensor' : kind);
+  const id = nextId(plan, kind);
   const source: Source = { id, kind, entity_id, position: roundPointToMm(position) };
   if (area_id) source.area_id = area_id;
-  if (kind !== 'sensor') source.tx_dbm = DEFAULT_TX_DBM[kind];
+  source.tx_dbm = DEFAULT_TX_DBM[kind];
   return { plan: { ...plan, sources: [...plan.sources, source] }, id };
 }
 
@@ -367,14 +367,13 @@ export function moveSource(plan: Plan, id: string, to: Point): Plan {
   };
 }
 
-/** Change a source. Switching to a sensor drops `tx_dbm`; switching away adds the default. */
+/** Change a source. One without a reference level gets the default. */
 export function updateSource(plan: Plan, id: string, patch: Partial<Omit<Source, 'id'>>): Plan {
   return {
     ...plan,
     sources: updateById(plan.sources, id, (x) => {
       const next: Source = { ...x, ...patch };
-      if (next.kind === 'sensor') delete next.tx_dbm;
-      else if (next.tx_dbm === undefined) next.tx_dbm = DEFAULT_TX_DBM[next.kind];
+      if (next.tx_dbm === undefined) next.tx_dbm = DEFAULT_TX_DBM[next.kind];
       if (!next.area_id) delete next.area_id;
       return next;
     }),
@@ -387,20 +386,25 @@ export function deleteSource(plan: Plan, id: string): Plan {
 
 // ---- devices ----
 
-/** Place an entity as a device marker. An entity already on the plan is moved instead. */
+/**
+ * Place a Home Assistant device (by `entity_id`, the entity its marker shows), or an entity without
+ * one, as a device marker. One already on the plan is moved instead.
+ */
 export function addDevice(
   plan: Plan,
   entity_id: string,
   position: Point,
+  device_id: string | null = null,
 ): { plan: Plan; id: string } {
   const devices = plan.devices ?? [];
-  const existing = devices.find((d) => d.entity_id === entity_id);
+  const existing = devices.find((d) =>
+    device_id ? d.device_id === device_id : d.entity_id === entity_id,
+  );
   if (existing) return { plan: moveDevice(plan, existing.id, position), id: existing.id };
   const id = nextId(plan, 'device');
-  return {
-    plan: { ...plan, devices: [...devices, { id, entity_id, position: roundPointToMm(position) }] },
-    id,
-  };
+  const device: Device = { id, entity_id, position: roundPointToMm(position) };
+  if (device_id) device.device_id = device_id;
+  return { plan: { ...plan, devices: [...devices, device] }, id };
 }
 
 export function moveDevice(plan: Plan, id: string, to: Point): Plan {
@@ -410,8 +414,19 @@ export function moveDevice(plan: Plan, id: string, to: Point): Plan {
   };
 }
 
-export function updateDevice(plan: Plan, id: string, entity_id: string): Plan {
-  return { ...plan, devices: updateById(plan.devices ?? [], id, (d) => ({ ...d, entity_id })) };
+/** Show another device (or entity without one) at the item's place. */
+export function updateDevice(
+  plan: Plan,
+  id: string,
+  entity_id: string,
+  device_id: string | null = null,
+): Plan {
+  return {
+    ...plan,
+    devices: updateById(plan.devices ?? [], id, ({ device_id: _old, ...d }) =>
+      device_id ? { ...d, entity_id, device_id } : { ...d, entity_id },
+    ),
+  };
 }
 
 export function deleteDevice(plan: Plan, id: string): Plan {

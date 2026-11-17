@@ -191,7 +191,8 @@ async def test_info_reports_the_version(hass: HomeAssistant, hass_ws_client) -> 
     ("schema_version", "accepted"),
     [
         (PLAN_SCHEMA_VERSION, True),
-        (2, False),
+        (1, False),
+        (3, False),
         (0, False),
         ("1", False),
         (1.0, False),
@@ -218,7 +219,7 @@ async def test_save_checks_schema_version(
 async def test_save_accepts_plan_without_schema_version(
     hass: HomeAssistant, hass_ws_client
 ) -> None:
-    """Plans from before the field count as the current version, as normalizePlan reads them."""
+    """Plans from before the field are stored as sent; normalizePlan reads them as version 1."""
     await _setup(hass)
     ws = await hass_ws_client(hass)
     plan = {"name": "Legacy", "walls": []}

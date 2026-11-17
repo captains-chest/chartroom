@@ -69,51 +69,38 @@ describe('entityArea', () => {
 });
 
 describe('sourceChoices', () => {
-  it('offers temperature and humidity sensors in the floor’s areas only', () => {
-    const ids = sourceChoices(hass, 'sensor', 'ground').map((c) => c.entity_id);
-    expect(ids).toEqual(['sensor.kitchen_humidity', 'sensor.kitchen_temperature']);
-    expect(sourceChoices(hass, 'sensor', 'upstairs').map((c) => c.entity_id)).toEqual([
-      'sensor.office_temperature',
-    ]);
-  });
-
-  it('offers every sensor on a plan without a floor', () => {
-    expect(sourceChoices(hass, 'sensor', null)).toHaveLength(4);
-  });
-
   it('offers any entity on the floor for access points and radios', () => {
-    const ids = sourceChoices(hass, 'access_point', 'ground').map((c) => c.entity_id);
+    const ids = sourceChoices(hass, 'ground').map((c) => c.entity_id);
     expect(ids).toContain('device_tracker.ap');
     expect(ids).toContain('sensor.kitchen_power');
     expect(ids).not.toContain('sensor.office_temperature');
+    expect(sourceChoices(hass, null)).toHaveLength(6);
   });
 });
 
 describe('source operations', () => {
   it('adds, moves, updates and deletes sources immutably', () => {
     const base = emptyPlan('Test');
-    const a = addSource(base, 'sensor', [1.23456, 2], 'sensor.kitchen_temperature', 'kitchen');
+    const a = addSource(base, 'radio', [1.23456, 2], 'sensor.zigbee_rssi', 'kitchen');
     expect(base.sources).toHaveLength(0);
-    expect(a.id).toBe('sensor_1');
+    expect(a.id).toBe('radio_1');
     expect(a.plan.sources[0]).toEqual({
-      id: 'sensor_1',
-      kind: 'sensor',
-      entity_id: 'sensor.kitchen_temperature',
+      id: 'radio_1',
+      kind: 'radio',
+      entity_id: 'sensor.zigbee_rssi',
       position: [1.235, 2],
       area_id: 'kitchen',
+      tx_dbm: -45,
     });
     const b = addSource(a.plan, 'access_point', [3, 3]);
     expect(b.id).toBe('access_point_1');
     expect(b.plan.sources[1]?.tx_dbm).toBe(-40);
-    const moved = moveSource(b.plan, 'sensor_1', [4, 5]);
+    const moved = moveSource(b.plan, 'radio_1', [4, 5]);
     expect(moved.sources[0]?.position).toEqual([4, 5]);
-    // Turning the access point into a sensor drops its level; back again restores a default.
-    const asSensor = updateSource(moved, 'access_point_1', { kind: 'sensor' });
-    expect(asSensor.sources[1]).not.toHaveProperty('tx_dbm');
-    const asRadio = updateSource(asSensor, 'access_point_1', { kind: 'radio', area_id: null });
-    expect(asRadio.sources[1]?.tx_dbm).toBe(-45);
-    expect(asRadio.sources[1]).not.toHaveProperty('area_id');
-    const gone = deleteSource(asRadio, 'sensor_1');
+    const changed = updateSource(moved, 'access_point_1', { kind: 'radio', area_id: null });
+    expect(changed.sources[1]?.kind).toBe('radio');
+    expect(changed.sources[1]).not.toHaveProperty('area_id');
+    const gone = deleteSource(changed, 'radio_1');
     expect(gone.sources.map((s) => s.id)).toEqual(['access_point_1']);
     expect(validatePlan(gone)).toEqual([]);
   });
@@ -131,7 +118,6 @@ describe('limitWarnings', () => {
     for (let i = 0; i <= LIMITS.walls; i++) plan = addWall(plan, [i, 0], [i, 1]).plan;
     for (let i = 0; i < LIMITS.accessPoints; i++)
       plan = addSource(plan, 'access_point', [i, 2]).plan;
-    plan = addSource(plan, 'sensor', [0, 3]).plan;
     const w = limitWarnings(plan);
     expect(w).toHaveLength(1);
     expect(w[0]).toMatch(/513 walls/);

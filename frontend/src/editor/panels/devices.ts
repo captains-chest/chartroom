@@ -1,16 +1,16 @@
-// The Device tool's list of entities to place: drag one onto the plan, or pick it and click.
-import type { DeviceChoice } from '../../devices';
+// The Device tool's list of devices to place: drag one onto the plan, or pick it and click.
+import { type DeviceChoice, isPlaced } from '../../devices';
 import { button, field, h } from '../../ui';
 import { areaName } from '../rooms';
 import { type PanelContext, section } from './context';
 
-/** Drag-and-drop type for an entity dragged from the list onto the plan. */
+/** Drag-and-drop type for a device (the entity its marker shows) dragged onto the plan. */
 export const ENTITY_MIME = 'application/x-chartroom-entity';
 
 export interface DeviceList {
-  /** The entities on offer (this floor's, when the plan has one). */
+  /** The devices on offer (this floor's, when the plan has one). */
   readonly choices: readonly DeviceChoice[];
-  /** The entity picked to place with the next click, if any. */
+  /** The device (by its choice's entity) picked to place with the next click, if any. */
   readonly armed: string | null;
   /** What the last auto-place did. */
   readonly note: string;
@@ -21,10 +21,10 @@ export interface DeviceList {
 
 export function devicesPanel(ctx: PanelContext, offer: DeviceList): HTMLElement {
   const hass = ctx.hass;
-  const placed = new Set((ctx.plan.devices ?? []).map((d) => d.entity_id));
-  const free = offer.choices.filter((c) => !placed.has(c.entity_id));
+  const placed = ctx.plan.devices ?? [];
+  const free = offer.choices.filter((c) => !isPlaced(placed, c));
   const areaOf = (a: string | null): string => (a ? areaName(hass, a) : 'No area');
-  const list = h('ul', { class: 'entities', 'aria-label': 'Entities not on the plan' });
+  const list = h('ul', { class: 'entities', 'aria-label': 'Devices not on the plan' });
   for (const c of free) {
     const item = h(
       'li',
@@ -58,7 +58,7 @@ export function devicesPanel(ctx: PanelContext, offer: DeviceList): HTMLElement 
     type: 'search',
     name: 'device-filter',
     placeholder: 'Filter',
-    'aria-label': 'Filter entities',
+    'aria-label': 'Filter devices',
   });
   filter.addEventListener('input', () => {
     const q = filter.value.trim().toLowerCase();
@@ -76,17 +76,17 @@ export function devicesPanel(ctx: PanelContext, offer: DeviceList): HTMLElement 
     h(
       'p',
       { class: 'meta' },
-      `${placed.size} on the plan · ${free.length} to place${ctx.plan.floor_id ? ' on this floor' : ''}`,
+      `${placed.length} on the plan · ${free.length} to place${ctx.plan.floor_id ? ' on this floor' : ''}`,
     ),
     button('Auto-place by area', () => offer.autoPlace(), { 'data-action': 'auto-place' }),
     offer.note ? h('p', { class: 'hint', role: 'status' }, offer.note) : null,
-    free.length > 0 ? field('Entities', filter) : null,
+    free.length > 0 ? field('Devices', filter) : null,
     free.length > 0
       ? list
       : h(
           'p',
           { class: 'hint' },
-          'Every light, switch, door, window, motion sensor, fan, cover and lock here is on the plan.',
+          'Every light, switch, door, window, motion, temperature and humidity sensor, fan, cover and lock here is on the plan.',
         ),
   );
 }

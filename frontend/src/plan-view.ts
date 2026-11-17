@@ -96,6 +96,8 @@ export class PlanView {
   #onPlan: (() => void) | null = null;
   #api: () => ChartroomApi | null = () => null;
   readonly #resized = new ResizeObserver(() => this.#resize());
+  /** Besides the legend, what a fitted plan keeps clear of: see `keepClear`. */
+  readonly #clear: HTMLElement[] = [];
 
   /**
    * `fixed`: the dashboard card. No pan or zoom, so the page still scrolls over it, and the plan is
@@ -408,8 +410,8 @@ export class PlanView {
   }
 
   /**
-   * Fit the plan to the view, clear of the legend; `resized` when the box's (or the legend's) new
-   * size asks for it, not the user.
+   * Fit the plan to the view, clear of the legend and the `keepClear` elements; `resized` when the
+   * box's (or theirs) new size asks for it, not the user.
    */
   fit(resized = false): void {
     const w = this.#svg.clientWidth;
@@ -420,17 +422,24 @@ export class PlanView {
     }
     this.#fitted = true;
     this.#moved = false;
-    const l = this.#heatLegend.getBoundingClientRect();
     const r = this.#svg.getBoundingClientRect();
-    const cover = l.width
-      ? {
-          left: l.left - r.left,
-          top: l.top - r.top,
-          right: l.right - r.left,
-          bottom: l.bottom - r.top,
-        }
-      : null;
-    this.#setView(fitView(this.#plan ? planBounds(this.#plan) : null, w, h, 0.6, cover), resized);
+    // Boxes off the plan (the phone's buttons docked below it) keep nothing clear.
+    const covers = [this.#heatLegend, ...this.#clear]
+      .map((e) => e.getBoundingClientRect())
+      .filter((b) => b.width)
+      .map((b) => ({
+        left: b.left - r.left,
+        top: b.top - r.top,
+        right: b.right - r.left,
+        bottom: b.bottom - r.top,
+      }));
+    this.#setView(fitView(this.#plan ? planBounds(this.#plan) : null, w, h, 0.6, covers), resized);
+  }
+
+  /** Keep a fitted plan clear of `el` too (the layer buttons) where it lies over the plan. */
+  keepClear(el: HTMLElement): void {
+    this.#clear.push(el);
+    this.#resized.observe(el);
   }
 
   zoom(factor: number, at?: Point): void {

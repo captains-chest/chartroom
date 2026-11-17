@@ -25,11 +25,24 @@ describe('viewport', () => {
     // A 10×4 m plan in 400×200 px with a 100×80 px legend at the top right: beside it the plan
     // fits 300×200 px, below it 400×120 px; beside it is larger.
     const legend = { left: 290, top: 10, right: 390, bottom: 90 };
-    const v = fitView({ minX: 0, minY: 0, maxX: 10, maxY: 4 }, 400, 200, 0, legend);
+    const v = fitView({ minX: 0, minY: 0, maxX: 10, maxY: 4 }, 400, 200, 0, [legend]);
     const px = (x: number, y: number) => [((x - v.x) / v.w) * 400, ((y - v.y) / v.h) * 200];
     const [right] = px(10, 0);
     expect(right).toBeCloseTo(290);
     expect(px(0, 4)[0]).toBeCloseTo(0);
+  });
+
+  it('fits clear of several covers', () => {
+    // The same plan and legend, and buttons across the top 30 px: below the buttons and beside the
+    // legend leaves 290×170 px, where the plan shows 290×116 px, centred.
+    const legend = { left: 290, top: 10, right: 390, bottom: 90 };
+    const buttons = { left: 10, top: 10, right: 390, bottom: 30 };
+    const v = fitView({ minX: 0, minY: 0, maxX: 10, maxY: 4 }, 400, 200, 0, [legend, buttons]);
+    const px = (x: number, y: number) => [((x - v.x) / v.w) * 400, ((y - v.y) / v.h) * 200];
+    expect(px(0, 0)[0]).toBeCloseTo(0);
+    expect(px(10, 4)[0]).toBeCloseTo(290);
+    expect(px(0, 0)[1]).toBeCloseTo(57);
+    expect(px(10, 4)[1]).toBeCloseTo(173);
   });
 
   it('zooms about the cursor, within limits', () => {

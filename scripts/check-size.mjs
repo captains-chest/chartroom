@@ -10,8 +10,8 @@ const BUDGET = {
   // The card entry plus the chunks it imports loads on every dashboard (20 KB before the device
   // radial menu, whose own code loads on first use; 20.5 KB before the popover's measured links
   // and the Signal button counting devices as possible mesh routers; 20.6 KB before fitting the
-  // plan clear of the legend).
-  'chartroom-card.js': 20.8 * 1024,
+  // plan clear of the legend; 20.8 KB before fitting it clear of the layer buttons too).
+  'chartroom-card.js': 20.9 * 1024,
 };
 
 const files = [];

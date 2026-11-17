@@ -1,19 +1,23 @@
-"""Mesh topology from ZHA, Z-Wave JS and Zigbee2MQTT, for the panel's mesh layer.
+"""Mesh topology from ZHA, Z-Wave JS, Zigbee2MQTT and Matter (Thread), for the panel's mesh layer.
 
 Each source is optional: it is read only when its integration is loaded, and a missing or failing
 source is reported in ``sources`` instead of breaking the others. The parsers are pure functions
 over the data each integration exposes (ZHA's device info, Z-Wave JS node statistics, Zigbee2MQTT's
-raw network map), so they are tested with fixtures. Everything is normalised to::
+raw network map, the Matter server's Thread diagnostics), so they are tested with fixtures.
+Everything is normalised to::
 
-    nodes: [{id, source, name, role, device_id, entities}]
-    links: [{a, b, source, lqi, rssi}]   # undirected, a < b
+    nodes: [{id, source, name, role, thread_role, device_id, entities}]
+    links: [{a, b, source, lqi, rssi, offline}]   # undirected, a < b
 
-with role one of coordinator, router, end_device (or None) and LQI 0-255 / RSSI in dBm, or None.
+with role one of coordinator, router, end_device (or None), thread_role the Thread role behind it
+(Matter only, else None), LQI 0-255 / RSSI in dBm, or None, and offline set when an end is a node
+its network reports unavailable (the link is from its last report).
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 import json
@@ -22,8 +26,10 @@ import math
 import time
 from typing import Any
 
+import aiohttp
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .const import DOMAIN
@@ -32,6 +38,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DATA_MESH_TEST: str = f"{DOMAIN}_mesh_test"
 DATA_Z2M: str = f"{DOMAIN}_z2m"
+DATA_OTBR: str = f"{DOMAIN}_otbr"
 Z2M_BASE_TOPIC = "zigbee2mqtt"
 # A raw network map makes every router scan its neighbours: ask at most this often.
 Z2M_REFRESH_S = 600
@@ -44,6 +51,31 @@ STALE_RELATIONSHIPS = {"PreviousChild", "Previous_Child", 4}
 # Z-Wave reports 125-127 in its RSSI fields as "not available" markers, not readings.
 ZWAVE_RSSI_UNAVAILABLE_MIN = 125
 
+# Thread Network Diagnostics (cluster 53) RoutingRole: (role, Thread role). A REED is an end device
+# that can become a router; it is drawn as a router, since it is mains powered and listening.
+THREAD_ROLES: dict[int, tuple[str, str]] = {
+    2: ("end_device", "sleepy end device"),
+    3: ("end_device", "end device"),
+    4: ("router", "REED"),
+    5: ("router", "router"),
+    6: ("router", "leader"),
+}
+# Thread LQI is 0-3; the other sources use 0-255.
+THREAD_LQI_SCALE = 85
+# A neighbour or route entry not heard from for this long is no longer a link. Routers advertise at
+# least every 32 s and OpenThread forgets a silent router after 100 s; a child polls its parent well
+# within the default 240 s child timeout. The values are the Matter server's cached reports, so
+# allow some slack over those. An end device's entry for its parent is kept whatever its age: it is
+# the device's attachment, and its age keeps growing while the link works (a Matter button's parent
+# entry read 173 181 s, then 346 004 s two days later, while the button kept working).
+THREAD_STALE_AGE_S = 300
+# Home Assistant hardware whose radio can run the OpenThread RCP firmware (``spinel``).
+THREAD_RADIO_DOMAINS = (
+    "homeassistant_connect_zbt2",
+    "homeassistant_sky_connect",
+    "homeassistant_yellow",
+)
+
 
 @dataclass(frozen=True)
 class MeshNode:
@@ -53,6 +85,7 @@ class MeshNode:
     source: str
     name: str
     role: str | None
+    thread_role: str | None = None
     device_id: str | None = None
     entities: tuple[str, ...] = ()
     # Device registry identifiers that find the node's device when the source does not say.
@@ -65,6 +98,7 @@ class MeshNode:
             "source": self.source,
             "name": self.name,
             "role": self.role,
+            "thread_role": self.thread_role,
             "device_id": self.device_id,
             "entities": list(self.entities),
         }
@@ -101,7 +135,15 @@ class _Links:
             return
         key = (a, b) if a < b else (b, a)
         link = self.by_pair.setdefault(
-            key, {"a": key[0], "b": key[1], "source": self.source, "lqi": None, "rssi": None}
+            key,
+            {
+                "a": key[0],
+                "b": key[1],
+                "source": self.source,
+                "lqi": None,
+                "rssi": None,
+                "offline": False,
+            },
         )
         for name, value in (("lqi", _num(lqi)), ("rssi", _num(rssi))):
             if value is not None:
@@ -224,6 +266,126 @@ def parse_z2m(networkmap: dict[str, Any]) -> Topology:
     return list(nodes.values()), links.list()
 
 
+def _thread_ext(value: Any) -> int | None:
+    """Return a Thread extended address as the tables give it (an int), or None for 0 (unknown)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def _hardware_ext(interfaces: Any) -> int | None:
+    """Return a node's own extended address: its Thread interface's hardware address."""
+    for iface in interfaces if isinstance(interfaces, list) else ():
+        if not isinstance(iface, dict) or iface.get("7") != 4:  # InterfaceTypeEnum.Thread
+            continue
+        try:
+            raw = base64.b64decode(str(iface.get("4") or ""), validate=True)
+        except ValueError:
+            continue
+        if len(raw) == 8:
+            return int.from_bytes(raw)
+    return None
+
+
+def _thread_entry(
+    entry: Any, by_ext: dict[int, str], age_field: str, check_age: bool
+) -> str | None:
+    """Return the node a neighbour or route table entry points at, unless unknown or stale."""
+    if not isinstance(entry, dict) or (ext := _thread_ext(entry.get("0"))) is None:
+        return None
+    age = _num(entry.get(age_field))
+    if check_age and age is not None and age > THREAD_STALE_AGE_S:
+        return None
+    return by_ext.get(ext)
+
+
+def matter_node_identifier(fabric: int, node_id: int) -> tuple[str, str]:
+    """Return a Matter node's device registry identifier, as the Matter integration sets it."""
+    return ("matter", f"deviceid_{fabric:016X}-{node_id:016X}-MatterNodeDevice")
+
+
+def _thread_node(fabric: int, n: Any) -> MeshNode | None:
+    """Return a Matter node on Thread as a mesh node, or None for bridges and other transports."""
+    if not isinstance(n, dict) or n.get("is_bridge") or not isinstance(n.get("node_id"), int):
+        return None
+    attrs = n.get("attributes") or {}
+    if "0/53/1" not in attrs:
+        return None
+    role, thread_role = THREAD_ROLES.get(attrs["0/53/1"], (None, None))
+    ident = matter_node_identifier(fabric, n["node_id"])
+    return MeshNode(
+        id=f"matter:{fabric:016X}-{n['node_id']:016X}",
+        source="matter",
+        name=str(n.get("name") or f"Matter node {n['node_id']}"),
+        role=role,
+        thread_role=thread_role,
+        identifiers=(ident,),
+    )
+
+
+def parse_thread(server: dict[str, Any], border_routers: list[dict[str, Any]]) -> Topology:
+    """Return the Thread nodes of a Matter server, linked by each node's neighbour and route tables.
+
+    ``server`` is shaped like the Matter server's diagnostics: ``info.compressed_fabric_id`` and
+    ``nodes`` of ``{node_id, available, is_bridge, attributes, name?}``, attributes keyed
+    ``endpoint/cluster/attribute``. Nodes without Thread diagnostics (Matter over Wi-Fi or Ethernet)
+    and bridges are left out. ``border_routers`` are ``{ext_address, name, device_id}``: Thread
+    neighbours that are no Matter node but a border router, drawn as the coordinator.
+    """
+    fabric = int((server.get("info") or {}).get("compressed_fabric_id") or 0)
+    nodes: dict[str, MeshNode] = {}
+    by_ext: dict[int, str] = {}
+    present: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    for n in server.get("nodes") or ():
+        if (node := _thread_node(fabric, n)) is None:
+            continue
+        nodes[node.id] = node
+        attrs = n.get("attributes") or {}
+        if (ext := _hardware_ext(attrs.get("0/51/0"))) is not None:
+            by_ext[ext] = node.id
+        present.append((node.id, n, attrs))
+    for br in border_routers:
+        if (ext := _thread_ext(br.get("ext_address"))) is None or ext in by_ext:
+            continue
+        nid = f"thread:{ext:016x}"
+        nodes[nid] = MeshNode(
+            id=nid,
+            source="matter",
+            name=str(br.get("name") or "Border router"),
+            role="coordinator",
+            thread_role="border router",
+            device_id=br.get("device_id"),
+        )
+        by_ext[ext] = nid
+
+    links = _Links("matter")
+    offline: set[str] = set()
+    for nid, n, attrs in present:
+        if n.get("available") is False:
+            offline.add(nid)
+        # An end device's tables hold its parent only, whose age says nothing (see the constant).
+        check_age = nodes[nid].role != "end_device"
+        for nb in attrs.get("0/53/7") or ():
+            if (other := _thread_entry(nb, by_ext, "1", check_age)) is None:
+                continue
+            lqi = _num(nb.get("5"))
+            links.add(
+                nid,
+                other,
+                lqi=None if lqi is None else lqi * THREAD_LQI_SCALE,
+                rssi=nb.get("6") if nb.get("6") is not None else nb.get("7"),
+            )
+        # Route entries with a link established are direct links too, with LQI both ways.
+        for rt in attrs.get("0/53/8") or ():
+            established = isinstance(rt, dict) and rt.get("9") is True
+            if not established or (other := _thread_entry(rt, by_ext, "7", check_age)) is None:
+                continue
+            lqis = [q for q in (_num(rt.get("5")), _num(rt.get("6"))) if q is not None]
+            links.add(nid, other, lqi=min(lqis) * THREAD_LQI_SCALE if lqis else None)
+    out = links.list()
+    for link in out:
+        link["offline"] = link["a"] in offline or link["b"] in offline
+    return list(nodes.values()), out
+
+
 @callback
 def _device_for(hass: HomeAssistant, ident: tuple[str, str]) -> dr.DeviceEntry | None:
     """Return the device registered under an identifier, or None.
@@ -316,6 +478,73 @@ async def _zwave(hass: HomeAssistant) -> Topology | None:
     return parse_zwave(out) if entries else None
 
 
+@callback
+def _thread_radio(hass: HomeAssistant) -> dr.DeviceEntry | None:
+    """Return the device of the radio running OpenThread RCP firmware, if there is just one."""
+    entries = [
+        e
+        for domain in THREAD_RADIO_DOMAINS
+        for e in hass.config_entries.async_loaded_entries(domain)
+        if e.data.get("firmware") == "spinel"
+    ]
+    if len(entries) != 1:
+        return None
+    devices = dr.async_entries_for_config_entry(dr.async_get(hass), entries[0].entry_id)
+    return devices[0] if devices else None
+
+
+async def _border_routers(hass: HomeAssistant) -> list[dict[str, Any]]:
+    """Return the OpenThread Border Routers Home Assistant knows, by their extended address.
+
+    With one border router and one radio running OpenThread RCP firmware, the router is drawn at
+    that radio's device. The address is asked once per loaded entry (it is a call to the router).
+    """
+    cache: dict[str, tuple[Any, int]] = hass.data.setdefault(DATA_OTBR, {})
+    entries = hass.config_entries.async_loaded_entries("otbr")
+    radio = _thread_radio(hass) if len(entries) == 1 else None
+    out = []
+    for entry in entries:
+        data = entry.runtime_data
+        cached = cache.get(entry.entry_id)
+        if cached is None or cached[0] is not data:
+            try:
+                ext = int.from_bytes(await data.get_extended_address())
+            except HomeAssistantError, aiohttp.ClientError, TimeoutError:
+                _LOGGER.debug("Reading the border router's address failed", exc_info=True)
+                continue
+            cache[entry.entry_id] = cached = (data, ext)
+        out.append(
+            {
+                "ext_address": cached[1],
+                "name": (radio and (radio.name_by_user or radio.name)) or entry.title,
+                "device_id": radio.id if radio else None,
+            }
+        )
+    return out
+
+
+async def _matter(hass: HomeAssistant) -> Topology | None:
+    entries = hass.config_entries.async_loaded_entries("matter")
+    if not entries:
+        return None
+    client = entries[0].runtime_data.adapter.matter_client
+    fabric = client.server_info.compressed_fabric_id
+    nodes = []
+    for node in client.get_nodes():
+        device = _device_for(hass, matter_node_identifier(fabric, node.node_id))
+        nodes.append(
+            {
+                "node_id": node.node_id,
+                "available": node.available,
+                "is_bridge": node.is_bridge_device,
+                "attributes": node.node_data.attributes,
+                "name": device and (device.name_by_user or device.name),
+            }
+        )
+    server = {"info": {"compressed_fabric_id": fabric}, "nodes": nodes}
+    return parse_thread(server, await _border_routers(hass))
+
+
 @dataclass
 class _Z2MState:
     unsub: CALLBACK_TYPE | None = None
@@ -385,6 +614,7 @@ def async_unload(hass: HomeAssistant) -> None:
     if state and state.unsub:
         state.unsub()
     hass.data.pop(DATA_MESH_TEST, None)
+    hass.data.pop(DATA_OTBR, None)
 
 
 async def _test_source(hass: HomeAssistant) -> Topology | None:
@@ -402,7 +632,7 @@ def _readers(hass: HomeAssistant) -> tuple[tuple[str, Reader], ...]:
     """Return the sources to read: only the test topology while one is set, else the real ones."""
     if hass.data.get(DATA_MESH_TEST) is not None:
         return (("test", _test_source),)
-    return (("zha", _zha), ("zwave_js", _zwave), ("zigbee2mqtt", _z2m))
+    return (("zha", _zha), ("zwave_js", _zwave), ("zigbee2mqtt", _z2m), ("matter", _matter))
 
 
 async def async_get_topology(hass: HomeAssistant) -> dict[str, Any]:

@@ -9,7 +9,7 @@ Zigbee and Z-Wave mesh links — in a sidebar panel and as a dashboard card.
 > rooms and sensor/signal sources. Phase 2 added live device markers (tap to toggle, hold for
 > details). Phase 3 added live temperature and humidity fields between your sensors. Phase 4 added
 > an estimated signal-strength map from your access points and radios through your walls, and the
-> ZHA, Z-Wave JS and Zigbee2MQTT mesh drawn between your devices. Phase 5 adds a history slider
+> ZHA, Z-Wave JS, Zigbee2MQTT and Matter (Thread) mesh drawn between your devices. Phase 5 adds a history slider
 > that plays the plan back from Home Assistant's recorder, and a phone layout for the panel. See
 > [docs/render-design.md](https://github.com/captains-chest/chartroom/blob/main/docs/render-design.md) for how the heatmaps are rendered and how fast
 > they are.
@@ -136,11 +136,14 @@ the access points and radios placed with **Source**:
 
 ### Mesh links
 
-**Mesh** draws the links between Zigbee and Z-Wave devices placed on the plan, as Home Assistant's
-ZHA and Z-Wave JS integrations and Zigbee2MQTT (over MQTT) report them. Each line runs between two
-placed devices (or sources) of the same network, coloured from red (weak) to green (strong) by
-link quality (LQI) or RSSI, dashed grey when the network gives neither. Hover a line for the two
-devices and the value. The note at the bottom left says how many links are on this plan and which
+**Mesh** draws the links between Zigbee, Z-Wave and Thread devices placed on the plan, as Home
+Assistant's ZHA, Z-Wave JS and Matter integrations and Zigbee2MQTT (over MQTT) report them. Each
+line runs between two placed devices (or sources) of the same network, coloured from red (weak) to
+green (strong) by RSSI or link quality (LQI), dashed grey when the network gives neither. Hover a
+line for the two devices and the value, and for Thread devices their role (leader, router, REED,
+end device). Thread links come from the neighbour tables Matter devices report; the border router
+is placed where you put the radio running OpenThread (its device, e.g. its firmware entity), when
+Home Assistant has just one. A Thread device that is offline keeps its last-reported links, dotted. The note at the bottom left says how many links are on this plan and which
 networks were found; a network that is not set up is simply skipped. The topology is read again
 every minute while the layer is on (Zigbee2MQTT's network map at most every 10 minutes, since it
 makes the routers scan). The toggle works with any heatmap or none, and is remembered on this
@@ -359,7 +362,7 @@ for the phone layout) and `history`, which runs after the desktop tests because 
 readings far from the others' on the shared instance.
 
 The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
-(with what it shares) 20.5 KB gzip and everything together 64.5 KB gzip. The heatmap renderer, editor,
+(with what it shares) 20.5 KB gzip and everything together 65 KB gzip. The heatmap renderer, editor,
 mesh layer, history bar and device menu are separate chunks loaded when first used. The build squeezes the CSS,
 GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
 byte for byte.

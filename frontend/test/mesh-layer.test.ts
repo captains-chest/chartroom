@@ -40,8 +40,9 @@ const topology: Topology = {
 };
 
 describe('mesh links', () => {
-  it('rates links by LQI, else RSSI', () => {
-    expect(linkQuality({ a: '', b: '', source: '', lqi: 255, rssi: -90 })).toBe(1);
+  it('rates links by RSSI, else LQI', () => {
+    expect(linkQuality({ a: '', b: '', source: '', lqi: 255, rssi: -90 })).toBe(0);
+    expect(linkQuality({ a: '', b: '', source: '', lqi: 51 })).toBe(0.2);
     expect(linkQuality({ a: '', b: '', source: '', rssi: -65 })).toBe(0.5);
     expect(linkQuality({ a: '', b: '', source: '', rssi: -20 })).toBe(1);
     expect(linkQuality({ a: '', b: '', source: '' })).toBeNull();
@@ -73,6 +74,42 @@ describe('mesh links', () => {
     expect(sourceNote(topology, links.length)).toBe(
       'Mesh: 3 links on this plan · ZHA, Zigbee2MQTT pending',
     );
+  });
+
+  it('names Thread roles and marks links of an offline node', () => {
+    const plan = emptyPlan('Thread');
+    plan.devices = [
+      { id: 'a', entity_id: 'switch.plug', position: [1, 1] },
+      { id: 'b', entity_id: 'light.lamp', position: [4, 1] },
+    ];
+    const thread: Topology = {
+      nodes: [
+        {
+          id: 'm:1',
+          source: 'matter',
+          name: 'Plug',
+          role: 'router',
+          thread_role: 'leader',
+          entities: ['switch.plug'],
+        },
+        {
+          id: 'm:2',
+          source: 'matter',
+          name: 'Lamp',
+          role: 'router',
+          thread_role: 'REED',
+          entities: ['light.lamp'],
+        },
+      ],
+      links: [{ a: 'm:1', b: 'm:2', source: 'matter', lqi: 170, rssi: -81, offline: true }],
+      sources: { matter: 'ok' },
+    };
+    const [link] = placeLinks(thread, plan, undefined);
+    expect(link!.offline).toBe(true);
+    expect(link!.label).toBe(
+      'Plug (leader) – Lamp (REED): LQI 170, RSSI -81 dBm (offline, last report)',
+    );
+    expect(sourceNote(thread, 1)).toBe('Mesh: 1 link on this plan · Matter');
   });
 
   it('says when there is no network', () => {

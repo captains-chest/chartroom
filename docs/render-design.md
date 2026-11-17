@@ -235,13 +235,21 @@ that still overlaps (small cards) is hidden; the marker keeps its accessible nam
 - The integration (`mesh.py`) reads ZHA (its gateway's devices and neighbour tables), Z-Wave JS
   (each node's last working route through its repeaters, with RSSI) and Zigbee2MQTT
   (`bridge/request/networkmap` over MQTT, at most every 10 minutes, since a scan loads the network) with the standard library and Home Assistant only.
+  Matter (Thread) comes from the loaded Matter entry's client: per node the cached Thread Network
+  Diagnostics (`0/53/1` role, `0/53/7` neighbour table, `0/53/8` route table) and its own extended
+  address (`0/51/0` hardware address). `parse_thread` keeps neighbour links (average RSSI, LQI 0-3
+  scaled by 85) and established router links (LQI in/out), drops router-side entries older than
+  300 s, keeps an end device's parent entry whatever its age, and flags links of unavailable nodes
+  `offline`. The border router is the OTBR entry's extended address (asked once per entry), tied
+  to the one radio whose firmware is `spinel`. Wi-Fi nodes (no `0/53`) and bridges are skipped.
   Each source reports `ok`, `absent`, `pending` or `error`; a missing integration is `absent`, not
   an error. `chartroom/mesh/get` returns `{nodes, links, sources}`; nodes carry the Home
   Assistant device id and entities when known.
 - The panel layer (`mesh-layer.ts`, its own lazy chunk, loaded on first use) places a node where a
   device marker shows its device (or one of its entities) or a source one of its entities, and draws a
-  line for each link with both ends on the plan: hue from red (bad) to green (good) by LQI/255, or
-  by RSSI from -90 to -40 dBm; dashed grey when unknown. It re-reads every 60 s while on.
+  line for each link with both ends on the plan: hue from red (bad) to green (good)
+  by RSSI from -90 to -40 dBm (RSSI wins when a link has both, as Thread links do), else LQI/255;
+  dashed grey when unknown, dotted when an end is offline. It re-reads every 60 s while on.
 - `chartroom/mesh/test_source` (admin) swaps in a fake topology, in memory only, for e2e. It is
   registered only when Home Assistant runs with `CHARTROOM_TEST_HOOKS` set, as the e2e one does.
 

@@ -163,6 +163,7 @@ export function installFakeDom(): void {
   };
   g['ResizeObserver'] ??= class {
     observe(): void {}
+    unobserve(): void {}
     disconnect(): void {}
   };
   // The plan view re-selects by id after a redraw.

@@ -589,8 +589,9 @@ export const planViewStyles = `
   .mesh-link.unknown { stroke-dasharray: 4 4; }
   .mesh-link.offline { stroke-dasharray: 1 5; opacity: 0.6; }
   .mesh-note { position: absolute; left: 8px; bottom: 8px; max-width: 60%; font-size: 11px; padding: 2px 6px; border-radius: 4px;
-    background: var(--card-background-color, #fff); opacity: 0.9; color: var(--secondary-text-color, #555); }
+    background: var(--card-background-color, #fff); opacity: 0.9; color: var(--secondary-text-color, #555); overflow-wrap: anywhere; }
   .mesh-note[hidden] { display: none; }
-  .fixed .heat-legend:not([hidden]) ~ .mesh-note { max-width: calc(100% - 192px); }
+  .fixed .mesh-note { max-width: calc(100% - 28px); }
+  .fixed:has(> .mesh-note:not([hidden])) > .heat-legend { bottom: 44px; }
   .heat-layers { display: flex; gap: 4px; }
 ${markerStyles}`;

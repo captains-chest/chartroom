@@ -569,6 +569,7 @@ const panelStyles = `
   .underlay-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 8px;
     padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent); }
   .underlay-controls input { width: 120px; }
+  .stage .mesh-note { left: 12px; bottom: 60px; }
   .underlay-ignored { position: absolute; left: 12px; bottom: 12px; max-width: min(360px, calc(100% - 80px));
     margin: 0; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem; color: var(--secondary-text-color, #727272);
     background: color-mix(in srgb, var(--card-background-color, #fff) 85%, transparent); }
@@ -603,6 +604,7 @@ const panelStyles = `
     .zoom { top: 8px; bottom: auto; right: 8px; }
     .zoom button:not(:last-child) { display: none; }
     .heat-legend { top: 8px; left: 8px; right: auto; width: 150px; font-size: 11px; }
+    .stage .mesh-note { left: 8px; bottom: 8px; }
   }
 `;
 

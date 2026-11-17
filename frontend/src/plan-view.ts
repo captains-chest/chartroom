@@ -591,5 +591,6 @@ export const planViewStyles = `
   .mesh-note { position: absolute; left: 8px; bottom: 8px; max-width: 60%; font-size: 11px; padding: 2px 6px; border-radius: 4px;
     background: var(--card-background-color, #fff); opacity: 0.9; color: var(--secondary-text-color, #555); }
   .mesh-note[hidden] { display: none; }
+  .fixed .heat-legend:not([hidden]) ~ .mesh-note { max-width: calc(100% - 192px); }
   .heat-layers { display: flex; gap: 4px; }
 ${markerStyles}`;

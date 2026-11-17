@@ -229,6 +229,8 @@ export class PlanEditor {
     // The entity registry may have come after the editor opened: fold the plan as the view does.
     const hass = this.#host.hass();
     if (this.#session.migrate((plan) => foldDevices(plan, hass))) {
+      // A drag in progress started from the unfolded plan: drop it rather than save that back.
+      this.#s = { ...this.#s, drag: null, preview: null };
       this.#dropStaleSelection();
       this.#render();
     } else this.#renderInspector();

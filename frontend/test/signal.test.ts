@@ -272,10 +272,12 @@ describe('signal from the mesh', () => {
       { id: 'b', entity_id: 'light.bulb', position: [4, 3] },
       { id: 'o', entity_id: 'light.off', position: [4, 1] },
       { id: 's', entity_id: 'sensor.t', position: [2, 2] },
+      { id: 'w', entity_id: 'switch.wave', position: [5, 3] },
     ];
     // The radio is the Zigbee coordinator, typed at -48 dBm.
     plan.sources[1] = { ...plan.sources[1]!, entity_id: 'binary_sensor.zigbee', tx_dbm: -48 };
-    hass.states!['light.off'] = { entity_id: 'light.off', state: 'unavailable', attributes: {} };
+    for (const e of ['light.off', 'switch.wave'])
+      hass.states![e] = { entity_id: e, state: 'unavailable', attributes: {} };
     const node = (id: string, source: string, role: string, entity: string) => ({
       id,
       source,
@@ -291,6 +293,7 @@ describe('signal from the mesh', () => {
         node('t:b', 'matter', 'router', 'light.bulb'),
         node('t:o', 'matter', 'router', 'light.off'),
         node('t:x', 'matter', 'router', 'light.nowhere'),
+        node('w:r', 'zwave_js', 'router', 'switch.wave'),
       ],
       links: [
         { a: 'z:c', b: 'z:s', source: 'zha', lqi: 200 },
@@ -299,8 +302,11 @@ describe('signal from the mesh', () => {
       ],
       sources: {},
     };
-    const [zigbee, thread, ...rest] = meshNetworks(topology, plan, hass);
+    const [zigbee, thread, zwave, ...rest] = meshNetworks(topology, plan, hass);
     expect(rest).toEqual([]);
+    // Ranked by placed routers whether or not they are up; one with all down stays, with none up.
+    expect([zigbee!.routers, thread!.routers, zwave!.routers]).toEqual([2, 2, 1]);
+    expect(meshSignal(zwave!, new Float32Array()).note).toMatch(/^Z-Wave · 0 routers · /);
     // Zigbee: the coordinator (at the radio) and the plug; the sensor is an end device.
     expect(zigbee!.name).toBe('Zigbee');
     const z = meshSignal(zigbee!, signalInput(plan, hass, []).walls);

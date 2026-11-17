@@ -319,6 +319,29 @@ describe('plans from before items named devices', () => {
     expect(foldDevices(folded, hass)).toBe(folded);
     expect(validatePlan(folded)).toEqual([]);
   });
+
+  it('fold a chain of one device’s sensors once, so folding again changes nothing', () => {
+    const at = (id: string, entity_id: string, x: number) => ({
+      id,
+      entity_id,
+      position: [x, 0] as const,
+    });
+    const plan = normalizePlan({
+      name: 'Chain',
+      devices: [
+        at('a', 'sensor.hood_temperature', 0),
+        at('b', 'sensor.hood_humidity', 1.1),
+        at('c', 'light.kitchen', 5),
+      ],
+    });
+    plan.devices!.splice(2, 0, { id: 'd', entity_id: 'sensor.hood_battery', position: [0.8, 0] });
+    const once = foldDevices(plan, hass);
+    expect(once.devices!.map((d) => [d.id, d.device_id, d.position])).toEqual([
+      ['a', 'hood', [0.633, 0]],
+      ['c', undefined, [5, 0]],
+    ]);
+    expect(foldDevices({ ...once }, hass).devices).toEqual(once.devices);
+  });
 });
 
 describe('device ops', () => {

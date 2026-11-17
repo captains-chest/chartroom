@@ -95,23 +95,26 @@ describe('tapAction', () => {
       service: 'lock',
       confirm: 'Lock lock.f?',
     });
-    expect(tapAction('lock.f', st('lock.f', 'jammed'))).toEqual({ type: 'more-info' });
+    expect(tapAction('lock.f', st('lock.f', 'jammed'))).toEqual({ type: 'menu' });
   });
 
-  it('shows details for sensors and for anything unavailable', () => {
-    expect(tapAction('binary_sensor.d', st('binary_sensor.d', 'on', 'door'))).toEqual({
-      type: 'more-info',
-    });
-    expect(tapAction('light.a', st('light.a', 'unavailable'))).toEqual({ type: 'more-info' });
-    expect(tapAction('light.a', undefined)).toEqual({ type: 'more-info' });
+  // No one sensor is the click: a device that only measures opens its wheel, with all of them.
+  it('opens the wheel for sensors and for anything unavailable', () => {
+    for (const [id, s] of [
+      ['sensor.t', st('sensor.t', '21', 'temperature')],
+      ['binary_sensor.d', st('binary_sensor.d', 'on', 'door')],
+      ['light.a', st('light.a', 'unavailable')],
+      ['light.a', undefined],
+    ] as const)
+      expect(tapAction(id, s)).toEqual({ type: 'menu' });
   });
 });
 
 describe('deviceActions', () => {
-  // Each ring as "Label" or "Label: ring-2 labels".
+  // Each level as "Label" or "Label: next level's labels".
   const shape = (ring: Ring): string[] =>
     ring.map((i) => (i.ring ? `${i.label}: ${i.ring.map((j) => j.label).join(', ')}` : i.label));
-  const of = (states: [string, string, EntityState['attributes']?][]): Hass => ({
+  const of = (states: [string, string, EntityState['attributes']?][], live = true): Hass => ({
     states: Object.fromEntries(
       states.map(([id, state, attributes = {}]) => [
         id,
@@ -120,6 +123,7 @@ describe('deviceActions', () => {
     ),
     entities: Object.fromEntries(states.map(([id]) => [id, { entity_id: id, device_id: 'd' }])),
     devices: { d: { id: 'd', name: 'Lamp' } },
+    ...(live && { callService: async () => {} }),
   });
   const STEPS = '10 %, 25 %, 50 %, 75 %, 100 %';
   it.each<[string, [string, string, EntityState['attributes']?][], string[]]>([
@@ -147,7 +151,7 @@ describe('deviceActions', () => {
     [
       'an unavailable light',
       [['light.a', 'unavailable', { supported_color_modes: ['hs'] }]],
-      ['Details'],
+      ['Light.a'],
     ],
     ['a switch', [['switch.a', 'on']], ['Toggle', 'Details']],
     [
@@ -171,35 +175,35 @@ describe('deviceActions', () => {
       [['cover.a', 'open', { supported_features: 15 }]],
       ['Open', 'Stop', 'Close', 'Position: 0 %, 25 %, 50 %, 75 %, 100 %', 'Details'],
     ],
-    [
-      'a cover that opens and closes',
-      [['cover.a', 'open', { supported_features: 3 }]],
-      ['Open', 'Close', 'Details'],
-    ],
     ['a locked lock', [['lock.a', 'locked']], ['Unlock', 'Details']],
-    ['a jammed lock', [['lock.a', 'jammed']], ['Details']],
     [
-      'a multisensor: one item per other entity',
+      'a temperature and humidity sensor: both readings, neither privileged',
       [
+        ['sensor.t', '21.4', { device_class: 'temperature', friendly_name: 'Lamp Temperature' }],
+        ['sensor.h', '48', { device_class: 'humidity', friendly_name: 'Lamp Humidity' }],
+      ],
+      ['Temperature', 'Humidity'],
+    ],
+    [
+      'a multisensor with a relay: every entity a segment, the relay with its options',
+      [
+        ['switch.s', 'off', { friendly_name: 'Lamp Relay' }],
         ['sensor.t', '21', { device_class: 'temperature', friendly_name: 'Lamp Temperature' }],
         ['binary_sensor.m', 'off', { device_class: 'motion', friendly_name: 'Lamp Motion' }],
-        ['switch.s', 'off', { friendly_name: 'Lamp Relay' }],
       ],
-      ['Toggle', 'Temperature', 'Motion', 'Details'],
+      ['Relay: Toggle, Details', 'Temperature', 'Motion'],
     ],
     [
-      'a light with a relay: ring 2 has what acts, no further rings',
+      'a light with a relay and a second light: each level has all its options',
       [
-        ['light.a', 'on', { supported_color_modes: ['brightness'] }],
+        ['light.a', 'on', { supported_color_modes: ['brightness'], friendly_name: 'Lamp Top' }],
         ['switch.s', 'off', { friendly_name: 'Lamp Relay' }],
         ['light.b', 'off', { supported_color_modes: ['brightness'], friendly_name: 'Lamp Night' }],
       ],
       [
-        'Toggle',
-        `Brightness: ${STEPS}`,
+        'Top: Toggle, Brightness, Details',
         'Relay: Toggle, Details',
-        'Night: Toggle, Details',
-        'Details',
+        'Night: Toggle, Brightness, Details',
       ],
     ],
   ])('%s', (_, states, want) => {
@@ -213,16 +217,51 @@ describe('deviceActions', () => {
     ).toEqual(want);
   });
 
-  it('acts with the data each item stands for', () => {
-    const h = of([
-      ['light.a', 'on', { supported_color_modes: ['color_temp', 'hs'] }],
-      ['lock.l', 'locked', { friendly_name: 'Front door' }],
-      ['sensor.t', '21', { device_class: 'temperature' }],
-    ]);
-    const [, brightness, colour, lock, temp, details] = deviceActions(
-      ['light.a', 'lock.l', 'sensor.t'],
-      h,
+  it('shows each reading on its segment and opens its details', () => {
+    const [t, h] = deviceActions(
+      ['sensor.t', 'sensor.h'],
+      of([
+        ['sensor.t', '21.4', { device_class: 'temperature', unit_of_measurement: '°C' }],
+        ['sensor.h', 'unavailable', { device_class: 'humidity' }],
+      ]),
     );
+    expect(t).toMatchObject({
+      value: '21.4 °C',
+      icon: 'thermometer',
+      action: { type: 'more-info', entity: 'sensor.t' },
+    });
+    expect(h).toMatchObject({ value: 'unavailable', unavailable: true });
+  });
+
+  it('puts what does not fit behind More, losing no entity', () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `sensor.s${i}`);
+    const ring = deviceActions(ids, of(ids.map((id) => [id, '1'])));
+    expect(ring).toHaveLength(8);
+    expect(ring[7]!.label).toBe('More');
+    expect(ring[7]!.ring).toHaveLength(3);
+  });
+
+  it('offers nothing that acts in the past: every entity opens its details', () => {
+    const states: [string, string][] = [
+      ['light.a', 'on'],
+      ['switch.s', 'off'],
+    ];
+    const ring = deviceActions(['light.a', 'switch.s'], of(states, false));
+    expect(ring.map((i) => i.action)).toEqual([
+      { type: 'more-info', entity: 'light.a' },
+      { type: 'more-info', entity: 'switch.s' },
+    ]);
+    expect(shape(deviceActions(['light.a'], of(states, false)))).toEqual(['Light.a']);
+  });
+
+  it('acts with the data each segment stands for', () => {
+    const h = of([
+      ['light.a', 'on', { supported_color_modes: ['color_temp', 'hs'], brightness: 128 }],
+      ['lock.l', 'locked', { friendly_name: 'Front door' }],
+    ]);
+    const [light, lock] = deviceActions(['light.a', 'lock.l'], h);
+    const [, brightness, colour, details] = light!.ring!;
+    expect(brightness!.value).toBe('50 %');
     expect(brightness!.ring![2]!.action).toEqual({
       type: 'service',
       entity: 'light.a',
@@ -232,12 +271,21 @@ describe('deviceActions', () => {
     });
     expect(colour!.ring![0]!.action).toMatchObject({ data: { color_temp_kelvin: 2700 } });
     expect(colour!.ring![3]!.action).toMatchObject({ data: { hs_color: [0, 100] } });
+    expect(details!.action).toEqual({ type: 'more-info', entity: 'light.a' });
     expect(lock!.ring![0]!.action).toMatchObject({
       service: 'unlock',
       confirm: 'Unlock Front door?',
     });
-    expect(temp!.action).toEqual({ type: 'more-info', entity: 'sensor.t' });
-    expect(details!.action).toEqual({ type: 'more-info', entity: 'light.a' });
+  });
+
+  it('puts Route last on a device, before Details on a single entity', () => {
+    const one = of([['switch.a', 'on']]);
+    expect(shape(deviceActions(['switch.a'], one, true))).toEqual(['Toggle', 'Route', 'Details']);
+    const two = of([
+      ['switch.a', 'on'],
+      ['sensor.t', '1'],
+    ]);
+    expect(shape(deviceActions(['switch.a', 'sensor.t'], two, true)).at(-1)).toBe('Route');
   });
 });
 

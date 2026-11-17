@@ -255,11 +255,14 @@ test.describe('devices', () => {
       const m = marker(panel, light);
       const menu = panel.locator('.device-menu');
       const item = (name: string): Locator => menu.getByRole('menuitem', { name, exact: true });
+      // Brightness says what it is set to while the light is on ("Brightness: 50 %").
+      const brightness = menu.getByRole('menuitem', { name: /^Brightness/ });
 
-      // Right-click: ring 1, its first item focused. Brightness opens ring 2 without acting.
+      // Right-click: the wheel, its first segment focused. Brightness opens the next level
+      // without acting.
       const box = (await m.boundingBox())!;
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
-      await expect(menu.getByRole('menuitem')).toHaveText(['Toggle', 'Brightness', 'Details']);
+      await expect(menu.getByRole('menuitem')).toHaveText(['Toggle', /Brightness/, 'Details']);
       await expect(item('Toggle')).toBeFocused();
       // The panel's box changing size (a tab added elsewhere, the window) fits the plan again;
       // the menu stays open on its marker.
@@ -268,19 +271,23 @@ test.describe('devices', () => {
       await page.setViewportSize({ width: 1200, height: 760 });
       await expect(plan).not.toHaveAttribute('viewBox', fitted!);
       await expect(item('Toggle')).toBeFocused();
-      await item('Brightness').click();
-      await expect(menu.getByRole('menu', { name: 'Brightness' }).getByRole('menuitem')).toHaveText(
-        ['10 %', '25 %', '50 %', '75 %', '100 %'],
-      );
+      await brightness.click();
+      const steps = menu.getByRole('menu', { name: 'Brightness' }).getByRole('menuitem');
+      await expect(steps).toHaveText(['10 %', '25 %', '50 %', '75 %', '100 %']);
       await shot(page, 'device-menu.png');
+      // The hub is Back: up a level, Brightness focused again; nothing acts.
+      await menu.getByRole('button', { name: 'Back' }).click();
+      await expect(brightness).toBeFocused();
+      await expect(item('10 %')).toHaveCount(0);
       expect([await state(light), await state(level)]).toEqual([was, wasLevel]);
-      // A ring-2 step calls the service and closes the menu.
+      await brightness.click();
+      // A step calls the service and closes the menu.
       await item('50 %').click();
       await expect(menu).toBeHidden();
       await expect.poll(async () => Number(await state(level))).toBe(128);
 
-      // The keyboard: Shift+F10 opens it, arrows move, Enter opens ring 2, Esc goes back a ring
-      // and then closes it, focus back on the marker; nothing acts.
+      // The keyboard: Shift+F10 opens it, arrows move, Enter opens the next level, Esc goes back
+      // a level and then closes it, focus back on the marker; nothing acts.
       await m.focus();
       await page.keyboard.press('Shift+F10');
       await expect(item('Toggle')).toBeFocused();
@@ -288,7 +295,7 @@ test.describe('devices', () => {
       await page.keyboard.press('Enter');
       await expect(item('10 %')).toBeFocused();
       await page.keyboard.press('Escape');
-      await expect(item('Brightness')).toBeFocused();
+      await expect(brightness).toBeFocused();
       await expect(item('10 %')).toHaveCount(0);
       await page.keyboard.press('Escape');
       await expect(menu).toBeHidden();
@@ -362,6 +369,16 @@ test.describe('devices', () => {
     await expect(pop.locator('.dp-value')).toHaveText(/^(open|closed)$/);
     await page.keyboard.press('Escape');
     await expect(pop).toBeHidden();
+
+    // A sensor has nothing to toggle: a click opens its wheel, its reading on it, not its details.
+    if (present.includes(temp)) {
+      await marker(panel, temp).click();
+      const menu = panel.locator('.device-menu');
+      await expect(menu.getByRole('menuitem')).toHaveAccessibleName(/°C$/);
+      await expect(page.locator('ha-more-info-dialog')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(menu).toBeHidden();
+    }
   });
 
   test('a lock asks before it unlocks', async ({ page }) => {

@@ -197,7 +197,13 @@ test('the card opens details instead of toggling a device while it shows the pas
     await card.getByRole('button', { name: 'History' }).click();
     await expect(card).toHaveAttribute('history', '');
     await expect(card.getByRole('slider', { name: 'Time' })).toBeEnabled();
+    // In the past nothing acts: a click opens the wheel, whose segment opens the details.
     await marker.click();
+    const face = (await card
+      .locator('.device-menu [role=menuitem] .dm-face')
+      .first()
+      .boundingBox())!;
+    await page.mouse.click(face.x + face.width / 2, face.y + face.height / 2);
     await expect(card).toHaveAttribute('data-info', light);
     await page.waitForTimeout(1000);
     expect(await state(light)).toBe(was);

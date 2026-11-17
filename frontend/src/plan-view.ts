@@ -140,7 +140,10 @@ export class PlanView {
     this.#svg.addEventListener('pointerup', (e) => this.#up(e));
     this.#svg.addEventListener('pointercancel', (e) => this.#up(e, true));
     this.#svg.addEventListener('contextmenu', (e) => e.preventDefault());
-    new ResizeObserver(() => this.#resize()).observe(this.#svg);
+    const resized = new ResizeObserver(() => this.#resize());
+    resized.observe(this.#svg);
+    // A fitted plan keeps clear of the legend, so it fits again when the legend changes size.
+    resized.observe(this.#heatLegend);
   }
 
   /** The live heatmap, once a layer has been switched on (loaded on demand). */
@@ -401,7 +404,10 @@ export class PlanView {
     this.el.classList.add('with-underlay');
   }
 
-  /** Fit the plan to the view; `resized` when the box's new size asks for it, not the user. */
+  /**
+   * Fit the plan to the view, clear of the legend; `resized` when the box's (or the legend's) new
+   * size asks for it, not the user.
+   */
   fit(resized = false): void {
     const w = this.#svg.clientWidth;
     const h = this.#svg.clientHeight;
@@ -411,7 +417,17 @@ export class PlanView {
     }
     this.#fitted = true;
     this.#moved = false;
-    this.#setView(fitView(this.#plan ? planBounds(this.#plan) : null, w / h, 0.6), resized);
+    const l = this.#heatLegend.getBoundingClientRect();
+    const r = this.#svg.getBoundingClientRect();
+    const cover = l.width
+      ? {
+          left: l.left - r.left,
+          top: l.top - r.top,
+          right: l.right - r.left,
+          bottom: l.bottom - r.top,
+        }
+      : null;
+    this.#setView(fitView(this.#plan ? planBounds(this.#plan) : null, w, h, 0.6, cover), resized);
   }
 
   zoom(factor: number, at?: Point): void {

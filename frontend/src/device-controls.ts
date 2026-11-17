@@ -98,6 +98,7 @@ export class DeviceControls implements PointerDelegate {
     // The view captures the pointer on press, so the contextmenu after a right-click goes to the
     // <svg>, not the marker: remember the marker the press started on.
     view.el.addEventListener('pointerdown', (e) => {
+      this.#unswallow();
       clearTimeout(this.#showTimer);
       // A press on the marker shown keeps it (a tap's new state shows); a pan hides it.
       if (this.#target(e.target) !== this.popover.anchor) this.#hide();
@@ -204,6 +205,7 @@ export class DeviceControls implements PointerDelegate {
 
   /** The plan was replaced, the view released or the editor opens: popover and menu are stale. */
   reset(): void {
+    this.#unswallow();
     this.#hide();
     this.cancel();
     this.#closeMenu();
@@ -287,27 +289,43 @@ export class DeviceControls implements PointerDelegate {
     clearTimeout(p.timer);
     if (!p.held && !p.moved) void this.tap(p.id, p.entity);
     else if (p.held) {
-      // A hold dragged to a menu item and released there picks it.
-      if (this.#menu?.anchor === p.el) this.#menu.pickAt(e.clientX, e.clientY);
-      // The mousedown and click a browser may send after the lift neither pick an item again nor
-      // move focus out of the menu (which would close it).
-      const swallow = (c: Event): void => {
-        c.stopPropagation();
-        c.preventDefault();
-        if (c.type === 'click') stop();
-      };
-      const stop = (): void => {
-        for (const type of ['mousedown', 'click'])
-          document.removeEventListener(type, swallow, true);
-      };
-      for (const type of ['mousedown', 'click']) document.addEventListener(type, swallow, true);
-      setTimeout(stop, LIFT_MS);
+      // A hold slid to a menu item and released there picks it. One released in place does not,
+      // even over an item (a menu moved in from the view's edge can put one over the marker).
+      if (p.moved && this.#menu?.anchor === p.el) this.#menu.pickAt(e.clientX, e.clientY);
+      this.#swallowLift(e.clientX, e.clientY);
     }
     // Keep the press a moment so the contextmenu that follows a long touch is ignored.
     setTimeout(() => {
       if (this.#press === p) this.#press = null;
     }, 50);
   }
+
+  /**
+   * The mousedown and click a browser may send at a hold's lift (`x`, `y`) neither pick an item
+   * again nor move focus out of the menu (which would close it). Retired by the next press in the
+   * plan, a reset, or `LIFT_MS`; a press elsewhere is not near the lift.
+   */
+  #swallowLift(x: number, y: number): void {
+    this.#unswallow();
+    const swallow = (c: Event): void => {
+      const m = c as MouseEvent;
+      if (Math.hypot(m.clientX - x, m.clientY - y) > SLOP_PX) return;
+      c.stopPropagation();
+      c.preventDefault();
+      if (c.type === 'click') this.#unswallow();
+    };
+    const types = ['mousedown', 'click'] as const;
+    for (const type of types) document.addEventListener(type, swallow, true);
+    const stop = (): void => {
+      clearTimeout(timer);
+      for (const type of types) document.removeEventListener(type, swallow, true);
+      if (this.#unswallow === stop) this.#unswallow = () => {};
+    };
+    const timer = setTimeout(stop, LIFT_MS);
+    this.#unswallow = stop;
+  }
+
+  #unswallow: () => void = () => {};
 
   #key(e: KeyboardEvent): void {
     const el = this.#marker(e.target);

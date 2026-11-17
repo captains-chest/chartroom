@@ -8,7 +8,7 @@ import { isSignalSource } from './plan/functions';
 import type { Plan } from './plan/models';
 import type { Point } from './plan/types';
 import { deviceNodes, networkOf, placeNodes, type Topology } from './mesh-layer';
-import { SIGNAL_N, signalAt } from './signal';
+import { MAX_SIGNAL_SOURCES, SIGNAL_N, signalAt } from './signal';
 
 /** A measured level (dBm) between two spots on the plan. */
 export interface MeasuredLink {
@@ -67,7 +67,10 @@ export interface PlacedMeshNode {
 export interface MeshNetwork {
   name: string;
   nodes: Map<string, PlacedMeshNode>;
-  /** Placed routers that are up: the network's sources. */
+  /**
+   * Placed routers, up or not: which networks show, and in what order, does not change with
+   * availability (those that are up are its sources, see `meshSignal`).
+   */
   routers: number;
   /** RSSI between two placed nodes, by node id. */
   links: { a: string; b: string; rssi: number }[];
@@ -95,7 +98,7 @@ export function meshNetworks(
     const router = n.role === 'coordinator' || n.role === 'router';
     const down = states.length > 0 && states.every((s) => s === 'unavailable');
     net.nodes.set(n.id, { name: n.name || n.id, at: p, router, down });
-    if (router && !down) net.routers++;
+    if (router) net.routers++;
     netOf.set(n.id, net);
   }
   for (const l of topology.links) {
@@ -167,7 +170,9 @@ export function measuredLines(
   for (const node of deviceNodes(topology, entities, deviceId, hass)) {
     const me = net.nodes.get(node.id);
     if (!me) continue;
+    // The sources the map uses (MAX_SIGNAL_SOURCES), less its own.
     const others = signal.sources
+      .slice(0, MAX_SIGNAL_SOURCES)
       .filter((s) => s.position[0] !== me.at[0] || s.position[1] !== me.at[1])
       .flatMap((s) => [s.position[0], s.position[1], s.value]);
     const here = signalAt({ walls, aps: new Float32Array(others) }, me.at[0], me.at[1]);

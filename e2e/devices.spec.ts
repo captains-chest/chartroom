@@ -274,6 +274,11 @@ test.describe('devices', () => {
     await shot(page, 'device-popover.png');
     await page.mouse.move(5, 5);
     await expect(pop).toBeHidden();
+    // Esc dismisses a hover's popover too, though focus is outside the plan.
+    await hover(coffee);
+    await expect(pop).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(pop).toBeHidden();
 
     // The keyboard: focus shows it (not a click's: a key press first, as when tabbing), Esc hides it.
     const door = marker(panel, 'binary_sensor.front_door');

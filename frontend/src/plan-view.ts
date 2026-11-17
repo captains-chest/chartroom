@@ -37,6 +37,8 @@ export interface PointerDelegate {
   viewChanged?(): void;
   /** After every new hass, whether or not the plan reads what changed. */
   statesChanged?(): void;
+  /** The plan was replaced, or the view released its layers (it left the page). */
+  reset?(): void;
 }
 
 export class PlanView {
@@ -194,6 +196,7 @@ export class PlanView {
     preview = false,
   ): void {
     this.#given = { plan: given, selected, preview };
+    this.#delegate?.reset?.();
     const plan = given && foldDevices(given, this.#hass);
     this.#plan = plan;
     this.#body.innerHTML = plan ? planBody(plan) : '';
@@ -276,6 +279,7 @@ export class PlanView {
   dispose(): void {
     this.#released = true;
     this.#generation++;
+    this.#delegate?.reset?.();
     this.#heat?.dispose();
     this.#heat = null;
     this.#heatLoad = null;

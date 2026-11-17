@@ -171,14 +171,29 @@ export class DeviceControls implements PointerDelegate {
     const content = this.active && el.isConnected ? this.#content(el as SVGElement) : null;
     if (!content) return this.#hide();
     this.popover.show(el, content);
-    this.#tick ??= setInterval(() => this.statesChanged(), TICK_MS);
+    if (this.#tick) return;
+    this.#tick = setInterval(() => this.statesChanged(), TICK_MS);
+    // Esc dismisses it wherever focus is (a mouse hover leaves focus outside the plan).
+    document.addEventListener('keydown', this.#escape);
+  }
+
+  readonly #escape = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') this.#hide();
+  };
+
+  /** The plan was replaced or the view released: what the popover says is stale. */
+  reset(): void {
+    this.#hide();
   }
 
   #hide(): void {
     clearTimeout(this.#showTimer);
     clearTimeout(this.#hideTimer);
-    clearInterval(this.#tick);
-    this.#tick = undefined;
+    if (this.#tick) {
+      clearInterval(this.#tick);
+      this.#tick = undefined;
+      document.removeEventListener('keydown', this.#escape);
+    }
     this.popover.hide();
   }
 
@@ -240,7 +255,6 @@ export class DeviceControls implements PointerDelegate {
   }
 
   #key(e: KeyboardEvent): void {
-    if (e.key === 'Escape') this.#hide();
     const el = this.#marker(e.target);
     if (!el || !this.active) return;
     if (e.key === 'Enter' || e.key === ' ') {

@@ -305,8 +305,8 @@ that still overlaps (small cards) is hidden; the marker keeps its accessible nam
   until the next press anywhere, Esc, a wheel, a new plan or the marker's blur (hover leaves it
   alone meanwhile). It calls no service.
 - Weak spots (#124, `weakSpots`, pure): a node that does not route (an end device, or a Thread
-  REED, which hangs on its parent until it is promoted) whose only parent link (the link to its
-  `via`, or one marked `parent`) is poor, by the same reading `linkQuality` uses:
+  REED, which hangs on its parent until it is promoted) whose parent link (the link to its
+  `via`, which decides when there is one; else its only link marked `parent`) is poor, by the same reading `linkQuality` uses:
   RSSI under -85 dBm when the link has RSSI, else LQI under 80 of 255; and a router that 3 or more
   nodes route through (their `via` chains pass it, so a two-hop dependant counts for both
   routers). -85 dBm is a few dB above where 802.15.4 radios stop decoding reliably (sensitivity

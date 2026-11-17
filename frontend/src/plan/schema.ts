@@ -5,9 +5,9 @@
 //
 // To add a field: its type in models.ts, its check below. A change older plans need migrating for
 // bumps PLAN_SCHEMA_VERSION and adds a step to `migrate`.
-import { PLAN_SCHEMA_VERSION } from './constants';
+import { MAX_EXCLUDE, PLAN_SCHEMA_VERSION } from './constants';
 import { uniqueIds } from './functions';
-import type { Plan, Room } from './models';
+import type { Device, Plan, Room } from './models';
 
 type Check = (v: unknown) => boolean;
 const num: Check = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -44,6 +44,17 @@ function normalizeRoom(raw: Record<string, unknown>): Record<string, unknown> {
   return ids.length > 0 ? { ...room, area_ids: ids } : room;
 }
 
+/**
+ * A stored device item as the panel uses it: its `exclude` without repeats or its own entity, and
+ * left out when that leaves none. One that is not a list of strings is kept for `shapeProblems`.
+ */
+function normalizeDevice(raw: Record<string, unknown>): Record<string, unknown> {
+  const { exclude, ...dev } = raw as Omit<Partial<Device>, 'exclude'> & { exclude?: unknown };
+  if (!strs(exclude)) return raw;
+  const ids = uniqueIds(exclude as unknown[]).filter((e) => e !== dev.entity_id);
+  return ids.length > 0 ? { ...dev, exclude: ids } : dev;
+}
+
 /** Every list in a plan, in the order problems are reported. */
 export const PLAN_LISTS: Readonly<Record<string, ListSpec>> = {
   walls: { fields: { id: str, a: pt, b: pt, thickness: num, material: str } },
@@ -72,8 +83,15 @@ export const PLAN_LISTS: Readonly<Record<string, ListSpec>> = {
   },
   // Plans from before device markers have none: an empty list.
   devices: {
-    fields: { id: str, entity_id: str, device_id: optStr, position: pt },
+    fields: {
+      id: str,
+      entity_id: str,
+      device_id: optStr,
+      position: pt,
+      exclude: (v) => v === undefined || (strs(v) && (v as unknown[]).length <= MAX_EXCLUDE),
+    },
     optional: 'fill',
+    normalize: normalizeDevice,
   },
   materials: { fields: { id: str, name: str, db_per_cm: num }, optional: 'leave' },
 };

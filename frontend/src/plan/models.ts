@@ -112,6 +112,11 @@ export interface Device {
    */
   entity_id: string;
   device_id?: string | null;
+  /**
+   * Entities of the device left out of the item (say a smart plug's unreliable temperature): no
+   * layer, popover or menu shows them. Never `entity_id`; missing when none are.
+   */
+  exclude?: string[];
   position: Point;
 }
 

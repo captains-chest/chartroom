@@ -672,6 +672,9 @@ const editorStyles = `
   .field input, .field select { font: inherit; padding: 4px 6px; border-radius: 4px; min-width: 0;
     border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); color: inherit; }
   .inspector .row { display: flex; gap: 6px; margin: 0 0 8px; }
+  .inspector .checks { max-height: 10rem; overflow-y: auto; }
+  .inspector .check { display: flex; align-items: center; gap: 6px; padding: 1px 0; color: inherit; }
+  .inspector .check input { margin: 0; padding: 0; }
   .inspector .meta { font-size: 0.8rem; color: var(--secondary-text-color, #727272); margin: 0 0 8px; }
   .inspector .hint { font-size: 0.8rem; color: var(--secondary-text-color, #727272); }
   .inspector .calibrate { border-left: 3px solid var(--divider-color, #ddd); padding-left: 8px; margin: 0 0 8px; }

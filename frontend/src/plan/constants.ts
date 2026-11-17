@@ -30,5 +30,8 @@ export const DEFAULT_MATERIALS: readonly Material[] = [
  */
 export const LIMITS = { walls: 512, accessPoints: 32, devices: 256 } as const;
 
+/** Most entities one device item can leave out (Device.exclude). */
+export const MAX_EXCLUDE = 64;
+
 /** Default reference level at 1 m for new access points and radios, in dBm. */
 export const DEFAULT_TX_DBM = { access_point: -40, radio: -45 } as const;

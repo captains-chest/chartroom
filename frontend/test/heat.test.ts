@@ -115,7 +115,7 @@ describe('heat layers', () => {
       ]);
     expect(read('temperature')).toEqual([['m', 'sensor.m_temp', [2, 1], 21]]);
     expect(read('humidity')).toEqual([['m', 'sensor.m_hum', [2, 1], 48]]);
-    expect(layerCounts(plan, hass)).toEqual({ temperature: 1, humidity: 1, signal: 0 });
+    expect(layerCounts(plan, hass)).toEqual({ temperature: 1, humidity: 1, signal: 1 });
   });
 
   it('treats a reading as stale only past STALE_MS', () => {
@@ -144,7 +144,8 @@ describe('heat layers', () => {
 
   it('counts placed sensors per layer whatever their state', () => {
     const { plan, hass } = setup();
-    expect(layerCounts(plan, hass)).toEqual({ temperature: 6, humidity: 1, signal: 1 });
+    // Signal: the radio, and any device could be a mesh router.
+    expect(layerCounts(plan, hass)).toEqual({ temperature: 6, humidity: 1, signal: 9 });
     expect(layerCounts(null, hass)).toEqual({ temperature: 0, humidity: 0, signal: 0 });
   });
 

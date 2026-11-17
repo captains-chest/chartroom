@@ -2,7 +2,8 @@
 // from ZHA, Z-Wave JS, Zigbee2MQTT and Matter (chartroom/mesh/get), drawn as lines coloured by link
 // quality. Routes and parent links are drawn solid, other neighbours faint, and routers get a ring.
 // Hovering a device names its role and highlights its route to the coordinator or border router.
-// Loaded on demand, the first time the Mesh layer is switched on.
+// Loaded on demand, the first time the Mesh layer is switched on (or with the heatmap, whose signal
+// map is built from the mesh's routers: signal-mesh.ts).
 import type { ChartroomApi } from './api';
 import type { Hass } from './ha-types';
 import type { Plan } from './plan/models';
@@ -77,6 +78,9 @@ const RELATIONSHIPS: Record<string, string> = {
   sibling: 'neighbour (sibling)',
   neighbor: 'neighbour',
 };
+/** The network a source's nodes are on: Zigbee, Z-Wave, Thread (or the source's own name). */
+export const networkOf = (source: string): string =>
+  NETWORKS[source] ?? SOURCE_NAMES[source] ?? source;
 const pairKey = (a: string, b: string): string => (a < b ? `${a} ${b}` : `${b} ${a}`);
 const nodeName = (n: MeshNode): string =>
   (n.name || n.id) + (n.thread_role ? ` (${n.thread_role})` : '');
@@ -106,7 +110,11 @@ export const qualityColour = (q: number | null): string =>
  * Where each node is on the plan: where a device marker or source shows one of its entities, or its
  * Home Assistant device (named by the marker, or an entity's).
  */
-function placeNodes(topology: Topology, plan: Plan, hass: Hass | undefined): Map<string, Point> {
+export function placeNodes(
+  topology: Topology,
+  plan: Plan,
+  hass: Hass | undefined,
+): Map<string, Point> {
   const byEntity = new Map<string, Point>();
   const byDevice = new Map<string, Point>();
   for (const p of [...(plan.devices ?? []), ...plan.sources]) {
@@ -168,7 +176,24 @@ function roleText(n: MeshNode): string {
       : n.role === 'router'
         ? `router${tr && tr !== 'router' ? ` (${tr})` : ''}`
         : (tr ?? n.role?.replace('_', ' ') ?? 'role unknown');
-  return `${NETWORKS[n.source] ?? SOURCE_NAMES[n.source] ?? n.source} ${role}`;
+  return `${networkOf(n.source)} ${role}`;
+}
+
+/** The nodes of a device: shown by `entities`, or Home Assistant device `deviceId`. */
+export function deviceNodes(
+  topology: Topology,
+  entities: readonly string[],
+  deviceId: string | null | undefined,
+  hass: Hass | undefined,
+): MeshNode[] {
+  const devices = new Set([deviceId, ...entities.map((e) => hass?.entities?.[e]?.device_id)]);
+  devices.delete(undefined);
+  devices.delete(null);
+  return topology.nodes.filter(
+    (n) =>
+      (n.entities ?? []).some((e) => entities.includes(e)) ||
+      (!!n.device_id && devices.has(n.device_id)),
+  );
 }
 
 /** What the mesh says about a device: its role, and its route by `via` (the links on it). */
@@ -188,18 +213,11 @@ export function meshInfo(
   deviceId: string | null | undefined,
   hass: Hass | undefined,
 ): MeshInfo {
-  const devices = new Set([deviceId, ...entities.map((e) => hass?.entities?.[e]?.device_id)]);
-  devices.delete(undefined);
-  devices.delete(null);
   const byId = new Map(topology.nodes.map((n) => [n.id, n]));
   const links = new Map(topology.links.map((l) => [pairKey(l.a, l.b), l]));
   const lines: string[] = [];
   const path = new Set<string>();
-  for (const n of topology.nodes) {
-    const own =
-      (n.entities ?? []).some((e) => entities.includes(e)) ||
-      (!!n.device_id && devices.has(n.device_id));
-    if (!own) continue;
+  for (const n of deviceNodes(topology, entities, deviceId, hass)) {
     lines.push(roleText(n));
     if (n.role === 'coordinator') continue;
     const hops: string[] = [];

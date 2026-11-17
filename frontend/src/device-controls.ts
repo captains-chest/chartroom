@@ -175,7 +175,8 @@ export class DeviceControls implements PointerDelegate {
 
   /**
    * What the popover says for a marker or source, or null for one no longer on the plan. With the
-   * Mesh layer on, its role and route too, and the route is highlighted.
+   * Mesh layer on, its role and route too, and the route is highlighted; with the signal map built
+   * from the mesh, its measured links next to the map's.
    */
   #content(el: SVGElement): PopoverContent | null {
     const plan = this.view.plan;
@@ -187,7 +188,10 @@ export class DeviceControls implements PointerDelegate {
     if (!entities) return null;
     const deviceId = d ? d.device_id : hass?.entities?.[entity!]?.device_id;
     const content = popoverContent(entities, deviceId, hass);
-    content.mesh = this.view.mesh?.focus(entities, deviceId);
+    content.mesh = [
+      ...(this.view.mesh?.focus(entities, deviceId) ?? []),
+      ...(this.view.heat?.probe(entities, deviceId) ?? []),
+    ];
     return content;
   }
 

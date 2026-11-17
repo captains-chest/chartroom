@@ -19,6 +19,8 @@ import {
   signalLimitWarnings,
   wallSegments,
 } from '../src/signal';
+import { fitLevel, meshNetworks, meshSignal, pathLoss } from '../src/signal-mesh';
+import type { Topology } from '../src/mesh-layer';
 import { createHandler } from '../src/worker-protocol';
 
 /** A 6 m x 4 m room split by a partition at x = 3 with a door in it; an AP in the left half. */
@@ -72,7 +74,8 @@ describe('signal layer readings', () => {
       ['ap', -30],
       ['r', -45],
     ]);
-    expect(layerCounts(plan, hass).signal).toBe(2);
+    // Its one device could be a mesh router.
+    expect(layerCounts(plan, hass).signal).toBe(3);
     expect(layerDomain('signal', 'dBm', [-10, -200])).toEqual([-90, -30]);
   });
 
@@ -227,5 +230,90 @@ describe('signal field and worker', () => {
     expect(signalKey(signalInput(plan, hass, readings))).toBe(a);
     hass.states!['binary_sensor.door']!.state = 'on';
     expect(signalKey(signalInput(plan, hass, readings))).not.toBe(a);
+  });
+});
+
+describe('signal from the mesh', () => {
+  it('fits one level at 1 m to measured links through walls, and needs a few', () => {
+    const { plan, hass } = setup();
+    const walls = signalInput(plan, hass, []).walls;
+    const spots: Point[] = [
+      [1, 1],
+      [4, 1],
+      [2, 3.5],
+      [4.5, 3],
+      [5.5, 2],
+    ];
+    const links = spots.flatMap((a, i) =>
+      spots.slice(i + 1).map((b, j) => ({
+        a,
+        b,
+        // Measured at -50 dBm @1 m, give or take 2 dB.
+        rssi: -50 - pathLoss(walls, a, b) + (j % 2 ? 2 : -2),
+      })),
+    );
+    // Some links lose more than distance alone: through the partition or the exterior wall.
+    const dist = (l: (typeof links)[number]): number =>
+      Math.hypot(l.a[0] - l.b[0], l.a[1] - l.b[1]);
+    expect(links.some((l) => pathLoss(walls, l.a, l.b) > -free(0, dist(l)) + 3)).toBe(true);
+    const fit = fitLevel(links, walls)!;
+    expect(fit.links).toBe(10);
+    expect(fit.level).toBeCloseTo(-50, 0);
+    expect(fit.rms).toBeGreaterThan(1.5);
+    expect(fit.rms).toBeLessThan(2.5);
+    expect(fitLevel(links.slice(0, 2), walls)).toBeNull();
+    expect(fitLevel([{ ...links[0]!, rssi: NaN }, ...links.slice(1, 3)], walls)).toBeNull();
+  });
+
+  it("makes the placed routers of each network sources, at a typed level when there's no RSSI", () => {
+    const { plan, hass } = setup();
+    plan.devices = [
+      { id: 'p', entity_id: 'switch.plug', position: [2, 1] },
+      { id: 'b', entity_id: 'light.bulb', position: [4, 3] },
+      { id: 'o', entity_id: 'light.off', position: [4, 1] },
+      { id: 's', entity_id: 'sensor.t', position: [2, 2] },
+    ];
+    // The radio is the Zigbee coordinator, typed at -48 dBm.
+    plan.sources[1] = { ...plan.sources[1]!, entity_id: 'binary_sensor.zigbee', tx_dbm: -48 };
+    hass.states!['light.off'] = { entity_id: 'light.off', state: 'unavailable', attributes: {} };
+    const node = (id: string, source: string, role: string, entity: string) => ({
+      id,
+      source,
+      name: id,
+      role,
+      entities: [entity],
+    });
+    const topology: Topology = {
+      nodes: [
+        node('z:c', 'zha', 'coordinator', 'binary_sensor.zigbee'),
+        node('z:s', 'zha', 'end_device', 'sensor.t'),
+        node('z:p', 'zigbee2mqtt', 'router', 'switch.plug'),
+        node('t:b', 'matter', 'router', 'light.bulb'),
+        node('t:o', 'matter', 'router', 'light.off'),
+        node('t:x', 'matter', 'router', 'light.nowhere'),
+      ],
+      links: [
+        { a: 'z:c', b: 'z:s', source: 'zha', lqi: 200 },
+        { a: 'z:p', b: 'z:s', source: 'zha', lqi: 120 },
+        { a: 't:b', b: 't:o', source: 'matter', rssi: -60 },
+      ],
+      sources: {},
+    };
+    const [zigbee, thread, ...rest] = meshNetworks(topology, plan, hass);
+    expect(rest).toEqual([]);
+    // Zigbee: the coordinator (at the radio) and the plug; the sensor is an end device.
+    expect(zigbee!.name).toBe('Zigbee');
+    const z = meshSignal(zigbee!, signalInput(plan, hass, []).walls);
+    expect(z.sources).toEqual([
+      { id: 'z:c', position: [1, 0.5], value: -48 },
+      { id: 'z:p', position: [2, 1], value: -48 },
+    ]);
+    expect(z.fit).toBeNull();
+    expect(z.note).toBe('Zigbee · 2 routers · -48 dBm @1 m (typed; no RSSI to fit)');
+    // Thread: the bulb; the unavailable one is left out, the unplaced one not there at all.
+    const t = meshSignal(thread!, signalInput(plan, hass, []).walls);
+    expect(t.sources.map((s) => [s.id, s.value])).toEqual([['t:b', -45]]);
+    expect(t.down.map((s) => s.id)).toEqual(['t:o']);
+    expect(t.note).toBe('Thread · 1 router · -45 dBm @1 m (default; 1 measured, too few to fit)');
   });
 });

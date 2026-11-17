@@ -6,6 +6,17 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ### Added
 
+- The signal map is built from the mesh: every placed coordinator and router of a Zigbee, Z-Wave
+  or Thread network (Thread REEDs and border routers too) is a source, end devices only receive.
+  One level at 1 m is fitted per network to the RSSI its placed devices measure between them (the
+  model's path loss through the walls stays as it is), and the legend shows it with the fit's RMS
+  error: "Thread · 5 routers · fitted -53 dBm @1 m · ±4.8 dB". With fewer than 3 measured links,
+  or LQI only, the network's placed radio's level is used, else -45 dBm. A select under the
+  legend picks the network, or the access points and radios placed by hand, which stay for Wi-Fi
+  and radios outside a mesh; the default is the network with the most placed routers. With the
+  map built from a mesh, a device's popover shows the map's level at its spot and each measured
+  link next to the map's. The Signal button is enabled on any plan with devices (#89).
+
 - The mesh layer shows the routes devices take. Each link in `chartroom/mesh/get` has a
   `relationship` (`route`, `parent`, `sibling` or `neighbor`, or none when the network does not
   say) and each node a `via`, its next hop towards the coordinator or border router, from what

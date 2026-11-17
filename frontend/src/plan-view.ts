@@ -122,7 +122,7 @@ export class PlanView {
       this.#overlay,
     );
     this.#heatBox = h('div', { class: 'heat-box', hidden: true });
-    this.#heatLegend = h('div', { class: 'heat-legend', role: 'img', hidden: true });
+    this.#heatLegend = h('div', { class: 'heat-legend', role: 'group', hidden: true });
     this.el = h(
       'div',
       { class: 'plan-box' },
@@ -277,6 +277,7 @@ export class PlanView {
       this.#labelHeat = m.renderValueLabels;
       this.#declutter = m.declutterLabels;
       heat.onReadings = (data) => this.#markHeat(data);
+      heat.meshApi = () => this.#api();
       heat.setView(this.#view, this.#svg.clientWidth, this.#svg.clientHeight);
       heat.setHass(this.#hass);
       heat.setPlan(this.#plan);

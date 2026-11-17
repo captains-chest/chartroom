@@ -89,6 +89,7 @@ test.describe('signal and mesh', () => {
       localStorage.removeItem('chartroom:renderer');
       localStorage.removeItem('chartroom:layer');
       localStorage.removeItem('chartroom:mesh');
+      localStorage.removeItem('chartroom:signal-network');
     });
     await deletePlan(token(), PLAN);
   });
@@ -209,11 +210,31 @@ test.describe('signal and mesh', () => {
       await shot(page, 'mesh-route.png');
       await page.mouse.move(1, 1);
       await expect(panel.locator('svg.plan g.mesh.focus')).toHaveCount(0);
-      // With the signal layer under it, then remembered across a reload.
+      // With the signal layer under it, built from the mesh's routers (one link with RSSI is too
+      // few to fit a level), then remembered across a reload.
       await panel.getByRole('button', { name: 'Signal' }).click();
-      await expect(panel.locator('.heat-legend .heat-title')).toContainText('Signal');
+      const legend = panel.locator('.heat-legend');
+      await expect(legend.locator('.heat-title')).toContainText('Signal');
+      await expect(legend).toContainText(
+        'Test · 2 routers · -45 dBm @1 m (default; 1 measured, too few to fit)',
+      );
       await settled(panel);
       await shot(page, 'mesh-links.png');
+      // Hovering the lock: the map's level at its spot, and its measured link next to the map's.
+      const lock = (await panel.locator(`g.device[data-entity="${ids[3]}"]`).boundingBox())!;
+      await page.mouse.move(lock.x + lock.width / 2, lock.y + lock.height / 2);
+      await expect(pop).toHaveText([
+        'Test end device',
+        'Route: → Coordinator (RSSI -84 dBm) · 1 hop',
+        /^Signal map here: -\d+ dBm$/,
+        /^Coordinator: measured -84 dBm, map -\d+ dBm$/,
+      ]);
+      await page.mouse.move(1, 1);
+      // The access points and radios instead.
+      await panel.getByRole('combobox', { name: 'Signal from' }).selectOption({
+        label: 'Access points and radios',
+      });
+      await expect(legend).toContainText('2 sources');
       await page.reload();
       await expect(panel.getByRole('button', { name: 'Mesh' })).toHaveAttribute(
         'aria-pressed',

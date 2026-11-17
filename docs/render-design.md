@@ -227,8 +227,45 @@ that still overlaps (small cards) is hidden; the marker keeps its accessible nam
   cells): WebGL2 against the worker, max difference 7.6e-6 dB, no cell over the tolerance.
 - **Fixed domain** -90 to -30 dBm on a violet, red, amber, yellow-green, green ramp; no value
   labels (a level at 1 m is not a reading). The legend counts sources and wall segments.
-- Not done: calibration (fitting `n` and losses to measured RSSI), per-source radio parameters
-  from the integrations, per-source bounding-box culling.
+- Not done: per-source radio parameters from the integrations, per-source bounding-box culling.
+
+### Signal from the mesh
+
+- **Sources** (`frontend/src/signal-mesh.ts`): with the mesh topology (`chartroom/mesh/get`, the
+  same poll as the Mesh layer, read while the Signal layer is on), every coordinator or router
+  that is placed on the plan (as `placeLinks` places nodes: a marker or source showing one of its
+  entities, or its device) is a source. Thread REEDs and the border router count; end devices are
+  receivers only and add nothing. A router whose entities are all unavailable is left out (the
+  legend counts it). Networks are Zigbee (ZHA and Zigbee2MQTT together), Z-Wave and Thread; they
+  do not share routers, so the map shows one at a time. A select under the legend picks it,
+  shown when there is more than one choice; the default is the network with the most placed
+  routers, and the pick is remembered in the browser (`chartroom:signal-network`).
+- **Hand-placed sources** stay as their own choice ("Access points and radios"): Wi-Fi and radios
+  outside a mesh are a different radio, so they are not mixed into a mesh's map. A plan without
+  placed routers shows them as before. A hand-placed radio that shows a mesh node's entity (the
+  Zigbee coordinator's bridge entity, say) places that node, and its typed level is the network's
+  fallback level.
+- **Level at 1 m**, one per network, fitted to the RSSI its placed nodes measure between them
+  (end devices' links too): least squares of `rssi = level - pathLoss(a, b)`, where `pathLoss` is
+  the model's own distance term plus the walls the straight line crosses, so the fit is just the
+  mean of `rssi + pathLoss`. It needs 3 links with RSSI (`MIN_FIT_LINKS`); with fewer, or with
+  LQI only (Zigbee2MQTT; LQI scales are chip-specific and are not dBm), the level is the one
+  typed on the network's hand-placed radio, else -45 dBm. The legend says which, with the RMS
+  error of the fit: "Thread · 5 routers · fitted -53 dBm @1 m · ±4.8 dB".
+- **Only the level is fitted**: `n = 2.2` and the material losses stay. A home has a handful of
+  links in one flat, crossing few walls, with RSSI noise of a few dB, which cannot separate the
+  exponent from the wall losses. On the house in #89 a three-parameter fit (level, `n`, wall
+  scale) gave n = 4.1 and walls x 0.2 for 4.3 dB against 5.5 dB; on the snapshot in
+  `tests/fixtures/matter_thread.json` it gives n = 4.1 with walls x 0.4 (8 links), or n = 5.3
+  with a negative wall loss (5 links). The level-only fit gives -54 dBm, ±6.8 dB (8 links, border
+  router at the coordinator's spot) and -53 dBm, ±4.8 dB (the 5 links between the placed lamps
+  and plugs). It also keeps the map consistent with the materials set in the editor.
+- **Measurements in the popover**: with the map built from a mesh, hovering a placed node's
+  marker shows the map's level at its spot from the other routers ("Signal map here: -61 dBm")
+  and each measured link next to the model's level for it ("Kitchen plug: measured -63 dBm, map
+  -64 dBm"). Large differences point at a wall of another material, a device moved since it was
+  placed, or a poor antenna.
+- The 32-source cap and the legend's "left out" note apply to routers as to placed sources.
 
 ### Mesh links
 

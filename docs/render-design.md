@@ -304,6 +304,22 @@ that still overlaps (small cards) is hidden; the marker keeps its accessible nam
   menu adds Route before Details: it shows the same popover on the marker and highlights the route
   until the next press anywhere, Esc, a wheel, a new plan or the marker's blur (hover leaves it
   alone meanwhile). It calls no service.
+- Weak spots (#124, `weakSpots`, pure): a node that does not route (an end device, or a Thread
+  REED, which hangs on its parent until it is promoted) whose only parent link (the link to its
+  `via`, or one marked `parent`) is poor, by the same reading `linkQuality` uses:
+  RSSI under -85 dBm when the link has RSSI, else LQI under 80 of 255; and a router that 3 or more
+  nodes route through (their `via` chains pass it, so a two-hop dependant counts for both
+  routers). -85 dBm is a few dB above where 802.15.4 radios stop decoding reliably (sensitivity
+  around -95 to -100 dBm, less fading margin), the bottom of the colour scale's red end; LQI 80 is
+  about a third of the scale, where Zigbee stacks start to drop or re-route a link. 3 dependants:
+  one or two devices behind a plug is ordinary, while three or more means unplugging one plug
+  takes a noticeable share of a home mesh down until they rejoin elsewhere; small home meshes
+  (10-30 nodes) then show only their real choke points. The coordinator or border router is not
+  counted, since every route ends there. On the plan a weak spot's ring is drawn in the warning
+  colour (an end device gets a ring only then); the popover names it after the route ("Weak: only
+  parent link is poor (RSSI -91 dBm)", "Weak: 4 devices route through this"). Mains-powered
+  Zigbee or Z-Wave devices that do not route are not told apart from battery end devices: the
+  readers do not carry ZHA's `power_source`, and Zigbee2MQTT's network map has no power source. (#134)
 - The panel layer (`mesh-layer.ts`, its own lazy chunk, loaded on first use) places a node where a
   device marker shows its device (or one of its entities) or a source one of its entities, and draws a
   line for each link with both ends on the plan: hue from red (bad) to green (good)

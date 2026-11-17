@@ -171,7 +171,7 @@ test.describe('signal and mesh', () => {
         links: [
           { a: 'z:c', b: 'z:p', lqi: 240, relationship: 'route' },
           { a: 'z:p', b: 'z:d', lqi: 90, relationship: 'parent' },
-          { a: 'z:c', b: 'z:l', rssi: -84, relationship: 'parent' },
+          { a: 'z:c', b: 'z:l', rssi: -88, relationship: 'parent' },
           { a: 'z:d', b: 'z:l' },
           { a: 'z:p', b: 'z:x', lqi: 200, relationship: 'sibling' },
         ],
@@ -190,14 +190,16 @@ test.describe('signal and mesh', () => {
       expect(q.map((v) => (v === null ? null : Math.round(v * 100) / 100))).toEqual([
         0.94,
         0.35,
-        0.12,
+        0.04,
         null,
       ]);
       await expect(lines.first().locator('title')).toHaveText(
         'Coordinator – Coffee plug: LQI 240 · route',
       );
-      // The coordinator and the plug get a ring.
-      await expect(panel.locator('svg.plan g.mesh line.mesh-node')).toHaveCount(2);
+      // The coordinator and the plug get a ring, and so does the lock: its only parent link is
+      // poor (#124).
+      await expect(panel.locator('svg.plan g.mesh line.mesh-node')).toHaveCount(3);
+      await expect(panel.locator('svg.plan g.mesh line.mesh-node.end.weak')).toHaveCount(1);
       // Hovering the door names its role and route, and highlights the route's two links.
       const door = (await panel.locator(`g.device[data-entity="${ids[2]}"]`).boundingBox())!;
       await page.mouse.move(door.x + door.width / 2, door.y + door.height / 2);
@@ -245,14 +247,16 @@ test.describe('signal and mesh', () => {
       );
       await settled(panel);
       await shot(page, 'mesh-links.png');
-      // Hovering the lock: the map's level at its spot, and its measured link next to the map's.
+      // Hovering the lock: its weak spot, the map's level at its spot, and its measured link next
+      // to the map's.
       const lock = (await panel.locator(`g.device[data-entity="${ids[3]}"]`).boundingBox())!;
       await page.mouse.move(lock.x + lock.width / 2, lock.y + lock.height / 2);
       await expect(pop).toHaveText([
         'Test end device',
-        'Route: → Coordinator (RSSI -84 dBm) · 1 hop',
+        'Route: → Coordinator (RSSI -88 dBm) · 1 hop',
+        'Weak: only parent link is poor (RSSI -88 dBm)',
         /^Signal map here: -\d+ dBm$/,
-        /^Coordinator: measured -84 dBm, map -\d+ dBm$/,
+        /^Coordinator: measured -88 dBm, map -\d+ dBm$/,
       ]);
       await page.mouse.move(1, 1);
       // The access points and radios instead.

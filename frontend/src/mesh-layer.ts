@@ -2,6 +2,7 @@
 // from ZHA, Z-Wave JS, Zigbee2MQTT and Matter (chartroom/mesh/get), drawn as lines coloured by link
 // quality. Routes and parent links are drawn solid, other neighbours faint, and routers get a ring.
 // Hovering a device names its role and highlights its route to the coordinator or border router.
+// Weak spots (`weakSpots`) get a warning-coloured ring and a line in the popover.
 // Loaded on demand, the first time the Mesh layer is switched on (or with the heatmap, whose signal
 // map is built from the mesh's routers: signal-mesh.ts).
 import type { ChartroomApi } from './api';
@@ -51,10 +52,14 @@ export interface PlacedLink {
   key: string;
   label: string;
 }
-/** A placed coordinator or router, drawn with a ring; a REED (could route, does not) fainter. */
+/**
+ * A placed coordinator or router, drawn with a ring; a REED (could route, does not) fainter. An
+ * end device gets one only when it is a weak spot.
+ */
 export interface PlacedNode {
   at: Point;
-  ring: 'coordinator' | 'router' | 'reed';
+  ring: 'coordinator' | 'router' | 'reed' | 'end';
+  weak: boolean;
 }
 
 /** How often the topology is read again while the layer is on. */
@@ -157,14 +162,62 @@ export function placeLinks(topology: Topology, plan: Plan, hass: Hass | undefine
   return out;
 }
 
-/** The placed coordinators and routers, for their rings. */
-export function placeRouters(topology: Topology, plan: Plan, hass: Hass | undefined): PlacedNode[] {
+/** The placed coordinators, routers and weak spots, for their rings. */
+export function placeRings(topology: Topology, plan: Plan, hass: Hass | undefined): PlacedNode[] {
   const at = placeNodes(topology, plan, hass);
+  const weak = weakSpots(topology);
   return topology.nodes.flatMap((n): PlacedNode[] => {
     const p = at.get(n.id);
-    if (!p || (n.role !== 'coordinator' && n.role !== 'router')) return [];
-    return [{ at: p, ring: n.thread_role === 'REED' ? 'reed' : n.role }];
+    const routes = n.role === 'coordinator' || n.role === 'router';
+    if (!p || (!routes && !weak.has(n.id))) return [];
+    const ring = n.thread_role === 'REED' ? 'reed' : routes ? n.role! : 'end';
+    return [{ at: p, ring: ring as PlacedNode['ring'], weak: weak.has(n.id) }];
   });
+}
+
+/** A parent link weaker than this is poor: LQI (0-255) under 80, else RSSI under -85 dBm. */
+export const POOR_LQI = 80;
+export const POOR_RSSI = -85;
+/** A router this many devices route through (by `via`) is one plug away from cutting them off. */
+export const MANY_DEPENDANTS = 3;
+
+/** The reading that makes a link poor, by RSSI when it has one (as `linkQuality`), else LQI; or null. */
+function poorReading(l: MeshLink): string | null {
+  if (typeof l.rssi === 'number' && Number.isFinite(l.rssi))
+    return l.rssi < POOR_RSSI ? `RSSI ${Math.round(l.rssi)} dBm` : null;
+  if (typeof l.lqi === 'number' && Number.isFinite(l.lqi))
+    return l.lqi < POOR_LQI ? `LQI ${Math.round(l.lqi)}` : null;
+  return null;
+}
+
+/**
+ * The weak spots of a topology, by node id, with what makes each weak:
+ * - a node that does not route (an end device, a Thread REED) whose only parent link (to its
+ *   `via`, or marked `parent`) is poor: "Weak: only parent link is poor (LQI 62)";
+ * - a router that MANY_DEPENDANTS or more nodes route through (their `via` chains pass it): "Weak:
+ *   4 devices route through this". The coordinator is left out: every route ends there.
+ */
+export function weakSpots(topology: Topology): Map<string, string> {
+  const out = new Map<string, string>();
+  const byId = new Map(topology.nodes.map((n) => [n.id, n]));
+  const dependants = new Map<string, number>();
+  for (const n of topology.nodes) {
+    const seen = new Set([n.id]);
+    for (let hop = byId.get(n.via ?? ''); hop && !seen.has(hop.id); hop = byId.get(hop.via ?? '')) {
+      seen.add(hop.id);
+      if (hop.role === 'router') dependants.set(hop.id, (dependants.get(hop.id) ?? 0) + 1);
+    }
+    if (n.role !== 'end_device' && n.thread_role !== 'REED') continue;
+    const parents = topology.links.filter((l) => {
+      const other = l.a === n.id ? l.b : l.b === n.id ? l.a : null;
+      return other !== null && (other === n.via || l.relationship === 'parent');
+    });
+    const poor = parents.length === 1 && poorReading(parents[0]!);
+    if (poor) out.set(n.id, `Weak: only parent link is poor (${poor})`);
+  }
+  for (const [id, k] of dependants)
+    if (k >= MANY_DEPENDANTS) out.set(id, `Weak: ${count(k, 'device')} route through this`);
+  return out;
 }
 
 /** "Thread router (leader)", "Zigbee end device", "Thread REED: can route, does not yet". */
@@ -217,6 +270,7 @@ export function meshInfo(
   const links = new Map(topology.links.map((l) => [pairKey(l.a, l.b), l]));
   const lines: string[] = [];
   const path = new Set<string>();
+  const weak = weakSpots(topology);
   for (const n of deviceNodes(topology, entities, deviceId, hass)) {
     lines.push(roleText(n));
     if (n.role === 'coordinator') continue;
@@ -240,6 +294,8 @@ export function meshInfo(
       lines.push(
         `Route: ${hops.join(' ')} · ${count(hops.length, 'hop')}${cur.role === 'coordinator' ? '' : ', then not reported'}`,
       );
+    const w = weak.get(n.id);
+    if (w) lines.push(w);
   }
   return { lines, path };
 }
@@ -327,6 +383,7 @@ const STYLES = `
   .mesh-node { stroke: var(--primary-text-color, #222); stroke-width: 36px; stroke-linecap: round; vector-effect: non-scaling-stroke; opacity: 0.4; pointer-events: none; }
   .mesh-node.reed { opacity: 0.15; }
   .mesh-node.coordinator { stroke: var(--primary-color, #03a9f4); stroke-width: 40px; opacity: 0.7; }
+  .mesh-node.weak { stroke: var(--warning-color, #ffa600); opacity: 0.8; }
 `;
 
 export class MeshLayer {
@@ -446,9 +503,9 @@ export class MeshLayer {
       ),
       // A zero-length line with a round cap is a disc of a fixed size on screen; the marker drawn
       // over it leaves a ring.
-      ...(t && plan ? placeRouters(t, plan, this.#hass) : []).map((n) =>
+      ...(t && plan ? placeRings(t, plan, this.#hass) : []).map((n) =>
         s('line', {
-          class: `mesh-node ${n.ring}`,
+          class: `mesh-node ${n.ring}${n.weak ? ' weak' : ''}`,
           x1: n.at[0],
           y1: n.at[1],
           x2: n.at[0],

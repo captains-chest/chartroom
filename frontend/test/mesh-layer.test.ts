@@ -4,10 +4,11 @@ import {
   linkQuality,
   meshInfo,
   placeLinks,
-  placeRouters,
+  placeRings,
   qualityColour,
   sourceNote,
   type Topology,
+  weakSpots,
 } from '../src/mesh-layer';
 import { emptyPlan } from '../src/plan/functions';
 
@@ -152,7 +153,7 @@ describe('mesh links', () => {
       ['l p', true],
     ]);
     expect(links[0]!.label).toBe('Door – Plug: RSSI -70 dBm · parent link');
-    expect(placeRouters(t, plan, hass).map((n) => n.ring)).toEqual(['router', 'reed']);
+    expect(placeRings(t, plan, hass).map((n) => n.ring)).toEqual(['router', 'reed']);
     const door = meshInfo(t, ['binary_sensor.door'], null, hass);
     expect(door.lines).toEqual([
       'Thread end device',
@@ -169,5 +170,71 @@ describe('mesh links', () => {
     expect(sourceNote({ nodes: [], links: [], sources: { zha: 'absent' } }, 0)).toContain('no ZHA');
     expect(sourceNote(null, 0)).toBe('Mesh: loading…');
     expect(sourceNote(null, 0, 'boom')).toBe('Mesh: boom');
+  });
+});
+
+describe('weak spots', () => {
+  const node = (id: string, role: string, via?: string, extra = {}) => ({
+    id,
+    source: 'zha',
+    name: id,
+    role,
+    via: via ?? null,
+    ...extra,
+  });
+
+  it('flags a device whose only parent link is poor, by RSSI when it has one', () => {
+    const t: Topology = {
+      nodes: [
+        node('c', 'coordinator'),
+        node('lqi', 'end_device', 'c'),
+        node('rssi', 'end_device', 'c'),
+        node('fine', 'end_device', 'c'),
+        node('reed', 'router', 'c', { thread_role: 'REED' }),
+        node('r', 'router', 'c'),
+      ],
+      links: [
+        { a: 'c', b: 'lqi', source: 'zha', lqi: 62, relationship: 'parent' },
+        { a: 'c', b: 'rssi', source: 'zha', lqi: 200, rssi: -91 },
+        { a: 'c', b: 'fine', source: 'zha', lqi: 40, rssi: -70, relationship: 'parent' },
+        // A REED does not route yet: it hangs on its parent like an end device.
+        { a: 'c', b: 'reed', source: 'zha', rssi: -86, relationship: 'parent' },
+        // A router has other ways out.
+        { a: 'c', b: 'r', source: 'zha', lqi: 10, relationship: 'route' },
+      ],
+      sources: { zha: 'ok' },
+    };
+    expect(Object.fromEntries(weakSpots(t))).toEqual({
+      lqi: 'Weak: only parent link is poor (LQI 62)',
+      rssi: 'Weak: only parent link is poor (RSSI -91 dBm)',
+      reed: 'Weak: only parent link is poor (RSSI -86 dBm)',
+    });
+  });
+
+  it('flags a router that many devices route through, two hops down too', () => {
+    const t: Topology = {
+      nodes: [
+        node('c', 'coordinator'),
+        node('r1', 'router', 'c', { entities: ['switch.plug'] }),
+        node('r2', 'router', 'r1'),
+        node('e1', 'end_device', 'r2'),
+        node('e2', 'end_device', 'r2'),
+        node('e3', 'end_device', 'c'),
+      ],
+      links: [],
+      sources: { zha: 'ok' },
+    };
+    // r1 carries r2 and, through it, e1 and e2; r2 only two; the coordinator is not counted.
+    expect(Object.fromEntries(weakSpots(t))).toEqual({
+      r1: 'Weak: 3 devices route through this',
+    });
+    const plan = emptyPlan('Weak');
+    plan.devices = [{ id: 'a', entity_id: 'switch.plug', position: [1, 1] }];
+    expect(placeRings(t, plan, undefined)).toEqual([{ at: [1, 1], ring: 'router', weak: true }]);
+    expect(meshInfo(t, ['switch.plug'], null, undefined).lines).toEqual([
+      'Zigbee router',
+      'Route: → c · 1 hop',
+      'Weak: 3 devices route through this',
+    ]);
   });
 });

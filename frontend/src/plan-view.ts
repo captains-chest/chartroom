@@ -584,10 +584,6 @@ export const planViewStyles = `
     box-shadow: 0 0 0 1px var(--card-background-color, #fff); }
   .heat-scale { display: flex; justify-content: space-between; color: var(--secondary-text-color, #666); margin-top: 2px; }
   .heat-note { color: var(--secondary-text-color, #666); margin-top: 2px; }
-  .mesh[hidden] { display: none; }
-  .mesh-link { stroke-width: 2.5px; vector-effect: non-scaling-stroke; stroke-linecap: round; opacity: 0.85; pointer-events: stroke; }
-  .mesh-link.unknown { stroke-dasharray: 4 4; }
-  .mesh-link.offline { stroke-dasharray: 1 5; opacity: 0.6; }
   .mesh-note { position: absolute; left: 8px; bottom: 8px; max-width: 60%; font-size: 11px; padding: 2px 6px; border-radius: 4px;
     background: var(--card-background-color, #fff); opacity: 0.9; color: var(--secondary-text-color, #555); overflow-wrap: anywhere; }
   .mesh-note[hidden] { display: none; }

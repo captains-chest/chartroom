@@ -245,6 +245,24 @@ that still overlaps (small cards) is hidden; the marker keeps its accessible nam
   Each source reports `ok`, `absent`, `pending` or `error`; a missing integration is `absent`, not
   an error. `chartroom/mesh/get` returns `{nodes, links, sources}`; nodes carry the Home
   Assistant device id and entities when known.
+- Routes (#90): each link has a `relationship` (`route`, `parent`, `sibling`, `neighbor`, or null
+  when the source does not say; both directions merge to the most telling) and each node a `via`,
+  its next hop towards the coordinator or border router. Zigbee: the neighbour table's
+  relationship (Parent/Child, Sibling); an end device's `via` is its parent; a router's is its
+  routing table's next hop for the coordinator (ZHA `routes`, Zigbee2MQTT links' `routes`, now
+  asked for with `routes: true`), else the coordinator when it is a neighbour. Z-Wave: the last
+  working route's hops are `route` (a node without one keeps its assumed controller link, with no
+  relationship). Thread: an end device's or REED's neighbour entry, or a router's `IsChild` entry,
+  is `parent`; a router's next hop to the border router is picked as OpenThread does, from its route
+  table (direct link cost from the two-way link quality, 3→1, 2→2, 1→4, against the next hop's
+  link cost plus its path cost; direct wins ties), with router IDs mapped to nodes through the
+  tables' extended addresses and RLOC16s. Other links are `neighbor`.
+- The layer draws `route` and `parent` links solid and `sibling`/`neighbor` ones faint, and a ring
+  under each placed coordinator, router and REED: a zero-length SVG line with a round cap and a
+  non-scaling stroke, so a disc of fixed screen size that the marker covers but for its edge. Its
+  styles ship in the lazy chunk (a `<style>` in the layer's group). Hovering or focusing a marker
+  asks the layer (`focus`) for the device's nodes' roles and routes, following `via` with each
+  hop's reading; the popover shows them and the route's links are drawn thick while the rest dim.
 - The panel layer (`mesh-layer.ts`, its own lazy chunk, loaded on first use) places a node where a
   device marker shows its device (or one of its entities) or a source one of its entities, and draws a
   line for each link with both ends on the plan: hue from red (bad) to green (good)

@@ -1,6 +1,6 @@
 {
   "data": {
-    "routes": false,
+    "routes": true,
     "type": "raw",
     "value": {
       "nodes": [
@@ -29,28 +29,38 @@
           "target": { "ieeeAddr": "0x00124b0000000001", "networkAddress": 0 },
           "lqi": 150,
           "depth": 1,
-          "relationship": 0
+          "relationship": 2,
+          "routes": []
+        },
+        {
+          "source": { "ieeeAddr": "0x00158d0000000003", "networkAddress": 15437 },
+          "target": { "ieeeAddr": "0x00124b0000000001", "networkAddress": 0 },
+          "lqi": 10,
+          "depth": 2,
+          "relationship": 4,
+          "routes": []
         },
         {
           "sourceIeeeAddr": "0x00124b0000000001",
           "targetIeeeAddr": "0x00158d0000000002",
           "linkquality": 170,
           "depth": 0,
-          "relationship": 1
+          "relationship": 2,
+          "routes": [
+            {
+              "destinationAddress": 0,
+              "status": "ACTIVE",
+              "nextHop": 0
+            }
+          ]
         },
         {
-          "source": { "ieeeAddr": "0x00158d0000000003" },
-          "target": { "ieeeAddr": "0x00158d0000000002" },
+          "source": { "ieeeAddr": "0x00158d0000000003", "networkAddress": 15437 },
+          "target": { "ieeeAddr": "0x00158d0000000002", "networkAddress": 6699 },
           "lqi": 70,
           "depth": 2,
-          "relationship": 0
-        },
-        {
-          "source": { "ieeeAddr": "0x00158d0000000003" },
-          "target": { "ieeeAddr": "0x00124b0000000001" },
-          "lqi": 10,
-          "depth": 1,
-          "relationship": 4
+          "relationship": 1,
+          "routes": []
         }
       ]
     }

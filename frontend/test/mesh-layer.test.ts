@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vite-plus/test';
 import type { Hass } from '../src/ha-types';
 import {
   linkQuality,
+  meshInfo,
   placeLinks,
+  placeRouters,
   qualityColour,
   sourceNote,
   type Topology,
@@ -110,6 +112,57 @@ describe('mesh links', () => {
       'Plug (leader) – Lamp (REED): LQI 170, RSSI -81 dBm (offline, last report)',
     );
     expect(sourceNote(thread, 1)).toBe('Mesh: 1 link on this plan · Matter');
+  });
+
+  it("draws neighbours faint and rings routers, and names a device's role and route", () => {
+    const plan = emptyPlan('Routes');
+    plan.devices = [
+      { id: 'a', entity_id: 'switch.plug', position: [1, 1] },
+      { id: 'b', entity_id: 'light.lamp', position: [4, 1] },
+      { id: 'c', entity_id: 'binary_sensor.door', position: [4, 4] },
+    ];
+    const node = (id: string, name: string, role: string, extra = {}) => ({
+      id,
+      source: 'matter',
+      name,
+      role,
+      entities: [],
+      ...extra,
+    });
+    const t: Topology = {
+      nodes: [
+        node('br', 'Border router', 'coordinator', { thread_role: 'border router' }),
+        node('p', 'Plug', 'router', { via: 'br', entities: ['switch.plug'] }),
+        node('l', 'Lamp', 'router', { thread_role: 'REED', entities: ['light.lamp'] }),
+        node('d', 'Door', 'end_device', { via: 'p', device_id: 'dev_d' }),
+      ],
+      links: [
+        { a: 'br', b: 'p', source: 'matter', lqi: 255, relationship: 'route' },
+        { a: 'd', b: 'p', source: 'matter', rssi: -70, relationship: 'parent' },
+        { a: 'l', b: 'p', source: 'matter', rssi: -60, relationship: 'neighbor' },
+      ],
+      sources: { matter: 'ok' },
+    };
+    const hass: Hass = {
+      entities: { 'binary_sensor.door': { entity_id: 'binary_sensor.door', device_id: 'dev_d' } },
+    };
+    const links = placeLinks(t, plan, hass);
+    expect(links.map((l) => [l.key, l.faint])).toEqual([
+      ['d p', false],
+      ['l p', true],
+    ]);
+    expect(links[0]!.label).toBe('Door – Plug: RSSI -70 dBm · parent link');
+    expect(placeRouters(t, plan, hass).map((n) => n.ring)).toEqual(['router', 'reed']);
+    const door = meshInfo(t, ['binary_sensor.door'], null, hass);
+    expect(door.lines).toEqual([
+      'Thread end device',
+      'Route: → Plug (RSSI -70 dBm) → Border router (LQI 255) · 2 hops',
+    ]);
+    expect([...door.path]).toEqual(['d p', 'br p']);
+    expect(meshInfo(t, ['light.lamp'], null, hass).lines).toEqual([
+      'Thread REED: can route, does not yet',
+      'Route: not reported',
+    ]);
   });
 
   it('says when there is no network', () => {

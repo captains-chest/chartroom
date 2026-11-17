@@ -6,12 +6,24 @@ over the data each integration exposes (ZHA's device info, Z-Wave JS node statis
 raw network map, the Matter server's Thread diagnostics), so they are tested with fixtures.
 Everything is normalised to::
 
-    nodes: [{id, source, name, role, thread_role, device_id, entities}]
-    links: [{a, b, source, lqi, rssi, offline}]   # undirected, a < b
+    nodes: [{id, source, name, role, thread_role, via, device_id, entities}]
+    links: [{a, b, source, lqi, rssi, offline, relationship}]   # undirected, a < b
 
 with role one of coordinator, router, end_device (or None), thread_role the Thread role behind it
 (Matter only, else None), LQI 0-255 / RSSI in dBm, or None, and offline set when an end is a node
 its network reports unavailable (the link is from its last report).
+
+``relationship`` is what the network says the link is, or None when it does not say:
+
+- ``route``: a hop of a node's route to the coordinator or border router (a routing table's next
+  hop, Z-Wave's last working route);
+- ``parent``: one end is the other's parent (Zigbee's join tree, a Thread child's parent);
+- ``sibling``: two Zigbee routers in each other's neighbour table;
+- ``neighbor``: the two hear each other, and nothing more is known.
+
+``via`` is a node's next hop towards its coordinator or border router, when its network says: an
+end device's parent, or a router's routing table entry for the coordinator. Following it gives the
+path a node's traffic takes.
 """
 
 from __future__ import annotations
@@ -47,6 +59,13 @@ Z2M_WAIT_S = 10
 ROLES = {"coordinator": "coordinator", "router": "router", "enddevice": "end_device"}
 # Zigbee neighbour relationships that are not a live link (ZHA names, Zigbee2MQTT numbers).
 STALE_RELATIONSHIPS = {"PreviousChild", "Previous_Child", 4}
+# What a Zigbee neighbour table entry says the neighbour is to the table's device (ZHA names,
+# Zigbee2MQTT numbers): its parent, its child or a sibling. Anything else is just a neighbour.
+ZIGBEE_PARENT = {"Parent", 0}
+ZIGBEE_CHILD = {"Child", 1}
+ZIGBEE_SIBLING = {"Sibling", 2}
+# When both ends report a link, the more telling relationship wins.
+RELATIONSHIP_RANK = {"neighbor": 1, "sibling": 2, "parent": 3, "route": 4}
 
 # Z-Wave reports 125-127 in its RSSI fields as "not available" markers, not readings.
 ZWAVE_RSSI_UNAVAILABLE_MIN = 125
@@ -69,6 +88,10 @@ THREAD_LQI_SCALE = 85
 # the device's attachment, and its age keeps growing while the link works (a Matter button's parent
 # entry read 173 181 s, then 346 004 s two days later, while the button kept working).
 THREAD_STALE_AGE_S = 300
+# Thread route cost of a link by its two-way link quality (0-3), as OpenThread counts it.
+THREAD_LINK_COST = {1: 4, 2: 2, 3: 1}
+# A route table's next hop when there is none.
+THREAD_NO_ROUTER = 63
 # Home Assistant hardware whose radio can run the OpenThread RCP firmware (``spinel``).
 THREAD_RADIO_DOMAINS = (
     "homeassistant_connect_zbt2",
@@ -86,6 +109,7 @@ class MeshNode:
     name: str
     role: str | None
     thread_role: str | None = None
+    via: str | None = None
     device_id: str | None = None
     entities: tuple[str, ...] = ()
     # Device registry identifiers that find the node's device when the source does not say.
@@ -99,6 +123,7 @@ class MeshNode:
             "name": self.name,
             "role": self.role,
             "thread_role": self.thread_role,
+            "via": self.via,
             "device_id": self.device_id,
             "entities": list(self.entities),
         }
@@ -130,7 +155,9 @@ class _Links:
         self.source = source
         self.by_pair: dict[tuple[str, str], dict[str, Any]] = {}
 
-    def add(self, a: str, b: str, lqi: Any = None, rssi: Any = None) -> None:
+    def add(
+        self, a: str, b: str, lqi: Any = None, rssi: Any = None, relationship: str | None = None
+    ) -> None:
         if a == b:
             return
         key = (a, b) if a < b else (b, a)
@@ -143,14 +170,77 @@ class _Links:
                 "lqi": None,
                 "rssi": None,
                 "offline": False,
+                "relationship": None,
             },
         )
+        if RELATIONSHIP_RANK.get(relationship or "", 0) > RELATIONSHIP_RANK.get(
+            link["relationship"] or "", 0
+        ):
+            link["relationship"] = relationship
         for name, value in (("lqi", _num(lqi)), ("rssi", _num(rssi))):
             if value is not None:
                 link[name] = value if link[name] is None else min(link[name], value)
 
     def list(self) -> list[dict[str, Any]]:
         return list(self.by_pair.values())
+
+
+def _zigbee_relationship(value: Any) -> str:
+    if value in ZIGBEE_PARENT or value in ZIGBEE_CHILD:
+        return "parent"
+    return "sibling" if value in ZIGBEE_SIBLING else "neighbor"
+
+
+def _nwk(value: Any) -> int | None:
+    """Return a Zigbee network address given as a number or as hex text ("0x1A2B")."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    try:
+        return int(str(value), 16)
+    except ValueError:
+        return None
+
+
+def _with_via(nodes: dict[str, MeshNode], via: dict[str, str]) -> list[MeshNode]:
+    return [replace(n, via=via[nid]) if nid in via else n for nid, n in nodes.items()]
+
+
+class _ZigbeeVia:
+    """Each Zigbee node's next hop to the coordinator, from neighbour and routing tables.
+
+    An end device's is its parent. A router's is its routing table's next hop for the coordinator;
+    without one, the coordinator itself when it is in the router's neighbour table, since Zigbee
+    sends to a neighbour directly. A router's parent is only where it joined, not where it sends.
+    """
+
+    def __init__(self, nodes: dict[str, MeshNode], links: _Links) -> None:
+        self.nodes = nodes
+        self.links = links
+        self.via: dict[str, str] = {}
+        self.direct: dict[str, str] = {}
+
+    def neighbor(self, holder: str, nb: str, rel: Any, lqi: Any) -> None:
+        """Add an entry for ``nb`` in ``holder``'s neighbour table."""
+        self.links.add(holder, nb, lqi=lqi, relationship=_zigbee_relationship(rel))
+        mine, theirs = self.nodes[holder].role, self.nodes[nb].role
+        if rel in ZIGBEE_PARENT and mine == "end_device":
+            self.via[holder] = nb
+        elif rel in ZIGBEE_CHILD and theirs == "end_device":
+            self.via[nb] = holder
+        elif mine == "router" and theirs == "coordinator":
+            self.direct[holder] = nb
+
+    def route(self, holder: str, hop: str) -> None:
+        """Note that ``holder``'s routing table sends to the coordinator through ``hop``."""
+        if hop != holder:
+            self.links.add(holder, hop, relationship="route")
+            self.via[holder] = hop
+
+    def nodes_with_via(self) -> list[MeshNode]:
+        for router, coordinator in self.direct.items():
+            if router not in self.via:
+                self.route(router, coordinator)
+        return _with_via(self.nodes, self.via)
 
 
 def _zha_id(ieee: Any) -> str:
@@ -176,12 +266,23 @@ def parse_zha(devices: list[dict[str, Any]]) -> Topology:
         for nid, dev in present
     }
     links = _Links("zha")
+    hops = _ZigbeeVia(nodes, links)
+    by_nwk = {nwk: nid for nid, dev in present if (nwk := _nwk(dev.get("nwk"))) is not None}
+    coordinator = next((nwk for nwk, nid in by_nwk.items() if nodes[nid].role == "coordinator"), 0)
     for a, dev in present:
         for nb in dev.get("neighbors") or ():
             b = _zha_id(nb.get("ieee", ""))
             if b in nodes and nb.get("relationship") not in STALE_RELATIONSHIPS:
-                links.add(a, b, lqi=nb.get("lqi"))
-    return list(nodes.values()), links.list()
+                hops.neighbor(a, b, nb.get("relationship"), nb.get("lqi"))
+        for rt in dev.get("routes") or ():
+            if (
+                isinstance(rt, dict)
+                and str(rt.get("route_status", "")).lower() == "active"
+                and _nwk(rt.get("dest_nwk")) == coordinator
+                and (hop := by_nwk.get(_nwk(rt.get("next_hop")))) is not None
+            ):
+                hops.route(a, hop)
+    return hops.nodes_with_via(), links.list()
 
 
 def _zwave_rssi(value: Any) -> float | None:
@@ -217,10 +318,13 @@ def parse_zwave(nodes_in: list[dict[str, Any]]) -> Topology:
     }
     controllers = {n.get("home_id"): nid for nid, n in present if n.get("is_controller")}
     links = _Links("zwave_js")
+    via: dict[str, str] = {}
     for nid, n in present:
         home = n.get("home_id")
         if n.get("is_controller") or home not in controllers:
             continue
+        # Without a last working route, the link to the controller is assumed, not reported.
+        relationship = "route" if n.get("lwr") else None
         lwr = n.get("lwr") or {}
         hops = [controllers[home]] + [
             f"zwave_js:{_zwave_key(home, r)}" for r in lwr.get("repeaters") or () if r is not None
@@ -231,8 +335,10 @@ def parse_zwave(nodes_in: list[dict[str, Any]]) -> Topology:
             rssi = _zwave_rssi(n.get("rssi"))
         for i in range(len(hops) - 1):
             last = i == len(hops) - 2
-            links.add(hops[i], hops[i + 1], rssi=rssi if last else None)
-    return list(nodes.values()), links.list()
+            links.add(hops[i], hops[i + 1], rssi=rssi if last else None, relationship=relationship)
+        if relationship:
+            via[nid] = hops[-2]
+    return _with_via(nodes, via), links.list()
 
 
 def parse_z2m(networkmap: dict[str, Any]) -> Topology:
@@ -240,12 +346,15 @@ def parse_z2m(networkmap: dict[str, Any]) -> Topology:
     data = networkmap.get("data", networkmap) if isinstance(networkmap, dict) else {}
     value = data.get("value", data) if isinstance(data, dict) else {}
     nodes: dict[str, MeshNode] = {}
+    by_nwk: dict[int, str] = {}
     for n in value.get("nodes") or ():
         ieee = str(n.get("ieeeAddr") or "").lower()
         if not ieee:
             continue
         nid = f"z2m:{ieee}"
         role = _role(n.get("type"))
+        if (nwk := _nwk(n.get("networkAddress"))) is not None:
+            by_nwk[nwk] = nid
         # Home Assistant registers the coordinator as Zigbee2MQTT's Bridge device, not by its ieee.
         prefix = "zigbee2mqtt_bridge_" if role == "coordinator" else "zigbee2mqtt_"
         nodes[nid] = MeshNode(
@@ -255,15 +364,28 @@ def parse_z2m(networkmap: dict[str, Any]) -> Topology:
             role=role,
             identifiers=(("mqtt", f"{prefix}{ieee}"),),
         )
+    coordinator = next((nwk for nwk, nid in by_nwk.items() if nodes[nid].role == "coordinator"), 0)
     links = _Links("zigbee2mqtt")
+    hops = _ZigbeeVia(nodes, links)
     for link in value.get("links") or ():
+        # A link is an entry of the target's neighbour table: the source is the neighbour.
         src = link.get("source") or {}
         dst = link.get("target") or {}
         a = f"z2m:{str(link.get('sourceIeeeAddr') or src.get('ieeeAddr') or '').lower()}"
         b = f"z2m:{str(link.get('targetIeeeAddr') or dst.get('ieeeAddr') or '').lower()}"
-        if a in nodes and b in nodes and link.get("relationship") not in STALE_RELATIONSHIPS:
-            links.add(a, b, lqi=link.get("lqi", link.get("linkquality")))
-    return list(nodes.values()), links.list()
+        rel = link.get("relationship")
+        if a not in nodes or b not in nodes or rel in STALE_RELATIONSHIPS:
+            continue
+        hops.neighbor(b, a, rel, link.get("lqi", link.get("linkquality")))
+        # The target's routing table entries whose next hop is the source (with routes asked for).
+        if any(
+            isinstance(rt, dict)
+            and str(rt.get("status", "")).upper() == "ACTIVE"
+            and _nwk(rt.get("destinationAddress")) == coordinator
+            for rt in link.get("routes") or ()
+        ):
+            hops.route(b, a)
+    return hops.nodes_with_via(), links.list()
 
 
 def _thread_ext(value: Any) -> int | None:
@@ -291,10 +413,7 @@ def _thread_entry(
     """Return the node a neighbour or route table entry points at, unless unknown or stale."""
     if not isinstance(entry, dict) or (ext := _thread_ext(entry.get("0"))) is None:
         return None
-    age = _num(entry.get(age_field))
-    if check_age and age is not None and age > THREAD_STALE_AGE_S:
-        return None
-    return by_ext.get(ext)
+    return by_ext.get(ext) if _thread_fresh(entry, age_field, check_age) else None
 
 
 def matter_node_identifier(fabric: int, node_id: int) -> tuple[str, str]:
@@ -356,34 +475,124 @@ def parse_thread(server: dict[str, Any], border_routers: list[dict[str, Any]]) -
         )
         by_ext[ext] = nid
 
-    links = _Links("matter")
+    net = _ThreadNet(nodes, by_ext, _thread_router_ids(present, by_ext))
     offline: set[str] = set()
     for nid, n, attrs in present:
         if n.get("available") is False:
             offline.add(nid)
-        # An end device's tables hold its parent only, whose age says nothing (see the constant).
-        check_age = nodes[nid].role != "end_device"
-        for nb in attrs.get("0/53/7") or ():
-            if (other := _thread_entry(nb, by_ext, "1", check_age)) is None:
-                continue
-            lqi = _num(nb.get("5"))
-            links.add(
-                nid,
-                other,
-                lqi=None if lqi is None else lqi * THREAD_LQI_SCALE,
-                rssi=nb.get("6") if nb.get("6") is not None else nb.get("7"),
-            )
-        # Route entries with a link established are direct links too, with LQI both ways.
-        for rt in attrs.get("0/53/8") or ():
-            established = isinstance(rt, dict) and rt.get("9") is True
-            if not established or (other := _thread_entry(rt, by_ext, "7", check_age)) is None:
-                continue
-            lqis = [q for q in (_num(rt.get("5")), _num(rt.get("6"))) if q is not None]
-            links.add(nid, other, lqi=min(lqis) * THREAD_LQI_SCALE if lqis else None)
-    out = links.list()
+        _thread_links(net, nodes[nid], attrs)
+    out = net.links.list()
     for link in out:
         link["offline"] = link["a"] in offline or link["b"] in offline
-    return list(nodes.values()), out
+    return _with_via(nodes, {k: v for k, v in net.via.items() if k != v}), out
+
+
+@dataclass
+class _ThreadNet:
+    """A Thread network's links and next hops, added node by node from their tables."""
+
+    nodes: dict[str, MeshNode]
+    by_ext: dict[int, str]
+    by_rid: dict[int, str]
+    links: _Links = field(default_factory=lambda: _Links("matter"))
+    via: dict[str, str] = field(default_factory=dict)
+
+
+def _thread_links(net: _ThreadNet, node: MeshNode, attrs: dict[str, Any]) -> None:
+    """Add a node's links from its neighbour and route tables, and note its next hops."""
+    links, via, by_ext, by_rid = net.links, net.via, net.by_ext, net.by_rid
+    border = {rid for rid, nid in by_rid.items() if net.nodes[nid].role == "coordinator"}
+    nid = node.id
+    # An end device's tables hold its parent only, whose age says nothing (see the constant).
+    check_age = node.role != "end_device"
+    # A REED is a child too, until it becomes a router: its one neighbour is its parent.
+    child = not check_age or node.thread_role == "REED"
+    for nb in attrs.get("0/53/7") or ():
+        if (other := _thread_entry(nb, by_ext, "1", check_age)) is None:
+            continue
+        if child:
+            via[nid] = other
+        elif nb.get("13") is True:  # IsChild: the neighbour is this node's child.
+            via[other] = nid
+        lqi = _num(nb.get("5"))
+        links.add(
+            nid,
+            other,
+            lqi=None if lqi is None else lqi * THREAD_LQI_SCALE,
+            rssi=nb.get("6") if nb.get("6") is not None else nb.get("7"),
+            relationship="parent" if child or nb.get("13") is True else "neighbor",
+        )
+    # Route entries with a link established are direct links too, with LQI both ways.
+    routes: dict[int, dict[str, Any]] = {}
+    for rt in attrs.get("0/53/8") or ():
+        if not isinstance(rt, dict) or not _thread_fresh(rt, "7", check_age):
+            continue
+        if isinstance(rid := rt.get("2"), int):
+            routes[rid] = rt
+        if rt.get("9") is not True or (other := _thread_entry(rt, by_ext, "7", False)) is None:
+            continue
+        lqis = [q for q in (_num(rt.get("5")), _num(rt.get("6"))) if q is not None]
+        links.add(
+            nid,
+            other,
+            lqi=min(lqis) * THREAD_LQI_SCALE if lqis else None,
+            relationship="neighbor",
+        )
+    if not child and (hop := _thread_next_hop(routes, border)) in by_rid:
+        via[nid] = by_rid[hop]
+        links.add(nid, by_rid[hop], relationship="route")
+
+
+def _thread_fresh(entry: dict[str, Any], age_field: str, check_age: bool) -> bool:
+    age = _num(entry.get(age_field))
+    return not check_age or age is None or age <= THREAD_STALE_AGE_S
+
+
+def _thread_router_ids(
+    present: list[tuple[str, dict[str, Any], dict[str, Any]]], by_ext: dict[int, str]
+) -> dict[int, str]:
+    """Return the nodes by Thread router ID, as their neighbours' and routes' entries give them."""
+    out: dict[int, str] = {}
+    for _nid, _n, attrs in present:
+        for nb in attrs.get("0/53/7") or ():
+            # A router's RLOC16 is its router ID shifted left 10, with no child bits.
+            rloc = nb.get("2") if isinstance(nb, dict) else None
+            ext = _thread_ext(nb.get("0")) if isinstance(nb, dict) else None
+            if isinstance(rloc, int) and rloc & 0x1FF == 0 and ext in by_ext:
+                out[rloc >> 10] = by_ext[ext]
+        for rt in attrs.get("0/53/8") or ():
+            rid = rt.get("2") if isinstance(rt, dict) else None
+            ext = _thread_ext(rt.get("0")) if isinstance(rt, dict) else None
+            if isinstance(rid, int) and ext in by_ext:
+                out[rid] = by_ext[ext]
+    return out
+
+
+def _thread_link_cost(entry: dict[str, Any]) -> float:
+    """Return the route cost of a router's established link, or infinity without one."""
+    quality = min((_num(entry.get("5")) or 0), (_num(entry.get("6")) or 0))
+    return THREAD_LINK_COST.get(int(quality), math.inf) if entry.get("9") is True else math.inf
+
+
+def _thread_next_hop(routes: dict[int, dict[str, Any]], targets: set[int]) -> int | None:
+    """Return the router ID a router sends to the border router through, as OpenThread picks it.
+
+    ``routes`` is its route table by router ID. Each entry gives the direct link's quality and a
+    next hop with the path cost from there; the cheaper way wins, the direct link on a tie.
+    """
+    best: tuple[float, int] | None = None
+    for target in targets:
+        if (entry := routes.get(target)) is None:
+            continue
+        ways = [(_thread_link_cost(entry), target)]
+        hop = entry.get("3")
+        cost = _num(entry.get("4"))
+        if hop in routes and hop not in (target, THREAD_NO_ROUTER) and cost is not None:
+            ways.append((_thread_link_cost(routes[hop]) + cost, hop))
+        way = min(ways, key=lambda w: w[0])
+        if math.isfinite(way[0]) and (best is None or way[0] < best[0]):
+            best = way
+    return best[1] if best else None
 
 
 @callback
@@ -597,7 +806,7 @@ async def _z2m(hass: HomeAssistant) -> Topology | str | None:
             await mqtt.async_publish(
                 hass,
                 f"{Z2M_BASE_TOPIC}/bridge/request/networkmap",
-                json.dumps({"type": "raw", "routes": False}),
+                json.dumps({"type": "raw", "routes": True}),
             )
         if state.networkmap is None:
             try:

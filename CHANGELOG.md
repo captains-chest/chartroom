@@ -6,6 +6,16 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ### Added
 
+- The mesh layer shows the routes devices take. Each link in `chartroom/mesh/get` has a
+  `relationship` (`route`, `parent`, `sibling` or `neighbor`, or none when the network does not
+  say) and each node a `via`, its next hop towards the coordinator or border router, from what
+  each network reports: Zigbee neighbour relationships and routing tables (Zigbee2MQTT's network
+  map now asks for routes), Z-Wave's last working route, and Thread's child entries and route
+  tables. Routes and parent links are drawn solid, other neighbour links faint. Coordinators and
+  border routers get a blue ring, routers a grey one and Thread REEDs a fainter one. With the
+  layer on, a device's popover names its role and route ("Route: → Kitchen plug (RSSI -63 dBm) →
+  Border router (LQI 255) · 2 hops"), and the route is highlighted on the plan (#90).
+
 - The mesh layer shows Matter-over-Thread devices and their links, read from the Thread network
   diagnostics the Matter server keeps for each node: each node's neighbour table (RSSI and LQI, both
   directions merged to the weaker) and its routes to other routers. Lines are coloured by RSSI when

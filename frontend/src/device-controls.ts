@@ -173,19 +173,22 @@ export class DeviceControls implements PointerDelegate {
     this.#hideTimer = setTimeout(() => this.#hide(), HIDE_MS);
   }
 
-  /** What the popover says for a marker or source, or null for one no longer on the plan. */
+  /**
+   * What the popover says for a marker or source, or null for one no longer on the plan. With the
+   * Mesh layer on, its role and route too, and the route is highlighted.
+   */
   #content(el: SVGElement): PopoverContent | null {
     const plan = this.view.plan;
     const hass = this.hass();
     const id = el.dataset['id'];
-    if (el.dataset['kind'] === 'device') {
-      const d = plan?.devices?.find((x) => x.id === id);
-      return d
-        ? popoverContent(itemEntities(plan, hass).get(d.id) ?? [d.entity_id], d.device_id, hass)
-        : null;
-    }
-    const entity = plan?.sources.find((x) => x.id === id)?.entity_id;
-    return entity ? popoverContent([entity], hass?.entities?.[entity]?.device_id, hass) : null;
+    const d = el.dataset['kind'] === 'device' ? plan?.devices?.find((x) => x.id === id) : null;
+    const entity = d ? null : plan?.sources.find((x) => x.id === id)?.entity_id;
+    const entities = d ? (itemEntities(plan, hass).get(d.id) ?? [d.entity_id]) : entity && [entity];
+    if (!entities) return null;
+    const deviceId = d ? d.device_id : hass?.entities?.[entity!]?.device_id;
+    const content = popoverContent(entities, deviceId, hass);
+    content.mesh = this.view.mesh?.focus(entities, deviceId);
+    return content;
   }
 
   #show(el: Element): void {
@@ -226,6 +229,7 @@ export class DeviceControls implements PointerDelegate {
       document.removeEventListener('keydown', this.#escape);
     }
     this.popover.hide();
+    this.view.mesh?.focus(null);
   }
 
   /** New states (or the History slider moved): an open popover follows them. */

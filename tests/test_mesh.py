@@ -45,11 +45,15 @@ def test_parse_zha() -> None:
         "name": "Hall plug",
         "role": "router",
         "thread_role": None,
+        # Its routing table's entry for the coordinator.
+        "via": "zha:00:12:4b:00:00:00:00:01",
         "device_id": "dev-plug",
         "entities": ["switch.hall_plug"],
     }
     assert by_id["zha:00:12:4b:00:00:00:00:01"]["role"] == "coordinator"
     assert by_id["zha:00:15:8d:00:00:00:00:03"]["role"] == "end_device"
+    # The plug's table names the door sensor its child.
+    assert by_id["zha:00:15:8d:00:00:00:00:03"]["via"] == "zha:00:15:8d:00:00:00:00:02"
     got = _links(links)
     # Both directions merge into one link with the weaker LQI; previous children and unknown
     # neighbours are dropped.
@@ -59,6 +63,8 @@ def test_parse_zha() -> None:
     }
     assert got[("zha:00:12:4b:00:00:00:00:01", "zha:00:15:8d:00:00:00:00:02")]["lqi"] == 180
     assert got[("zha:00:15:8d:00:00:00:00:02", "zha:00:15:8d:00:00:00:00:03")]["lqi"] == 90
+    # A route beats the plug's parent entry for the coordinator.
+    assert [link["relationship"] for link in got.values()] == ["route", "parent"]
 
 
 def test_parse_zwave() -> None:
@@ -77,6 +83,13 @@ def test_parse_zwave() -> None:
     assert got[(dimmer, attic)]["rssi"] == -80
     assert got[(ctl, n4)]["rssi"] is None
     assert all(link["lqi"] is None for link in links)
+    # The last working route is the route; without one, the link to the controller is a guess.
+    assert {k: x["relationship"] for k, x in got.items()} == {
+        (ctl, dimmer): "route",
+        (dimmer, attic): "route",
+        (ctl, n4): None,
+    }
+    assert (by_id[attic].via, by_id[dimmer].via, by_id[n4].via) == (dimmer, ctl, None)
 
 
 def test_parse_z2m() -> None:
@@ -93,6 +106,14 @@ def test_parse_z2m() -> None:
     }
     assert got[("z2m:0x00124b0000000001", "z2m:0x00158d0000000002")]["lqi"] == 150
     assert got[("z2m:0x00158d0000000002", "z2m:0x00158d0000000003")]["lqi"] == 70
+    # Two hops: the sensor is the bulb's child, and the bulb routes to the coordinator directly.
+    assert [x["relationship"] for x in got.values()] == ["route", "parent"]
+    via = {n.id: n.via for n in nodes}
+    assert via == {
+        "z2m:0x00124b0000000001": None,
+        "z2m:0x00158d0000000002": "z2m:0x00124b0000000001",
+        "z2m:0x00158d0000000003": "z2m:0x00158d0000000002",
+    }
     identifiers = {n.id: n.identifiers for n in nodes}
     assert identifiers["z2m:0x00124b0000000001"] == (
         ("mqtt", "zigbee2mqtt_bridge_0x00124b0000000001"),
@@ -152,6 +173,45 @@ def test_parse_thread() -> None:
     assert len(_thread(server, br=False)[1]) == 6
 
 
+def test_thread_routes() -> None:
+    """Parents and next hops: each node's way to the border router, from its own tables."""
+    server = copy.deepcopy(_load("matter_thread.json"))
+
+    def routes(server: dict[str, Any]) -> tuple[dict[str, str | None], dict[tuple[str, ...], Any]]:
+        nodes, links = mesh.parse_thread(
+            server, [{"ext_address": server["border_router_ext_address"], "name": "BR"}]
+        )
+        names = {n.id: n.name for n in nodes}
+        return (
+            {n.name: names.get(n.via or "") for n in nodes},
+            {tuple(sorted((names[x["a"]], names[x["b"]]))): x["relationship"] for x in links},
+        )
+
+    via, rel = routes(server)
+    # Both plugs reach the border router directly (cost 1, versus 2 through the other plug). The
+    # button and the table lamp (a REED) are children of it. The other two REEDs report no link.
+    assert via == {
+        "Kitchen plug": "BR",
+        "Living room plug": "BR",
+        "Dining lamp": None,
+        "Button": "BR",
+        "Table lamp": "BR",
+        "TV lamp": None,
+        "BR": None,
+    }
+    assert rel[("BR", "Kitchen plug")] == "route"
+    assert rel[("BR", "Button")] == "parent"
+    assert rel[("Kitchen plug", "Living room plug")] == "neighbor"
+    # A poor direct link (cost 4) loses to the living room plug's (1, plus its path cost 1).
+    kitchen = server["nodes"][0]
+    for entry in kitchen["attributes"]["0/53/8"]:
+        if entry["0"] == server["border_router_ext_address"]:
+            entry["5"] = 1
+    via, rel = routes(server)
+    assert (via["Kitchen plug"], via["Living room plug"]) == ("Living room plug", "BR")
+    assert rel[("Kitchen plug", "Living room plug")] == "route"
+
+
 def test_parse_thread_stale_and_unavailable() -> None:
     """Old router entries are dropped; an unavailable node's cached links are marked offline."""
     server = copy.deepcopy(_load("matter_thread.json"))
@@ -185,6 +245,7 @@ def test_parsers_tolerate_junk() -> None:
                 "name": "zha:x",
                 "role": None,
                 "thread_role": None,
+                "via": None,
                 "device_id": None,
                 "entities": [],
             }
@@ -338,9 +399,9 @@ async def test_mesh_test_source(
     topology = {
         "nodes": [
             {"id": "c", "role": "coordinator", "entities": ["light.a"]},
-            {"id": "r", "name": "Plug", "role": "router", "entities": ["switch.b"]},
+            {"id": "r", "name": "Plug", "role": "router", "via": "c", "entities": ["switch.b"]},
         ],
-        "links": [{"a": "c", "b": "r", "lqi": 200}],
+        "links": [{"a": "c", "b": "r", "lqi": 200, "relationship": "route"}],
     }
     await ws.send_json_auto_id({"type": "chartroom/mesh/test_source", "topology": topology})
     assert (await ws.receive_json())["success"]
@@ -353,10 +414,14 @@ async def test_mesh_test_source(
         "name": "",
         "role": "coordinator",
         "thread_role": None,
+        "via": None,
         "device_id": None,
         "entities": ["light.a"],
     }
-    assert result["links"] == [{"a": "c", "b": "r", "source": "test", "lqi": 200.0, "rssi": None}]
+    assert result["nodes"][1]["via"] == "c"
+    assert result["links"] == [
+        {"a": "c", "b": "r", "source": "test", "lqi": 200.0, "rssi": None, "relationship": "route"}
+    ]
 
     # Only admins may set it.
     user_ws = await hass_ws_client(hass, hass_read_only_access_token)
@@ -429,6 +494,7 @@ async def test_mesh_test_source_is_resolved(hass: HomeAssistant, hass_ws_client)
             "name": "",
             "role": None,
             "thread_role": None,
+            "via": None,
             "device_id": device.id,
             "entities": ["switch.plug"],
         }
@@ -545,6 +611,7 @@ async def test_mesh_reads_matter(hass: HomeAssistant, hass_ws_client) -> None:
         "name": "ZBT-2",
         "role": "coordinator",
         "thread_role": "border router",
+        "via": None,
         "device_id": radio.id,
         "entities": [],
     }

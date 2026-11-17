@@ -143,7 +143,17 @@ green (strong) by RSSI or link quality (LQI), dashed grey when the network gives
 line for the two devices and the value, and for Thread devices their role (leader, router, REED,
 end device). Thread links come from the neighbour tables Matter devices report; the border router
 is placed where you put the radio running OpenThread (its device, e.g. its firmware entity), when
-Home Assistant has just one. A Thread device that is offline keeps its last-reported links, dotted. The note at the bottom left says how many links are on this plan and which
+Home Assistant has just one. A Thread device that is offline keeps its last-reported links, dotted.
+
+Links a device's traffic takes are drawn solid: a hop of its route to the coordinator or border
+router (a router's routing table, Z-Wave's last working route) and an end device's link to its
+parent. Other neighbours (two routers that hear each other) are drawn faint. Coordinators and
+border routers get a blue ring, routers a grey one, and a Thread REED (mains powered, could route
+but doesn't) a fainter one. With the layer on, hovering a device also names its role and route,
+e.g. "Thread end device" and "Route: → Kitchen plug (RSSI -63 dBm) → Border router (LQI 255) ·
+2 hops", and highlights that route on the plan. A route the network does not report says so.
+
+The note at the bottom left says how many links are on this plan and which
 networks were found; a network that is not set up is simply skipped. The topology is read again
 every minute while the layer is on (Zigbee2MQTT's network map at most every 10 minutes, since it
 makes the routers scan). The toggle works with any heatmap or none, and is remembered on this
@@ -362,7 +372,7 @@ for the phone layout) and `history`, which runs after the desktop tests because 
 readings far from the others' on the shared instance.
 
 The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
-(with what it shares) 20.5 KB gzip and everything together 65 KB gzip. The heatmap renderer, editor,
+(with what it shares) 20.5 KB gzip and everything together 66 KB gzip. The heatmap renderer, editor,
 mesh layer, history bar and device menu are separate chunks loaded when first used. The build squeezes the CSS,
 GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
 byte for byte.

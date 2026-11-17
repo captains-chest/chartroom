@@ -1,6 +1,7 @@
 // Mesh links between placed devices: the Zigbee, Z-Wave and Thread topology the integration reads
 // from ZHA, Z-Wave JS, Zigbee2MQTT and Matter (chartroom/mesh/get), drawn as lines coloured by link
-// quality.
+// quality. Routes and parent links are drawn solid, other neighbours faint, and routers get a ring.
+// Hovering a device names its role and highlights its route to the coordinator or border router.
 // Loaded on demand, the first time the Mesh layer is switched on.
 import type { ChartroomApi } from './api';
 import type { Hass } from './ha-types';
@@ -16,6 +17,8 @@ export interface MeshNode {
   role: string | null;
   /** The Thread role (leader, router, REED, ...), for Matter nodes. */
   thread_role?: string | null;
+  /** The next hop towards the coordinator or border router, when the network says. */
+  via?: string | null;
   device_id?: string | null;
   entities?: string[];
 }
@@ -27,6 +30,8 @@ export interface MeshLink {
   rssi?: number | null;
   /** An end is offline: the link is from its last report. */
   offline?: boolean;
+  /** What the network says the link is (see mesh.py); null when it does not say. */
+  relationship?: 'route' | 'parent' | 'sibling' | 'neighbor' | null;
 }
 export interface Topology {
   nodes: MeshNode[];
@@ -39,7 +44,16 @@ export interface PlacedLink {
   /** 0 (bad) to 1 (good), or null when the network does not say. */
   quality: number | null;
   offline: boolean;
+  /** A neighbour link that is no route or parent link: drawn faint. */
+  faint: boolean;
+  /** The two node ids. */
+  key: string;
   label: string;
+}
+/** A placed coordinator or router, drawn with a ring; a REED (could route, does not) fainter. */
+export interface PlacedNode {
+  at: Point;
+  ring: 'coordinator' | 'router' | 'reed';
 }
 
 /** How often the topology is read again while the layer is on. */
@@ -51,6 +65,29 @@ const SOURCE_NAMES: Record<string, string> = {
   matter: 'Matter',
   test: 'Test',
 };
+const NETWORKS: Record<string, string> = {
+  zha: 'Zigbee',
+  zigbee2mqtt: 'Zigbee',
+  zwave_js: 'Z-Wave',
+  matter: 'Thread',
+};
+const RELATIONSHIPS: Record<string, string> = {
+  route: 'route',
+  parent: 'parent link',
+  sibling: 'neighbour (sibling)',
+  neighbor: 'neighbour',
+};
+const pairKey = (a: string, b: string): string => (a < b ? `${a} ${b}` : `${b} ${a}`);
+const nodeName = (n: MeshNode): string =>
+  (n.name || n.id) + (n.thread_role ? ` (${n.thread_role})` : '');
+/** "LQI 130, RSSI -63 dBm", or '' when the link has neither. */
+const readings = (l: MeshLink): string =>
+  [
+    typeof l.lqi === 'number' ? `LQI ${Math.round(l.lqi)}` : '',
+    typeof l.rssi === 'number' ? `RSSI ${Math.round(l.rssi)} dBm` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
 
 /** Link quality from 0 to 1: RSSI over -90..-40 dBm (the finer of the two), else LQI over 0..255. */
 export function linkQuality(link: MeshLink): number | null {
@@ -66,10 +103,10 @@ export const qualityColour = (q: number | null): string =>
   q === null ? '#8a8f98' : `hsl(${Math.round(q * 120)} 75% 40%)`;
 
 /**
- * The links whose two ends are both on the plan. A node is placed where a device marker or source
- * shows one of its entities, or its Home Assistant device (named by the marker, or an entity's).
+ * Where each node is on the plan: where a device marker or source shows one of its entities, or its
+ * Home Assistant device (named by the marker, or an entity's).
  */
-export function placeLinks(topology: Topology, plan: Plan, hass: Hass | undefined): PlacedLink[] {
+function placeNodes(topology: Topology, plan: Plan, hass: Hass | undefined): Map<string, Point> {
   const byEntity = new Map<string, Point>();
   const byDevice = new Map<string, Point>();
   for (const p of [...(plan.devices ?? []), ...plan.sources]) {
@@ -79,34 +116,114 @@ export function placeLinks(topology: Topology, plan: Plan, hass: Hass | undefine
     if (dev && !byDevice.has(dev)) byDevice.set(dev, p.position);
   }
   const at = new Map<string, Point>();
-  const names = new Map<string, string>();
   for (const n of topology.nodes) {
-    names.set(n.id, (n.name || n.id) + (n.thread_role ? ` (${n.thread_role})` : ''));
     const pos =
       (n.entities ?? []).map((e) => byEntity.get(e)).find((p) => p) ??
       (n.device_id ? byDevice.get(n.device_id) : undefined);
     if (pos) at.set(n.id, pos);
   }
+  return at;
+}
+
+/** The links whose two ends are both on the plan (see `placeNodes`). */
+export function placeLinks(topology: Topology, plan: Plan, hass: Hass | undefined): PlacedLink[] {
+  const at = placeNodes(topology, plan, hass);
+  const names = new Map(topology.nodes.map((n) => [n.id, nodeName(n)]));
   const out: PlacedLink[] = [];
   for (const l of topology.links) {
     const a = at.get(l.a);
     const b = at.get(l.b);
     if (!a || !b || (a[0] === b[0] && a[1] === b[1])) continue;
-    const quality = linkQuality(l);
-    const parts = [
-      typeof l.lqi === 'number' ? `LQI ${Math.round(l.lqi)}` : '',
-      typeof l.rssi === 'number' ? `RSSI ${Math.round(l.rssi)} dBm` : '',
-    ].filter(Boolean);
     const offline = l.offline === true;
+    const rel = l.relationship ? ` · ${RELATIONSHIPS[l.relationship] ?? l.relationship}` : '';
     out.push({
       a,
       b,
-      quality,
+      quality: linkQuality(l),
       offline,
-      label: `${names.get(l.a)} – ${names.get(l.b)}: ${parts.join(', ') || 'quality unknown'}${offline ? ' (offline, last report)' : ''}`,
+      faint: l.relationship === 'sibling' || l.relationship === 'neighbor',
+      key: pairKey(l.a, l.b),
+      label: `${names.get(l.a)} – ${names.get(l.b)}: ${readings(l) || 'quality unknown'}${rel}${offline ? ' (offline, last report)' : ''}`,
     });
   }
   return out;
+}
+
+/** The placed coordinators and routers, for their rings. */
+export function placeRouters(topology: Topology, plan: Plan, hass: Hass | undefined): PlacedNode[] {
+  const at = placeNodes(topology, plan, hass);
+  return topology.nodes.flatMap((n): PlacedNode[] => {
+    const p = at.get(n.id);
+    if (!p || (n.role !== 'coordinator' && n.role !== 'router')) return [];
+    return [{ at: p, ring: n.thread_role === 'REED' ? 'reed' : n.role }];
+  });
+}
+
+/** "Thread router (leader)", "Zigbee end device", "Thread REED: can route, does not yet". */
+function roleText(n: MeshNode): string {
+  const tr = n.thread_role;
+  const role =
+    tr === 'REED'
+      ? 'REED: can route, does not yet'
+      : n.role === 'router'
+        ? `router${tr && tr !== 'router' ? ` (${tr})` : ''}`
+        : (tr ?? n.role?.replace('_', ' ') ?? 'role unknown');
+  return `${NETWORKS[n.source] ?? SOURCE_NAMES[n.source] ?? n.source} ${role}`;
+}
+
+/** What the mesh says about a device: its role, and its route by `via` (the links on it). */
+export interface MeshInfo {
+  lines: string[];
+  /** The links on the routes, by `pairKey`. */
+  path: Set<string>;
+}
+
+/**
+ * The nodes of a device (shown by `entities`, or Home Assistant device `deviceId`): their roles and
+ * routes to the coordinator, e.g. "Route: → Plug (RSSI -63 dBm) → Border router (LQI 255) · 2 hops".
+ */
+export function meshInfo(
+  topology: Topology,
+  entities: readonly string[],
+  deviceId: string | null | undefined,
+  hass: Hass | undefined,
+): MeshInfo {
+  const devices = new Set([deviceId, ...entities.map((e) => hass?.entities?.[e]?.device_id)]);
+  devices.delete(undefined);
+  devices.delete(null);
+  const byId = new Map(topology.nodes.map((n) => [n.id, n]));
+  const links = new Map(topology.links.map((l) => [pairKey(l.a, l.b), l]));
+  const lines: string[] = [];
+  const path = new Set<string>();
+  for (const n of topology.nodes) {
+    const own =
+      (n.entities ?? []).some((e) => entities.includes(e)) ||
+      (!!n.device_id && devices.has(n.device_id));
+    if (!own) continue;
+    lines.push(roleText(n));
+    if (n.role === 'coordinator') continue;
+    const hops: string[] = [];
+    const seen = new Set([n.id]);
+    let cur = n;
+    for (
+      let next = byId.get(cur.via ?? '');
+      next && !seen.has(next.id);
+      next = byId.get(cur.via ?? '')
+    ) {
+      const key = pairKey(cur.id, next.id);
+      const link = links.get(key);
+      path.add(key);
+      hops.push(`→ ${next.name || next.id}${link && readings(link) ? ` (${readings(link)})` : ''}`);
+      seen.add(next.id);
+      cur = next;
+    }
+    if (!hops.length) lines.push('Route: not reported');
+    else
+      lines.push(
+        `Route: ${hops.join(' ')} · ${count(hops.length, 'hop')}${cur.role === 'coordinator' ? '' : ', then not reported'}`,
+      );
+  }
+  return { lines, path };
 }
 
 /** What the note under the plan says about each network source. */
@@ -180,8 +297,28 @@ export function watchTopology(
   return { ready, stop };
 }
 
+// Here rather than with the view's styles, so they load with the layer.
+const STYLES = `
+  .mesh[hidden] { display: none; }
+  .mesh-link { stroke-width: 2.5px; vector-effect: non-scaling-stroke; stroke-linecap: round; opacity: 0.85; pointer-events: stroke; }
+  .mesh-link.unknown { stroke-dasharray: 4 4; }
+  .mesh-link.offline { stroke-dasharray: 1 5; opacity: 0.6; }
+  .mesh-link.faint { stroke-width: 1.5px; opacity: 0.3; }
+  .mesh.focus .mesh-link { opacity: 0.12; }
+  .mesh.focus .mesh-link.on-path { stroke-width: 4px; opacity: 1; }
+  .mesh-node { stroke: var(--primary-text-color, #222); stroke-width: 36px; stroke-linecap: round; vector-effect: non-scaling-stroke; opacity: 0.4; pointer-events: none; }
+  .mesh-node.reed { opacity: 0.15; }
+  .mesh-node.coordinator { stroke: var(--primary-color, #03a9f4); stroke-width: 40px; opacity: 0.7; }
+`;
+
 export class MeshLayer {
-  readonly g: SVGGElement = s('g', { class: 'mesh', hidden: true });
+  readonly #lines: SVGGElement = s('g');
+  readonly g: SVGGElement = s(
+    'g',
+    { class: 'mesh', hidden: true },
+    s('style', {}, STYLES),
+    this.#lines,
+  );
   readonly note: HTMLElement = h('div', { class: 'mesh-note', hidden: true, role: 'status' });
   #on = false;
   #plan: Plan | null = null;
@@ -192,6 +329,8 @@ export class MeshLayer {
   #stop: (() => void) | null = null;
   #watched: MeshApi | null = null;
   readonly #api: () => MeshApi | null;
+  /** The links on the hovered device's route, by `pairKey`. */
+  #path: Set<string> | null = null;
   /** Placed links, for tests. */
   links: PlacedLink[] = [];
 
@@ -243,16 +382,37 @@ export class MeshLayer {
     return ready;
   }
 
+  /**
+   * What the mesh says about the device a popover is about to show (see `meshInfo`), and highlight
+   * its route; nothing while the layer is off. `focus(null)` drops the highlight.
+   */
+  focus(entities: readonly string[] | null, deviceId?: string | null): string[] {
+    const info =
+      this.#on && this.#topology && entities
+        ? meshInfo(this.#topology, entities, deviceId, this.#hass)
+        : null;
+    const path = info?.path.size ? info.path : null;
+    // The popover asks again on every state change: redraw only when the route changed.
+    if ([...(path ?? [])].join() !== [...(this.#path ?? [])].join()) {
+      this.#path = path;
+      this.#render();
+    }
+    return info?.lines ?? [];
+  }
+
   #render(): void {
     if (!this.#on) return;
     const t = this.#topology;
-    this.links = t && this.#plan ? placeLinks(t, this.#plan, this.#hass) : [];
-    this.g.replaceChildren(
+    const plan = this.#plan;
+    this.links = t && plan ? placeLinks(t, plan, this.#hass) : [];
+    const path = this.#path;
+    this.g.classList.toggle('focus', !!path);
+    this.#lines.replaceChildren(
       ...this.links.map((l) =>
         s(
           'line',
           {
-            class: `mesh-link${l.quality === null ? ' unknown' : ''}${l.offline ? ' offline' : ''}`,
+            class: `mesh-link${l.quality === null ? ' unknown' : ''}${l.offline ? ' offline' : ''}${l.faint ? ' faint' : ''}${path?.has(l.key) ? ' on-path' : ''}`,
             x1: l.a[0],
             y1: l.a[1],
             x2: l.b[0],
@@ -262,11 +422,23 @@ export class MeshLayer {
           s('title', {}, l.label),
         ),
       ),
+      // A zero-length line with a round cap is a disc of a fixed size on screen; the marker drawn
+      // over it leaves a ring.
+      ...(t && plan ? placeRouters(t, plan, this.#hass) : []).map((n) =>
+        s('line', {
+          class: `mesh-node ${n.ring}`,
+          x1: n.at[0],
+          y1: n.at[1],
+          x2: n.at[0],
+          y2: n.at[1],
+        }),
+      ),
     );
     this.note.textContent = sourceNote(t, this.links.length, this.#error);
   }
 
   dispose(): void {
+    this.#path = null;
     this.#stop?.();
     this.#stop = null;
   }

@@ -44,9 +44,24 @@ test('a re-attached card still draws its layers, and a removed one stops polling
   const meshRequests = countMeshRequests(page);
   await expect(async () => {
     await page.goto(`/${DASHBOARD}/main`);
-    await page.waitForFunction(() => customElements.get('chartroom-card') !== undefined, null, {
-      timeout: 10_000,
-    });
+    // The card is given hass once, so wait for one with states and the entity registry: on a
+    // cold start the page has none at first, or one with neither.
+    await page.waitForFunction(
+      () => {
+        const hass = (
+          document.querySelector('home-assistant') as {
+            hass?: { states?: object; entities?: object };
+          } | null
+        )?.hass;
+        return (
+          customElements.get('chartroom-card') !== undefined &&
+          !!hass?.entities &&
+          Object.keys(hass.states ?? {}).length > 0
+        );
+      },
+      null,
+      { timeout: 10_000 },
+    );
   }).toPass({ timeout: 60_000, intervals: [1_000, 2_000, 5_000] });
   await page.evaluate(() => {
     const card = document.createElement('chartroom-card') as unknown as WithView & {

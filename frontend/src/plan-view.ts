@@ -70,8 +70,12 @@ export class PlanView {
   #hass: Hass | undefined;
   #selectedDevice: string | null = null;
   #view: View = { x: 0, y: 0, w: 10, h: 6 };
-  /** The plan shown: the one given, with its devices folded (foldDevices) once the registry is in. */
+  /**
+   * The plan shown: the one given, with its devices folded (foldDevices) once the registry is in,
+   * unless the editor is open. The editor folds its own plan, so the view shows it as it is.
+   */
   #plan: Plan | null = null;
+  #editing = false;
   /** The plan as given to `setPlan`, and the selection given with it. */
   #given: { plan: Plan | null; selected?: { kind: string; id: string } | null; preview: boolean } =
     { plan: null, preview: false };
@@ -167,6 +171,7 @@ export class PlanView {
 
   /** Mark the plan as edited with `tool` (for the cursor), or not edited. */
   setEditing(tool: string | null): void {
+    this.#editing = !!tool;
     this.#svg.classList.toggle('editing', !!tool);
     this.#svg.dataset['tool'] = tool ?? '';
   }
@@ -187,8 +192,9 @@ export class PlanView {
   /**
    * Show `plan`. `preview`: a drag in the editor is under way, so layers that are slow to follow
    * (the temperature and humidity layout) may wait for the drag to end. Sensors of one Home
-   * Assistant device placed apart (plans from before items named devices) show as one: `plan` is
-   * the plan shown (which a save stores) once the editor opens it.
+   * Assistant device placed apart (plans from before items named devices) show as one, except in
+   * the editor: it folds its plan when it opens it (and when the registry comes), and the view shows
+   * that plan as it is, so an item dragged near its device stays the item the editor holds.
    */
   setPlan(
     given: Plan | null,
@@ -197,7 +203,7 @@ export class PlanView {
   ): void {
     this.#given = { plan: given, selected, preview };
     this.#delegate?.reset?.();
-    const plan = given && foldDevices(given, this.#hass);
+    const plan = given && (this.#editing ? given : foldDevices(given, this.#hass));
     this.#plan = plan;
     this.#body.innerHTML = plan ? planBody(plan) : '';
     if (selected) {
@@ -333,9 +339,10 @@ export class PlanView {
     const registry = hass?.entities !== this.#hass?.entities;
     this.#hass = hass;
     if (!changed) return false;
-    // A new entity registry may fold the plan's devices (or change what they are).
+    // A new entity registry may fold the plan's devices (or change what they are). The editor
+    // folds its own plan (PlanEditor.hassChanged) and shows it.
     const { plan, selected, preview } = this.#given;
-    if (registry && plan && foldDevices(plan, hass) !== this.#plan) {
+    if (registry && plan && !this.#editing && foldDevices(plan, hass) !== this.#plan) {
       this.setPlan(plan, selected, preview);
       return true;
     }

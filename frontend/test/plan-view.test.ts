@@ -179,4 +179,31 @@ describe('plan view and Home Assistant states', () => {
     view.setPlan(next, null, true);
     expect(heat.setPlan).toHaveBeenLastCalledWith(next, h2, true);
   });
+
+  it("shows the editor's plan as it is: the editor folds its own plan", () => {
+    const view = new PlanView(true);
+    const plan = emptyPlan('Home');
+    // A sensor of one device left on its own, dragged next to its device's other sensor.
+    plan.devices = [
+      { id: 't', entity_id: 'sensor.hood_temperature', position: [1, 1] },
+      { id: 'h', entity_id: 'sensor.hood_humidity', position: [1.2, 1] },
+    ];
+    const registry = (): Hass => ({
+      entities: {
+        'sensor.hood_temperature': { entity_id: 'sensor.hood_temperature', device_id: 'hood' },
+        'sensor.hood_humidity': { entity_id: 'sensor.hood_humidity', device_id: 'hood' },
+      },
+    });
+    view.setEditing('select');
+    view.setPlan(plan, null, true);
+    view.setHass(registry());
+    expect(view.plan).toBe(plan);
+    view.setHass(registry());
+    view.setPlan(plan);
+    expect(view.plan).toBe(plan);
+
+    view.setEditing(null);
+    view.setPlan(plan);
+    expect(view.plan!.devices!.map((d) => d.id)).toEqual(['t']);
+  });
 });

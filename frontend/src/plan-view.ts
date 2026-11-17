@@ -95,6 +95,7 @@ export class PlanView {
   #delegate: PointerDelegate | null = null;
   #onPlan: (() => void) | null = null;
   #api: () => ChartroomApi | null = () => null;
+  readonly #resized = new ResizeObserver(() => this.#resize());
 
   /**
    * `fixed`: the dashboard card. No pan or zoom, so the page still scrolls over it, and the plan is
@@ -140,10 +141,10 @@ export class PlanView {
     this.#svg.addEventListener('pointerup', (e) => this.#up(e));
     this.#svg.addEventListener('pointercancel', (e) => this.#up(e, true));
     this.#svg.addEventListener('contextmenu', (e) => e.preventDefault());
-    const resized = new ResizeObserver(() => this.#resize());
-    resized.observe(this.#svg);
-    // A fitted plan keeps clear of the legend, so it fits again when the legend changes size.
-    resized.observe(this.#heatLegend);
+    this.#resized.observe(this.#svg);
+    // A fitted plan keeps clear of the legend, so it fits again when the legend changes size, or
+    // moves: in the card the mesh note, shown or hidden, lifts or lowers it.
+    this.#resized.observe(this.#heatLegend);
   }
 
   /** The live heatmap, once a layer has been switched on (loaded on demand). */
@@ -259,6 +260,7 @@ export class PlanView {
       const mesh = new m.MeshLayer(() => this.#api());
       this.#meshSlot.append(mesh.g);
       this.el.append(mesh.note);
+      this.#resized.observe(mesh.note);
       mesh.setHass(this.#hass);
       mesh.setPlan(this.#plan);
       this.#mesh = mesh;
@@ -303,6 +305,7 @@ export class PlanView {
     this.#heatLoad = null;
     this.#mesh?.dispose();
     this.#mesh?.g.remove();
+    if (this.#mesh) this.#resized.unobserve(this.#mesh.note);
     this.#mesh?.note.remove();
     this.#mesh = null;
     this.#meshLoad = null;

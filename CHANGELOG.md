@@ -2,7 +2,7 @@
 
 All notable changes to Chartroom. Versions follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.3.1 — 2026-11-17
 
 ### Changed
 

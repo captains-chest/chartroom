@@ -77,6 +77,16 @@ export class DeviceMenu {
     if (refocus) (anchor as SVGElement).focus?.();
   }
 
+  /**
+   * A hold's release at client (`x`, `y`): the item there is picked as a tap picks it (one with a
+   * ring only opens it); anywhere else, nothing.
+   */
+  pickAt(x: number, y: number): void {
+    const root = this.el.getRootNode() as Document | ShadowRoot;
+    const b = root.elementFromPoint?.(x, y)?.closest<HTMLButtonElement>('[role=menuitem]');
+    if (this.#anchor && b && this.el.contains(b)) b.click();
+  }
+
   /** Centred on the marker, moved in as far as the rings need to stay inside the view. */
   place(): void {
     const a = this.#anchor;

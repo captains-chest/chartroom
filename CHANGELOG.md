@@ -18,8 +18,9 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   item per other entity of the device, and Details (Home Assistant's more-info dialog, which these
   used to open directly). Brightness, Colour, Speed and Position open a second ring with steps.
   Only what the device supports is offered, and an unavailable device has Details only. It works
-  with the mouse, touch and keyboard (arrow keys, Enter, Esc or Backspace) and closes on a click
-  outside, a pan or a zoom (#86).
+  with the mouse, touch and keyboard (arrow keys, Enter, Esc or Backspace), and a hold can slide to
+  an item and pick it by letting go there; it closes on a click outside, a pan or a zoom (#86,
+  #106).
 
 ### Changed
 

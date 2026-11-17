@@ -33,8 +33,11 @@ export interface PointerDelegate {
   hover?(p: Point, e: PointerEvent): void;
   /** The browser took the pointer (a scroll started): drop the gesture without acting. */
   cancel?(): void;
-  /** After every pan or zoom (the editor rescales its handles). */
-  viewChanged?(): void;
+  /**
+   * After every pan or zoom (the editor rescales its handles); `resized` when only the view's box
+   * changed size, not by the user's hand.
+   */
+  viewChanged?(resized?: boolean): void;
   /** After every new hass, whether or not the plan reads what changed. */
   statesChanged?(): void;
   /** The plan was replaced, or the view released its layers (it left the page). */
@@ -397,7 +400,8 @@ export class PlanView {
     this.el.classList.add('with-underlay');
   }
 
-  fit(): void {
+  /** Fit the plan to the view; `resized` when the box's new size asks for it, not the user. */
+  fit(resized = false): void {
     const w = this.#svg.clientWidth;
     const h = this.#svg.clientHeight;
     if (w === 0 || h === 0) {
@@ -406,7 +410,7 @@ export class PlanView {
     }
     this.#fitted = true;
     this.#moved = false;
-    this.#setView(fitView(this.#plan ? planBounds(this.#plan) : null, w / h, 0.6));
+    this.#setView(fitView(this.#plan ? planBounds(this.#plan) : null, w / h, 0.6), resized);
   }
 
   zoom(factor: number, at?: Point): void {
@@ -421,7 +425,7 @@ export class PlanView {
     return toPlan(this.#view, e.clientX - r.left, e.clientY - r.top, r.width || 1, r.height || 1);
   }
 
-  #setView(v: View): void {
+  #setView(v: View, resized = false): void {
     this.#view = v;
     this.#svg.setAttribute('viewBox', viewBoxOf(v));
     this.#underlaySvg.setAttribute('viewBox', viewBoxOf(v));
@@ -429,15 +433,15 @@ export class PlanView {
     this.markers.setScale(this.mpp);
     this.#heat?.setView(v, this.#svg.clientWidth, this.#svg.clientHeight);
     this.#tidyLabels();
-    this.#delegate?.viewChanged?.();
+    this.#delegate?.viewChanged?.(resized);
   }
 
   #resize(): void {
     const w = this.#svg.clientWidth;
     const h = this.#svg.clientHeight;
     if (w === 0 || h === 0) return;
-    if (!this.#fitted || this.fixed || !(this.#moved || this.#editing)) this.fit();
-    else this.#setView(withAspect(this.#view, w / h));
+    if (!this.#fitted || this.fixed || !(this.#moved || this.#editing)) this.fit(true);
+    else this.#setView(withAspect(this.#view, w / h), true);
   }
 
   #wheel(e: WheelEvent): void {

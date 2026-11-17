@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vite-plus/test';
 import { PLAN_SCHEMA_VERSION } from '../src/plan/constants';
 import { pointAlong, validatePlan } from '../src/plan/functions';
-import type { Plan } from '../src/plan/models';
+import type { Plan, Source } from '../src/plan/models';
 import type { Point } from '../src/plan/types';
 import { polygonArea } from '../src/geometry';
-import { planToSvg } from '../src/plan-svg';
+import { planBody, planToSvg } from '../src/plan-svg';
 
 interface Fixture extends Plan {
   meta: { stated_areas_m2: Record<string, number>; stated_total_m2: number };
@@ -87,5 +87,17 @@ describe('example plan fixture', () => {
 
   it('matches the committed SVG preview (run scripts/example-plan/render-svg.mjs)', () => {
     expect(planToSvg(plan)).toBe(read('../../docs/images/example-plan.svg'));
+  });
+
+  it('names sources with aria-label, not a tooltip, in the live view (#104)', () => {
+    const ap: Source = {
+      id: 'ap',
+      kind: 'access_point',
+      entity_id: 'switch.coffee_plug',
+      position: [1, 1],
+    };
+    const body = planBody({ ...plan, sources: [ap] }, { tooltips: false });
+    expect(body).not.toContain('<title>');
+    expect(body).toContain('role="img" aria-label="switch.coffee_plug"');
   });
 });

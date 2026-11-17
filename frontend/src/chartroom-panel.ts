@@ -585,6 +585,11 @@ const panelStyles = `
   .sheet { display: contents; }
   .grip { display: none; }
   footer { padding: 2px 16px; }
+  /* The time bar takes the bottom row on a desktop: the underlay row, then the mesh note, sit above it. */
+  @media (min-width: 601px) {
+    :host([history]) .underlay-controls, :host([history]) .underlay-ignored { bottom: 60px; }
+    :host([history]) .stage:has(.underlay-controls:not([hidden]), .underlay-ignored:not([hidden])) .mesh-note { bottom: 104px; }
+  }
   .status { margin: 0; color: var(--secondary-text-color, #727272); font-size: 0.8rem; }
   @media (max-width: 600px) {
     header { gap: 8px; padding: 4px 8px; }

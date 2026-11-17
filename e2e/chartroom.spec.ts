@@ -100,7 +100,13 @@ test('the panel switches floors and shows a plan with pan and zoom', async ({ pa
     return [...root.querySelectorAll('svg.plan [data-kind=wall]')].every((e) => {
       const r = e.getBoundingClientRect();
       const offButtons = r.top >= b.bottom || r.left >= b.right;
-      return offButtons && r.left >= s.left && r.right <= s.right && r.bottom <= s.bottom;
+      return (
+        offButtons &&
+        r.left >= s.left &&
+        r.top >= s.top &&
+        r.right <= s.right &&
+        r.bottom <= s.bottom
+      );
     });
   });
   expect(clear).toBe(true);

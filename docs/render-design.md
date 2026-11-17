@@ -372,11 +372,12 @@ not a source, and a device item stands for a Home Assistant device rather than o
   the same id and position (no registry needed, so a plan still loads before `hass` has one). The
   registry part, `foldDevices`, runs where the plan meets `hass`: `PlanView.setPlan` (and again
   when the registry changes) for what is shown, and the editor when it opens a plan or imports a
-  file, so the next save stores it. Items that name an entity of a device but not the device get
-  `device_id`; those of one device within 1 m (`FOLD_M`) become one item at their mean position
-  (the first one's id and entity); one near an item that already names the device folds into it,
-  and one far from the rest of its device stays on its own as a single-entity item. Folding a
-  folded plan returns it unchanged.
+  file, so the next save stores it (an editor opened before the registry came folds its plan and
+  undo history when it does, without saving). Items that name an entity of a device but not the
+  device get `device_id`: the first of a device and those linked to it by steps of at most 1 m
+  (`FOLD_M`, on the positions as placed) become one item at their mean position (the first one's
+  id and entity). The device's other items, and those of a device an item already names, stay on
+  their own as single-entity items, so folding a folded plan returns it unchanged.
 
 ## What Phase 1 must provide
 

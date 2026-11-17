@@ -226,7 +226,12 @@ export class PlanEditor {
    * mid-typing the field).
    */
   hassChanged(): void {
-    this.#renderInspector();
+    // The entity registry may have come after the editor opened: fold the plan as the view does.
+    const hass = this.#host.hass();
+    if (this.#session.migrate((plan) => foldDevices(plan, hass))) {
+      this.#dropStaleSelection();
+      this.#render();
+    } else this.#renderInspector();
   }
 
   #setTool(tool: Tool): void {

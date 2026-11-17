@@ -118,6 +118,17 @@ export class EditSession {
     return true;
   }
 
+  /**
+   * Rewrite the plan and its undo history the way loading it would have (`fn` returns its argument
+   * when nothing changes). Nothing is saved for it: the next change saves the rewritten plan.
+   * Whether the plan changed.
+   */
+  migrate(fn: (plan: Plan) => Plan): boolean {
+    const before = this.plan;
+    if (!this.#closed) this.#history.map(fn);
+    return this.plan !== before;
+  }
+
   undo(): boolean {
     if (this.#closed || this.#history.undo() === undefined) return false;
     this.#saver.schedule(this.plan);

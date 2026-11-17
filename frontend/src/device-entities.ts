@@ -4,7 +4,6 @@
 import { dist, roundPointToMm } from './geometry';
 import type { EntityEntry, Hass } from './ha-types';
 import type { Device, Plan } from './plan/models';
-import type { Point } from './plan/types';
 
 /** Domains whose marker does something on a tap. */
 const CONTROLS = new Set(['light', 'switch', 'fan', 'input_boolean', 'cover', 'lock']);
@@ -113,9 +112,10 @@ export const FOLD_M = 1;
 /**
  * `plan` with its items that name an entity of a Home Assistant device, but not the device (plans
  * from before items named devices: each sensor of a multisensor placed on its own), naming the
- * device; items of one device near each other become one, at their middle. One near an item that
- * already names the device folds into it. One far from the others of its device stays on its own.
- * The same plan when nothing changes (no registry yet, or nothing to fold).
+ * device: the first such item of a device and those linked to it by steps of at most FOLD_M
+ * become one, at their middle. The device's other items, and those of a device an item already
+ * names, stay on their own. Folding a folded plan changes nothing; the same plan comes back when
+ * nothing changes (no registry yet, or nothing to fold).
  */
 export function foldDevices(plan: Plan, hass: Hass | undefined): Plan {
   const entities = hass?.entities;
@@ -130,48 +130,32 @@ export function foldDevices(plan: Plan, hass: Hass | undefined): Plan {
 const folds = new WeakMap<Plan, { entities: Record<string, EntityEntry>; plan: Plan }>();
 
 function fold(plan: Plan, devices: readonly Device[], entities: Record<string, EntityEntry>): Plan {
-  const deviceOf = (d: Device): string | null =>
-    d.device_id ? null : (entities[d.entity_id]?.device_id ?? null);
-  if (!devices.some(deviceOf)) return plan;
-  const named = devices.filter((d) => d.device_id);
-  /** Items made here, with the positions folded into each. */
-  const made = new Map<Device, Point[]>();
-  const out: Device[] = [];
-  let changed = false;
+  const named = new Set(devices.map((d) => d.device_id).filter(Boolean));
+  // Items to fold, by device: a device some item names already keeps its other items as they are,
+  // so folding a folded plan changes nothing.
+  const byDevice = new Map<string, Device[]>();
   for (const d of devices) {
-    const dev = deviceOf(d);
-    if (!dev) {
-      out.push(d);
-      continue;
-    }
-    const near = (o: Device): boolean =>
-      o.device_id === dev && dist(o.position, d.position) <= FOLD_M;
-    if (named.some(near)) {
-      changed = true;
-      continue;
-    }
-    const into = [...made.keys()].find(near);
-    if (into) {
-      const at = [...made.get(into)!, d.position];
-      const mid = roundPointToMm([
-        at.reduce((s, p) => s + p[0], 0) / at.length,
-        at.reduce((s, p) => s + p[1], 0) / at.length,
-      ]);
-      const next = { ...into, position: mid };
-      made.delete(into);
-      made.set(next, at);
-      out[out.indexOf(into)] = next;
-      changed = true;
-    } else if ([...named, ...made.keys()].some((o) => o.device_id === dev)) {
-      out.push(d);
-    } else {
-      const next = { ...d, device_id: dev };
-      made.set(next, [d.position]);
-      out.push(next);
-      changed = true;
-    }
+    const dev = d.device_id ? null : entities[d.entity_id]?.device_id;
+    if (dev && !named.has(dev)) byDevice.set(dev, [...(byDevice.get(dev) ?? []), d]);
   }
-  return changed ? { ...plan, devices: out } : plan;
+  if (byDevice.size === 0) return plan;
+  const made = new Map<Device, Device>();
+  const gone = new Set<Device>();
+  for (const [dev, items] of byDevice) {
+    // The first item's group: every item linked to it by steps of at most FOLD_M, on the positions
+    // as placed. The rest of the device's items stay on their own.
+    const group = [items[0]!];
+    for (let i = 0; i < group.length; i++)
+      for (const o of items)
+        if (!group.includes(o) && dist(o.position, group[i]!.position) <= FOLD_M) group.push(o);
+    const mid = roundPointToMm([
+      group.reduce((s, d) => s + d.position[0], 0) / group.length,
+      group.reduce((s, d) => s + d.position[1], 0) / group.length,
+    ]);
+    made.set(group[0]!, { ...group[0]!, device_id: dev, position: mid });
+    for (const d of group.slice(1)) gone.add(d);
+  }
+  return { ...plan, devices: devices.filter((d) => !gone.has(d)).map((d) => made.get(d) ?? d) };
 }
 
 /**

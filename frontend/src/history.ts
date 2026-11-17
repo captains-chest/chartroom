@@ -48,6 +48,13 @@ export class History<T> {
     return next;
   }
 
+  /** Rewrite every value, past and future too, without a step to undo (a load-time migration). */
+  map(fn: (value: T) => T): void {
+    this.#past = this.#past.map(fn);
+    this.#future = this.#future.map(fn);
+    this.#present = fn(this.#present);
+  }
+
   /** Start over from `present`, forgetting the history (another plan was loaded). */
   reset(present: T): void {
     this.#past = [];

@@ -103,10 +103,12 @@ test('the panel switches floors and shows a plan with pan and zoom', async ({ pa
   await page.mouse.wheel(0, 300);
   await expect.poll(async () => (await box())[2]!).toBeGreaterThan(zoomed[2]!);
   const before = await box();
-  // Pan from a spot outside the flat (the view margin) so no element is grabbed.
-  await page.mouse.move(r.x + 8, r.y + 8);
+  // Pan from a spot outside the flat (the view margin) so no element is grabbed. The plan's box is
+  // read again just before: tabs other tests add meanwhile can push the plan down.
+  const p = (await svg.boundingBox())!;
+  await page.mouse.move(p.x + 8, p.y + 8);
   await page.mouse.down();
-  await page.mouse.move(r.x + 108, r.y + 58, { steps: 4 });
+  await page.mouse.move(p.x + 108, p.y + 58, { steps: 4 });
   await page.mouse.up();
   const panned = await box();
   expect(panned[0]!).toBeLessThan(before[0]!);

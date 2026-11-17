@@ -456,6 +456,23 @@ describe('plans from before items named devices', () => {
     expect(validatePlan(folded)).toEqual([]);
   });
 
+  it('leave out the entities an item excludes, and so does what the marker shows', () => {
+    const plan: Plan = {
+      ...emptyPlan('x'),
+      devices: [
+        {
+          id: 'hood',
+          entity_id: 'sensor.hood_humidity',
+          device_id: 'hood',
+          exclude: ['sensor.hood_temperature'],
+          position: [0, 0],
+        },
+      ],
+    };
+    expect(itemEntities(plan, hass).get('hood')).toEqual(['sensor.hood_humidity']);
+    expect(itemPrimary(plan, hass, plan.devices![0]!)).toBe('sensor.hood_humidity');
+  });
+
   it('fold a chain of one device’s sensors once, so folding again changes nothing', () => {
     const at = (id: string, entity_id: string, x: number) => ({
       id,

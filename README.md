@@ -48,7 +48,8 @@ under **Settings → Areas, labels & zones** and assign your areas to them.
   placed on their own. **Auto-place by area** drops every device whose area is linked to a room
   into that room; drag the rest from the list onto the plan (or pick one and click where it goes),
   then drag markers to where the devices really are. The inspector changes which device a marker
-  shows or deletes it. On a plan for a floor, the list only offers that floor's areas. Plans saved
+  shows or deletes it, and under **Entities shown** unticks an entity of the device to leave it out
+  of the marker, its popover and menu and the maps (say a smart plug's unreliable temperature). On a plan for a floor, the list only offers that floor's areas. Plans saved
   by earlier versions placed each sensor of a device on its own: they open with the sensors of one device
   that sit within 1 m of each other as one marker, between them, and are saved that way after
   your next edit.

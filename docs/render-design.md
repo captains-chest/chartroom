@@ -358,8 +358,10 @@ not a source, and a device item stands for a Home Assistant device rather than o
 - An item has `entity_id` (the entity it was placed by, shown while the registry does not know the
   device) and, for an entity that has a device, `device_id`. Its entities are its own `entity_id`
   and the rest of the device's in `hass.entities`, without hidden and config/diagnostic ones, less
-  any placed as items of their own (`itemEntities` in `device-entities.ts`, cached per plan and
-  registry object). Helpers and template sensors have no device: their item is the one entity.
+  any placed as items of their own and any in the item's optional `exclude` (`itemEntities` in
+  `device-entities.ts`, cached per plan and registry object). `exclude` (at most 64 ids, set by the
+  editor's **Entities shown** checkboxes) never holds the item's own `entity_id`; normalising drops
+  repeats and an empty list, and the editor drops ids the device no longer has on the next change. Helpers and template sensors have no device: their item is the one entity.
 - `layerData` takes, for each item, the first of its entities whose class fits the layer
   (`layerOfState`): a multisensor's temperature feeds Temperature and its humidity Humidity, both
   at the item's position, with the item's id as the reading id. So there is one value label per

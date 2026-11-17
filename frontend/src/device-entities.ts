@@ -54,7 +54,8 @@ const resolved = new WeakMap<
 
 /**
  * Each device item's entities by item id: its own `entity_id` first, then the rest of its device's.
- * An entity placed as an item of its own (a sensor of the device placed apart) is left to that item.
+ * An entity placed as an item of its own (a sensor of the device placed apart) is left to that item,
+ * and one the item excludes is left out.
  */
 export function itemEntities(
   plan: Plan | null,
@@ -67,8 +68,11 @@ export function itemEntities(
   const own = new Set(devices.filter((d) => !d.device_id).map((d) => d.entity_id));
   const map = new Map<string, readonly string[]>();
   for (const d of devices) {
+    const out = new Set(d.exclude);
     const rest = d.device_id
-      ? entitiesOfDevice(hass, d.device_id).filter((e) => e !== d.entity_id && !own.has(e))
+      ? entitiesOfDevice(hass, d.device_id).filter(
+          (e) => e !== d.entity_id && !own.has(e) && !out.has(e),
+        )
       : [];
     map.set(d.id, [d.entity_id, ...rest]);
   }

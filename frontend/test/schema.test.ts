@@ -50,6 +50,23 @@ describe('plan schema', () => {
     expect(shapeProblems(bad as never)).toEqual(['rooms[0]: bad or missing area_ids']);
   });
 
+  it("checks a device's exclude, without repeats or its own entity, and caps its length", () => {
+    const dev = { id: 'd', entity_id: 'light.a', device_id: 'x', position: [0, 0] };
+    const plan = normalizePlan({
+      name: 'P',
+      devices: [
+        { ...dev, exclude: ['sensor.t', 'sensor.t', 'light.a'] },
+        { ...dev, id: 'e', exclude: ['light.a'] },
+        { ...dev, id: 'f', exclude: Array.from({ length: 65 }, (_, i) => `sensor.s${i}`) },
+      ],
+    });
+    expect(plan.devices!.slice(0, 2)).toEqual([
+      { ...dev, exclude: ['sensor.t'] },
+      { ...dev, id: 'e' },
+    ]);
+    expect(shapeProblems(plan)).toEqual(['devices[2]: bad or missing exclude']);
+  });
+
   it('keeps a damaged list for shapeProblems to report, rather than throwing', () => {
     expect(() => normalizePlan({ name: 'P', rooms: 'none' })).not.toThrow();
     expect(() => normalizePlan({ name: 'P', rooms: [null, 3] })).not.toThrow();

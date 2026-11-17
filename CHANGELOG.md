@@ -22,6 +22,11 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
   an item and pick it by letting go there; it closes on a click outside, a pan or a zoom (#86,
   #106).
 
+- The editor's device inspector lists the device's entities under **Entities shown**: untick one
+  (say a smart plug's unreliable temperature) to leave it out of the marker, its popover and radial
+  menu, and the maps. The entity the device was placed by stays. Plans store it as the device
+  item's optional `exclude` (#101).
+
 ### Changed
 
 - A Home Assistant device is one marker on the plan, not one per entity: a temperature and

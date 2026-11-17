@@ -13,7 +13,7 @@ import {
   same,
   sub,
 } from '../geometry';
-import { DEFAULT_TX_DBM } from './constants';
+import { DEFAULT_TX_DBM, MAX_EXCLUDE } from './constants';
 import { uniqueIds } from './functions';
 import type { Device, Door, Material, Opening, Plan, Room, Source, Wall } from './models';
 import type { OpeningKind, Point, SourceKind, Window } from './types';
@@ -414,7 +414,7 @@ export function moveDevice(plan: Plan, id: string, to: Point): Plan {
   };
 }
 
-/** Show another device (or entity without one) at the item's place. */
+/** Show another device (or entity without one) at the item's place, leaving none of it out. */
 export function updateDevice(
   plan: Plan,
   id: string,
@@ -423,9 +423,22 @@ export function updateDevice(
 ): Plan {
   return {
     ...plan,
-    devices: updateById(plan.devices ?? [], id, ({ device_id: _old, ...d }) =>
+    devices: updateById(plan.devices ?? [], id, ({ device_id: _old, exclude: _out, ...d }) =>
       device_id ? { ...d, entity_id, device_id } : { ...d, entity_id },
     ),
+  };
+}
+
+/** Leave these entities of the item's device out of it (never its own `entity_id`). */
+export function setDeviceExclude(plan: Plan, id: string, exclude: readonly string[]): Plan {
+  return {
+    ...plan,
+    devices: updateById(plan.devices ?? [], id, ({ exclude: _old, ...d }) => {
+      const ids = uniqueIds(exclude)
+        .filter((e) => e !== d.entity_id)
+        .slice(0, MAX_EXCLUDE);
+      return ids.length > 0 ? { ...d, exclude: ids } : d;
+    }),
   };
 }
 

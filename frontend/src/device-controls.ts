@@ -60,6 +60,8 @@ export class DeviceControls implements PointerDelegate {
   #lastInfo = 0;
   /** The popover was opened by the menu's Route: hover leaves it, the next press anywhere hides it. */
   #pinned = false;
+  /** The press that hid a pinned popover: on a marker it does nothing else, as with the menu. */
+  #unpinnedBy: Event | null = null;
   readonly #confirmText: HTMLElement;
   readonly #confirmButton: HTMLButtonElement;
   #answer: ((ok: boolean) => void) | null = null;
@@ -227,7 +229,10 @@ export class DeviceControls implements PointerDelegate {
     this.#menu?.close(false);
   }
 
-  readonly #unpin = (): void => this.#hide();
+  readonly #unpin = (e: Event): void => {
+    this.#unpinnedBy = e;
+    this.#hide();
+  };
 
   #hide(): void {
     if (this.#pinned) {
@@ -264,8 +269,9 @@ export class DeviceControls implements PointerDelegate {
 
   down(_p: Point, e: PointerEvent): boolean {
     const el = e.button === 0 ? this.#marker(e.target) : null;
-    // A press that closes the menu does nothing else on a marker (elsewhere it may pan).
-    if (this.#menu?.anchor) {
+    // A press that closes the menu or hides a route does nothing else on a marker (elsewhere it
+    // may pan).
+    if (this.#menu?.anchor || e === this.#unpinnedBy) {
       this.#closeMenu();
       this.#press = null;
       return !!el;

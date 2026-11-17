@@ -7,7 +7,7 @@ import type { Device, Plan } from './plan/models';
 import { s } from './ui';
 
 /** Our own line glyphs on a 24-unit grid (no icon library). */
-const GLYPHS: Record<Glyph, string> = {
+export const GLYPHS: Record<Glyph, string> = {
   light: 'M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3zM9.5 19h5M10.5 21.5h3',
   switch: 'M7 7h10a5 5 0 0 1 0 10H7A5 5 0 0 1 7 7zM16 10a2 2 0 1 0 0 4a2 2 0 1 0 0-4z',
   plug: 'M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4',
@@ -29,7 +29,6 @@ const GLYPHS: Record<Glyph, string> = {
 interface Marker {
   el: SVGGElement;
   glyph: SVGElement;
-  title: SVGElement;
   device: Device;
   entity: string;
   state: unknown;
@@ -99,9 +98,8 @@ export class MarkerLayer {
     setTimeout(() => el.classList.remove('pending'), PENDING_TIMEOUT_MS);
   }
 
-  #create(d: Device): Pick<Marker, 'el' | 'glyph' | 'title'> {
+  #create(d: Device): Pick<Marker, 'el' | 'glyph'> {
     const glyph = s('path', { class: 'glyph', transform: GLYPH_TRANSFORM });
-    const title = s('title');
     const el = s(
       'g',
       {
@@ -116,9 +114,8 @@ export class MarkerLayer {
       s('circle', { class: 'disc', r: MARKER_PX }),
       glyph,
       s('path', { class: 'slash', d: 'M-8 8L8 -8' }),
-      title,
     );
-    return { el, glyph, title };
+    return { el, glyph };
   }
 
   #place(el: SVGGElement, d: Device): void {
@@ -152,8 +149,9 @@ export class MarkerLayer {
     el.classList.toggle('selected', sel);
     el.classList.toggle('pending', pending);
     el.dataset['status'] = look.status;
+    // No <title>: its native tooltip would cover the popover (device-popover.ts), which the
+    // marker names with aria-describedby while it shows.
     el.setAttribute('aria-label', look.label);
-    m.title.textContent = look.label;
     m.glyph.setAttribute('d', GLYPHS[look.glyph]);
   }
 }

@@ -1,5 +1,13 @@
 // Tapping and holding device markers outside the editor: tap toggles (locks ask first), hold,
-// right-click or the context-menu key open Home Assistant's more-info dialog.
+// right-click or the context-menu key open Home Assistant's more-info dialog. Hovering a marker or
+// source with the mouse, or focusing a marker from the keyboard, shows what it is (a popover).
+import { itemEntities } from './device-entities';
+import {
+  DevicePopover,
+  devicePopoverStyles,
+  popoverContent,
+  type PopoverContent,
+} from './device-popover';
 import { tapAction } from './devices';
 import type { Hass } from './ha-types';
 import type { Point } from './plan/types';
@@ -10,6 +18,12 @@ import { button, h } from './ui';
 export const HOLD_MS = 500;
 /** A press that moves further than this is a pan, not a tap. */
 const SLOP_PX = 8;
+/** How long the mouse rests on a marker before its popover shows. */
+const SHOW_MS = 400;
+/** How long the popover stays after the mouse leaves its marker, so the mouse can reach it. */
+const HIDE_MS = 200;
+/** How often an open popover refreshes its "5 min ago". */
+const TICK_MS = 30_000;
 
 interface Press {
   entity: string;
@@ -23,6 +37,11 @@ interface Press {
 
 export class DeviceControls implements PointerDelegate {
   readonly dialog: HTMLDialogElement;
+  /** What the hovered or focused marker is (`.device-popover`). */
+  readonly popover: DevicePopover;
+  #showTimer: ReturnType<typeof setTimeout> | undefined;
+  #hideTimer: ReturnType<typeof setTimeout> | undefined;
+  #tick: ReturnType<typeof setInterval> | undefined;
   #press: Press | null = null;
   /** The marker under the last right-button press, if any. */
   #rightPress: { entity: string; x: number; y: number } | null = null;
@@ -51,10 +70,26 @@ export class DeviceControls implements PointerDelegate {
       ),
     );
     this.dialog.addEventListener('close', () => this.#close(false));
+    this.popover = new DevicePopover(view.el);
     view.el.addEventListener('keydown', (e) => this.#key(e));
+    view.el.addEventListener('pointerover', (e) => this.#over(e));
+    // Hidden while zooming; a pan starts with a press, below.
+    view.el.addEventListener('wheel', () => this.#hide(), { passive: true });
+    view.el.addEventListener('pointerout', (e) => this.#out(e));
+    // Keyboard focus only: a click or tap focuses the marker too, without :focus-visible.
+    view.el.addEventListener('focusin', (e) => {
+      const el = this.#marker(e.target);
+      if (el?.matches(':focus-visible')) this.#show(el);
+    });
+    view.el.addEventListener('focusout', (e) => {
+      if (e.target === this.popover.anchor) this.#hide();
+    });
     // The view captures the pointer on press, so the contextmenu after a right-click goes to the
     // <svg>, not the marker: remember the marker the press started on.
     view.el.addEventListener('pointerdown', (e) => {
+      clearTimeout(this.#showTimer);
+      // A press on the marker shown keeps it (a tap's new state shows); a pan hides it.
+      if (this.#target(e.target) !== this.popover.anchor) this.#hide();
       const el = e.button === 2 ? this.#marker(e.target) : null;
       this.#rightPress = el ? { entity: el.dataset['entity']!, x: e.clientX, y: e.clientY } : null;
     });
@@ -81,6 +116,81 @@ export class DeviceControls implements PointerDelegate {
 
   #marker(target: EventTarget | null): SVGElement | null {
     return (target as Element | null)?.closest?.<SVGElement>('[data-kind=device]') ?? null;
+  }
+
+  /** A marker or a source (an access point or radio) under `target`. */
+  #target(target: EventTarget | null): SVGElement | null {
+    return (
+      (target as Element | null)?.closest?.<SVGElement>('[data-kind=device], [data-kind=source]') ??
+      null
+    );
+  }
+
+  #over(e: PointerEvent): void {
+    if (e.pointerType === 'touch' || !this.active) return;
+    if (this.popover.el.contains(e.target as Node)) {
+      clearTimeout(this.#hideTimer);
+      return;
+    }
+    const el = this.#target(e.target);
+    // Buttons down: a pan or a press passing over.
+    if (!el || e.buttons) return;
+    clearTimeout(this.#hideTimer);
+    if (el === this.popover.anchor) return;
+    clearTimeout(this.#showTimer);
+    // From one marker to the next, the popover follows at once.
+    this.#showTimer = setTimeout(() => this.#show(el), this.popover.anchor ? 0 : SHOW_MS);
+  }
+
+  #out(e: PointerEvent): void {
+    if (e.pointerType === 'touch') return;
+    const pop = this.popover.el;
+    const from = this.#target(e.target) ?? (pop.contains(e.target as Node) ? pop : null);
+    if (!from || from.contains(e.relatedTarget as Node | null)) return;
+    clearTimeout(this.#showTimer);
+    clearTimeout(this.#hideTimer);
+    this.#hideTimer = setTimeout(() => this.#hide(), HIDE_MS);
+  }
+
+  /** What the popover says for a marker or source, or null for one no longer on the plan. */
+  #content(el: SVGElement): PopoverContent | null {
+    const plan = this.view.plan;
+    const hass = this.hass();
+    const id = el.dataset['id'];
+    if (el.dataset['kind'] === 'device') {
+      const d = plan?.devices?.find((x) => x.id === id);
+      return d
+        ? popoverContent(itemEntities(plan, hass).get(d.id) ?? [d.entity_id], d.device_id, hass)
+        : null;
+    }
+    const entity = plan?.sources.find((x) => x.id === id)?.entity_id;
+    return entity ? popoverContent([entity], hass?.entities?.[entity]?.device_id, hass) : null;
+  }
+
+  #show(el: Element): void {
+    const content = this.active && el.isConnected ? this.#content(el as SVGElement) : null;
+    if (!content) return this.#hide();
+    this.popover.show(el, content);
+    this.#tick ??= setInterval(() => this.statesChanged(), TICK_MS);
+  }
+
+  #hide(): void {
+    clearTimeout(this.#showTimer);
+    clearTimeout(this.#hideTimer);
+    clearInterval(this.#tick);
+    this.#tick = undefined;
+    this.popover.hide();
+  }
+
+  /** New states (or the History slider moved): an open popover follows them. */
+  statesChanged(): void {
+    const anchor = this.popover.anchor;
+    if (anchor) this.#show(anchor);
+  }
+
+  /** The view moved (fitted, resized): the popover follows its marker. */
+  viewChanged(): void {
+    this.popover.place();
   }
 
   down(_p: Point, e: PointerEvent): boolean {
@@ -130,6 +240,7 @@ export class DeviceControls implements PointerDelegate {
   }
 
   #key(e: KeyboardEvent): void {
+    if (e.key === 'Escape') this.#hide();
     const el = this.#marker(e.target);
     if (!el || !this.active) return;
     if (e.key === 'Enter' || e.key === ' ') {
@@ -195,7 +306,7 @@ export class DeviceControls implements PointerDelegate {
   }
 }
 
-export const deviceControlStyles = `
+export const deviceControlStyles = `${devicePopoverStyles}
   dialog.confirm { border: 0; border-radius: 12px; padding: 16px 20px; min-width: 240px;
     background: var(--card-background-color, #fff); color: var(--primary-text-color, #212121);
     box-shadow: 0 4px 24px rgba(0,0,0,0.3); }

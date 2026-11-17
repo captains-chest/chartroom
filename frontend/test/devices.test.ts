@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import { pointInPolygon } from '../src/geometry';
 import type { EntityState, Hass } from '../src/ha-types';
 import { foldDevices, itemEntities, itemPrimary } from '../src/device-entities';
+import { popoverContent } from '../src/device-popover';
 import { autoPlace, deviceChoices, deviceLook, spotsInRoom, tapAction } from '../src/devices';
 import { LIMITS } from '../src/plan/constants';
 import { emptyPlan, limitWarnings, validatePlan } from '../src/plan/functions';
@@ -393,5 +394,78 @@ describe('device ops', () => {
       position: [0, 0] as [number, number],
     }));
     expect(limitWarnings({ ...emptyPlan('x'), devices })).toHaveLength(1);
+  });
+});
+
+describe('popoverContent', () => {
+  const now = Date.parse('2026-01-01T12:00:00Z');
+  const at = (x: EntityState, minutesAgo: number, unit?: string): EntityState => ({
+    ...x,
+    attributes: { ...x.attributes, ...(unit ? { unit_of_measurement: unit } : {}) },
+    last_changed: new Date(now - minutesAgo * 60_000).toISOString(),
+  });
+  const h: Hass = {
+    areas: { kitchen: { area_id: 'kitchen', name: 'Kitchen', floor_id: null } },
+    entities: {
+      'sensor.hood_temperature': { entity_id: 'sensor.hood_temperature', device_id: 'hood' },
+      'sensor.hood_humidity': { entity_id: 'sensor.hood_humidity', device_id: 'hood' },
+      'binary_sensor.hood_motion': { entity_id: 'binary_sensor.hood_motion', device_id: 'hood' },
+    },
+    devices: { hood: { id: 'hood', area_id: 'kitchen', name: 'Kitchen hood' } },
+    states: Object.fromEntries(
+      [
+        at(
+          st('sensor.hood_temperature', '21.4', 'temperature', 'Kitchen hood Temperature'),
+          0,
+          '°C',
+        ),
+        at(st('sensor.hood_humidity', '48', 'humidity', 'Kitchen hood Humidity'), 5, '%'),
+        at(st('binary_sensor.hood_motion', 'unavailable', 'motion', 'Kitchen hood Motion'), 180),
+        at(st('light.desk', 'on', undefined, 'Desk lamp'), 3 * 24 * 60),
+      ].map((x) => [x.entity_id, x]),
+    ),
+  };
+
+  it("names the device and its area, with a line per entity, the marker's first", () => {
+    const ids = ['sensor.hood_humidity', 'sensor.hood_temperature', 'binary_sensor.hood_motion'];
+    expect(popoverContent(ids, 'hood', h, now)).toEqual({
+      title: 'Kitchen hood',
+      area: 'Kitchen',
+      more: 0,
+      lines: [
+        {
+          entity: 'binary_sensor.hood_motion',
+          glyph: 'motion',
+          name: 'Motion',
+          value: 'unavailable',
+          changed: '3 h ago',
+          unavailable: true,
+        },
+        {
+          entity: 'sensor.hood_humidity',
+          glyph: 'humidity',
+          name: 'Humidity',
+          value: '48 %',
+          changed: '5 min ago',
+          unavailable: false,
+        },
+        {
+          entity: 'sensor.hood_temperature',
+          glyph: 'thermometer',
+          name: 'Temperature',
+          value: '21.4 °C',
+          changed: 'just now',
+          unavailable: false,
+        },
+      ],
+    });
+  });
+
+  it('names an entity without a device by its friendly name', () => {
+    const c = popoverContent(['light.desk'], null, h, now);
+    expect(c).toMatchObject({ title: 'Desk lamp', area: null, more: 0 });
+    expect(c.lines).toEqual([
+      expect.objectContaining({ name: 'Light', value: 'on', changed: '3 d ago' }),
+    ]);
   });
 });

@@ -49,7 +49,9 @@ export interface DeviceLook {
   /** On, open, unlocked, detected: drawn filled in the domain's colour. */
   active: boolean;
   glyph: Glyph;
-  /** "Front door: open" — the marker's accessible name and tooltip. */
+  /** "open", "21.4 °C", "unavailable": the state in words, with its unit. */
+  value: string;
+  /** "Front door: open" — the marker's accessible name. */
   label: string;
 }
 
@@ -93,6 +95,8 @@ export function deviceLook(entityId: string, st: EntityState | undefined): Devic
   const domain = domainOf(entityId);
   const cls = st?.attributes.device_class ?? '';
   const raw = st?.state ?? 'unavailable';
+  const unit = st?.attributes.unit_of_measurement;
+  const reading = unit ? `${raw} ${unit}` : raw;
   let status: Status;
   let active = false;
   let word: string | undefined;
@@ -110,8 +114,7 @@ export function deviceLook(entityId: string, st: EntityState | undefined): Devic
     if (status === 'unknown') word = raw;
   } else if (domain === 'sensor') {
     status = 'reading';
-    const unit = st?.attributes.unit_of_measurement;
-    word = unit ? `${raw} ${unit}` : raw;
+    word = reading;
   } else if (raw === 'on' || raw === 'off') {
     active = raw === 'on';
     if (domain === 'binary_sensor' && cls === 'lock') {
@@ -124,9 +127,10 @@ export function deviceLook(entityId: string, st: EntityState | undefined): Devic
     }
   } else {
     status = 'unknown';
-    word = raw;
+    word = reading;
   }
-  return { status, active, glyph, label: `${name}: ${word ?? WORDS[status] ?? status}` };
+  const value = word ?? WORDS[status] ?? status;
+  return { status, active, glyph, value, label: `${name}: ${value}` };
 }
 
 /** What tapping a marker does: call a service (maybe after confirming), or show details. */

@@ -6,12 +6,13 @@ import { gzipSync } from 'node:zlib';
 
 const DIST = 'custom_components/chartroom/frontend';
 const BUDGET = {
-  total: 68 * 1024, // every .js file the integration serves (50 KB before multi-area rooms and plan import/export, 53 KB before the separate underlay file, 54 KB before the ignored-underlay notice, 54.5 KB before saying why an imported image was rejected and retrying failed saves, 55 KB before waiting for an image upload at Done, 56 KB before checking stored plans against the plan schema, 57 KB before following plans saved elsewhere in the panel, 58 KB before one marker per Home Assistant device, 60 KB before the device popover, 61 KB before the device radial menu, 64 KB before picking a menu item by a hold slid to it, 64.5 KB before Thread links from Matter, 65 KB before mesh routes and router rings, 66 KB before the signal map from mesh routers fitted to their measured links)
+  total: 68.2 * 1024, // every .js file the integration serves (50 KB before multi-area rooms and plan import/export, 53 KB before the separate underlay file, 54 KB before the ignored-underlay notice, 54.5 KB before saying why an imported image was rejected and retrying failed saves, 55 KB before waiting for an image upload at Done, 56 KB before checking stored plans against the plan schema, 57 KB before following plans saved elsewhere in the panel, 58 KB before one marker per Home Assistant device, 60 KB before the device popover, 61 KB before the device radial menu, 64 KB before picking a menu item by a hold slid to it, 64.5 KB before Thread links from Matter, 65 KB before mesh routes and router rings, 66 KB before the signal map from mesh routers fitted to their measured links, 68 KB before the menu's mesh Route)
   // The card entry plus the chunks it imports loads on every dashboard (20 KB before the device
   // radial menu, whose own code loads on first use; 20.5 KB before the popover's measured links
   // and the Signal button counting devices as possible mesh routers; 20.6 KB before fitting the
-  // plan clear of the legend; 20.8 KB before fitting it clear of the layer buttons too).
-  'chartroom-card.js': 20.9 * 1024,
+  // plan clear of the legend; 20.8 KB before fitting it clear of the layer buttons too; 20.9 KB
+  // before the menu's mesh Route showing the popover until the next press).
+  'chartroom-card.js': 21 * 1024,
 };
 
 const files = [];

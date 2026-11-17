@@ -210,6 +210,23 @@ test.describe('signal and mesh', () => {
       await shot(page, 'mesh-route.png');
       await page.mouse.move(1, 1);
       await expect(panel.locator('svg.plan g.mesh.focus')).toHaveCount(0);
+      // Without hover (touch), the menu's Route shows the same and keeps it until the next press
+      // or Esc; it never acts on the device (#125).
+      const plugState = async (): Promise<string> =>
+        (await api<{ state: string }>(token(), `/api/states/${ids[1]}`)).state;
+      const before = await plugState();
+      const plug = (await panel.locator(`g.device[data-entity="${ids[1]}"]`).boundingBox())!;
+      await page.mouse.click(plug.x + plug.width / 2, plug.y + plug.height / 2, {
+        button: 'right',
+      });
+      await panel.locator('.device-menu').getByRole('menuitem', { name: 'Route' }).click();
+      await page.mouse.move(1, 1);
+      await expect(pop).toHaveText(['Test router', 'Route: → Coordinator (LQI 240) · 1 hop']);
+      await expect(panel.locator('svg.plan g.mesh.focus line.on-path')).toHaveCount(1);
+      await page.keyboard.press('Escape');
+      await expect(panel.locator('svg.plan g.mesh.focus')).toHaveCount(0);
+      await expect(panel.locator('.device-popover')).toBeHidden();
+      expect(await plugState()).toBe(before);
       // With the signal layer under it, built from the mesh's routers (one link with RSSI is too
       // few to fit a level), then remembered across a reload.
       await panel.getByRole('button', { name: 'Signal' }).click();

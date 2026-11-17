@@ -300,6 +300,10 @@ that still overlaps (small cards) is hidden; the marker keeps its accessible nam
   styles ship in the lazy chunk (a `<style>` in the layer's group). Hovering or focusing a marker
   asks the layer (`focus`) for the device's nodes' roles and routes, following `via` with each
   hop's reading; the popover shows them and the route's links are drawn thick while the rest dim.
+  Touch has no hover, so while the layer is on and knows the device (`MeshLayer.info`), the radial
+  menu adds Route before Details: it shows the same popover on the marker and highlights the route
+  until the next press anywhere, Esc, a wheel, a new plan or the marker's blur (hover leaves it
+  alone meanwhile). It calls no service.
 - The panel layer (`mesh-layer.ts`, its own lazy chunk, loaded on first use) places a node where a
   device marker shows its device (or one of its entities) or a source one of its entities, and draws a
   line for each link with both ends on the plan: hue from red (bad) to green (good)
@@ -445,14 +449,15 @@ not a source, and a device item stands for a Home Assistant device rather than o
   pure) builds it from the item's entities: ring 1 is what the primary entity can do (from its
   domain, `supported_features`, `supported_color_modes`, color-temperature range, `preset_modes`),
   an item per other entity (a ring 2 with what that one can do plus its Details, or its Details
-  alone) and Details; unsupported items are left out, an unavailable device has Details only.
+  alone), Route while the Mesh layer knows the device (see Mesh links) and Details; unsupported
+  items are left out, an unavailable device has (Route and) Details only.
   Two rings at most: a ring-1 item acts or opens ring 2 (without acting), ring-2 items act. It is
   HTML in the plan box (`role=menu`/`menuitem`), centred on the marker's screen box and moved in so
   both rings stay inside the view, a constant size at any zoom, and hides the popover while open.
   It closes on a press outside it (one on a marker does nothing else), a pan, zoom or resize
   (`viewChanged`), a new plan or a released view (`reset`), the editor opening, Tab and Esc
   (Backspace and Esc in ring 2 go back to ring 1); focus returns to the marker. Choosing calls the
-  service the way a tap does (`markPending`, a lock's confirm, errors as `hass-notification`).
+  service (Route and Details call none) the way a tap does (`markPending`, a lock's confirm, errors as `hass-notification`).
   History is not in the menu: the History slider shows the whole plan, so it has nothing to jump
   to for one device yet.
 - `planInputs` (which states a plan reads) and the History slider's entity list resolve items the

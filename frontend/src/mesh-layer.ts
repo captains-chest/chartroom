@@ -400,15 +400,19 @@ export class MeshLayer {
     return ready;
   }
 
+  /** What the mesh says about a device (see `meshInfo`), without highlighting; null while off. */
+  info(entities: readonly string[] | null, deviceId?: string | null): MeshInfo | null {
+    return this.#on && this.#topology && entities
+      ? meshInfo(this.#topology, entities, deviceId, this.#hass)
+      : null;
+  }
+
   /**
    * What the mesh says about the device a popover is about to show (see `meshInfo`), and highlight
    * its route; nothing while the layer is off. `focus(null)` drops the highlight.
    */
   focus(entities: readonly string[] | null, deviceId?: string | null): string[] {
-    const info =
-      this.#on && this.#topology && entities
-        ? meshInfo(this.#topology, entities, deviceId, this.#hass)
-        : null;
+    const info = this.info(entities, deviceId);
     const path = info?.path.size ? info.path : null;
     // The popover asks again on every state change: redraw only when the route changed.
     if ([...(path ?? [])].join() !== [...(this.#path ?? [])].join()) {

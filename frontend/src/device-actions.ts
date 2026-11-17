@@ -6,7 +6,10 @@ import type { EntityState, Hass } from './ha-types';
 
 const domainOf = (entityId: string): string => entityId.slice(0, entityId.indexOf('.'));
 
-/** What choosing a radial-menu item does: call a service (maybe after confirming), or show details. */
+/**
+ * What choosing a radial-menu item does: call a service (maybe after confirming), show details, or
+ * show the device's mesh route (never acts on it).
+ */
 export type MenuAction =
   | {
       type: 'service';
@@ -16,7 +19,8 @@ export type MenuAction =
       data?: Record<string, unknown>;
       confirm?: string;
     }
-  | { type: 'more-info'; entity: string };
+  | { type: 'more-info'; entity: string }
+  | { type: 'route' };
 
 /** A radial-menu item: it acts, or (in ring 1 only) opens ring 2, whose items act. */
 export interface MenuItem {
@@ -137,25 +141,34 @@ function entityItems(entity: string, st: EntityState | undefined): MenuItem[] {
 /**
  * The radial menu for a device item's `entities` (see `itemEntities`), ring 1 with ring 2 inside
  * its items: what the marker's entity can do, then an item per other entity (opening a ring with
- * what that one can do and its Details, or its Details alone), then Details. Items the entity
- * does not support are left out; an unavailable device has Details only.
+ * what that one can do and its Details, or its Details alone), then Route when `route` (the Mesh
+ * layer is on and knows the device), then Details. Items the entity does not support are left out;
+ * an unavailable device has (Route and) Details only.
  */
-export function deviceActions(entities: readonly string[], hass: Hass | undefined): Ring {
+export function deviceActions(
+  entities: readonly string[],
+  hass: Hass | undefined,
+  route = false,
+): Ring {
   const primary = primaryEntity(entities, hass);
   const details = (entity: string): MenuItem => ({
     label: 'Details',
     action: { type: 'more-info', entity },
   });
+  const end: MenuItem[] = [
+    ...(route ? [{ label: 'Route', action: { type: 'route' } } as const] : []),
+    details(primary),
+  ];
   const st = hass?.states?.[primary];
-  if (!st || st.state === 'unavailable' || st.state === 'unknown') return [details(primary)];
+  if (!st || st.state === 'unavailable' || st.state === 'unknown') return end;
   const ring = entityItems(primary, st);
   const device = deviceName(primary, hass?.entities?.[primary]?.device_id, hass);
   for (const e of entities) {
-    if (e === primary || ring.length >= MAX_RING - 1) continue;
+    if (e === primary || ring.length >= MAX_RING - end.length) continue;
     // Ring 2 only acts: what opens a further ring (brightness steps) is left to the entity's Details.
     const own = entityItems(e, hass?.states?.[e]).filter((i) => !i.ring);
     const label = entityName(e, device, hass);
     ring.push(own.length ? { label, ring: [...own, details(e)] } : { ...details(e), label });
   }
-  return [...ring, details(primary)];
+  return [...ring, ...end];
 }

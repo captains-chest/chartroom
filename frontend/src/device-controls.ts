@@ -1,7 +1,8 @@
 // Tapping and holding device markers outside the editor: tap toggles (locks ask first); a hold,
 // right-click or the context-menu key opens the radial menu of what the device can do (Details
 // among it: Home Assistant's more-info dialog). Hovering a marker or source with the mouse, or
-// focusing a marker from the keyboard, shows what it is (a popover).
+// focusing a marker from the keyboard, shows what it is (a popover). With the Mesh layer on, the
+// menu's Route shows the popover and the route until the next press (touch has no hover).
 import { itemEntities } from './device-entities';
 import {
   DevicePopover,
@@ -57,6 +58,8 @@ export class DeviceControls implements PointerDelegate {
   /** Bumped by each opening and dismissal: an opening still loading the menu then gives up. */
   #menuTicket = 0;
   #lastInfo = 0;
+  /** The popover was opened by the menu's Route: hover leaves it, the next press anywhere hides it. */
+  #pinned = false;
   readonly #confirmText: HTMLElement;
   readonly #confirmButton: HTMLButtonElement;
   #answer: ((ok: boolean) => void) | null = null;
@@ -148,7 +151,7 @@ export class DeviceControls implements PointerDelegate {
   }
 
   #over(e: PointerEvent): void {
-    if (e.pointerType === 'touch' || !this.active) return;
+    if (e.pointerType === 'touch' || !this.active || this.#pinned) return;
     if (this.popover.el.contains(e.target as Node)) {
       clearTimeout(this.#hideTimer);
       return;
@@ -164,7 +167,7 @@ export class DeviceControls implements PointerDelegate {
   }
 
   #out(e: PointerEvent): void {
-    if (e.pointerType === 'touch') return;
+    if (e.pointerType === 'touch' || this.#pinned) return;
     const pop = this.popover.el;
     const from = this.#target(e.target) ?? (pop.contains(e.target as Node) ? pop : null);
     if (!from || from.contains(e.relatedTarget as Node | null)) return;
@@ -224,7 +227,13 @@ export class DeviceControls implements PointerDelegate {
     this.#menu?.close(false);
   }
 
+  readonly #unpin = (): void => this.#hide();
+
   #hide(): void {
+    if (this.#pinned) {
+      this.#pinned = false;
+      document.removeEventListener('pointerdown', this.#unpin, true);
+    }
     clearTimeout(this.#showTimer);
     clearTimeout(this.#hideTimer);
     if (this.#tick) {
@@ -372,16 +381,30 @@ export class DeviceControls implements PointerDelegate {
     const menu = (this.#menu ??= new DeviceMenu(this.view.el, (a, m) => this.#choose(a, m)));
     if (menu.anchor === el) return;
     const name = deviceName(el.dataset['entity']!, d.device_id, hass);
-    menu.open(el, name, deviceActions(entities, hass));
+    const route = !!this.view.mesh?.info(entities, d.device_id)?.lines.length;
+    menu.open(el, name, deviceActions(entities, hass, route));
   }
 
   #choose(action: MenuAction, marker: Element): void {
     if (action.type === 'more-info') return this.#moreInfo(action.entity);
+    if (action.type === 'route') return this.#route(marker);
     const { domain, service, data, confirm } = action;
     void this.#call((marker as SVGElement).dataset['id']!, action.entity, domain, service, {
       data,
       confirm,
     });
+  }
+
+  /**
+   * The menu's Route: the popover (role and route among it) on `marker`, its route highlighted,
+   * until the next press anywhere, Esc, a wheel, a new plan or the marker's blur. Never acts.
+   */
+  #route(marker: Element): void {
+    this.#hide();
+    this.#show(marker);
+    if (!this.popover.anchor) return;
+    this.#pinned = true;
+    document.addEventListener('pointerdown', this.#unpin, true);
   }
 
   /** Home Assistant's own details dialog for an entity. */

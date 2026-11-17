@@ -6,6 +6,12 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ### Added
 
+- With the Mesh layer on, a device's radial menu has a Route item when the mesh knows the device:
+  it shows the popover with the device's role and route ("Route: → Kitchen plug (RSSI -63 dBm) →
+  Border router (LQI 255) · 2 hops") and highlights the route on the plan until the next press,
+  Esc, a pan or zoom, or another plan. It never acts on the device. So a phone or wall tablet,
+  where a hold opens the menu instead of a popover, can see routes too (#125).
+
 - The signal map is built from the mesh: every placed coordinator and router of a Zigbee, Z-Wave
   or Thread network (Thread REEDs and border routers too) is a source, end devices only receive.
   One level at 1 m is fitted per network to the RSSI its placed devices measure between them (the

@@ -168,6 +168,34 @@ export function tapAction(entityId: string, st: EntityState | undefined): TapAct
   }
 }
 
+/** "Set preset mode" for "set_preset_mode": words, capitalised. */
+export const words = (s: string): string => {
+  const t = s.replace(/_/g, ' ').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+/** The name of Home Assistant device `deviceId`, else of the entity its marker shows. */
+export function deviceName(
+  primary: string,
+  deviceId: string | null | undefined,
+  hass: Hass | undefined,
+): string {
+  const dev = deviceId ? hass?.devices?.[deviceId] : undefined;
+  return (
+    dev?.name_by_user || dev?.name || hass?.states?.[primary]?.attributes.friendly_name || primary
+  );
+}
+
+/** An entity's name without its device's ("Temperature" of "Kitchen sensor Temperature"). */
+export function entityName(entity: string, device: string, hass: Hass | undefined): string {
+  const st = hass?.states?.[entity];
+  const full = st?.attributes.friendly_name ?? entity;
+  const own = full.toLowerCase().startsWith(device.toLowerCase())
+    ? full.slice(device.length).trim()
+    : full;
+  return words(own || st?.attributes.device_class || domainOf(entity));
+}
+
 export interface DeviceChoice {
   /** The entity its marker shows (primaryEntity); the item is placed by it. */
   entity_id: string;

@@ -98,9 +98,15 @@ template:
         device_class: signal_strength
         state_class: measurement
   - light:
+      # Dimmable, so the device menu offers Brightness.
       - name: Kitchen ceiling light
         unique_id: e2e_kitchen_ceiling_light
         state: "{{ is_state('input_boolean.kitchen_light', 'on') }}"
+        level: "{{ states('input_number.kitchen_light_level') | int(0) }}"
+        set_level:
+          - action: input_number.set_value
+            target: { entity_id: input_number.kitchen_light_level }
+            data: { value: '{{ brightness }}' }
         turn_on:
           - action: input_boolean.turn_on
             target: { entity_id: input_boolean.kitchen_light }
@@ -197,6 +203,12 @@ input_boolean:
 
 # Readings behind the climate sensors, like the developer instance's simulated ones.
 input_number:
+  kitchen_light_level:
+    name: Kitchen light level (sim)
+    min: 0
+    max: 255
+    step: 1
+    initial: 255
   living_room_temp:
     name: Living room temp (sim)
     min: 10

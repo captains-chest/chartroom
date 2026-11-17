@@ -6,8 +6,10 @@ import { gzipSync } from 'node:zlib';
 
 const DIST = 'custom_components/chartroom/frontend';
 const BUDGET = {
-  total: 61 * 1024, // every .js file the integration serves (50 KB before multi-area rooms and plan import/export, 53 KB before the separate underlay file, 54 KB before the ignored-underlay notice, 54.5 KB before saying why an imported image was rejected and retrying failed saves, 55 KB before waiting for an image upload at Done, 56 KB before checking stored plans against the plan schema, 57 KB before following plans saved elsewhere in the panel, 58 KB before one marker per Home Assistant device, 60 KB before the device popover)
-  'chartroom-card.js': 20 * 1024, // the card entry plus the chunks it imports loads on every dashboard
+  total: 64 * 1024, // every .js file the integration serves (50 KB before multi-area rooms and plan import/export, 53 KB before the separate underlay file, 54 KB before the ignored-underlay notice, 54.5 KB before saying why an imported image was rejected and retrying failed saves, 55 KB before waiting for an image upload at Done, 56 KB before checking stored plans against the plan schema, 57 KB before following plans saved elsewhere in the panel, 58 KB before one marker per Home Assistant device, 60 KB before the device popover, 61 KB before the device radial menu)
+  // The card entry plus the chunks it imports loads on every dashboard (20 KB before the device
+  // radial menu, whose own code loads on first use).
+  'chartroom-card.js': 20.5 * 1024,
 };
 
 const files = [];

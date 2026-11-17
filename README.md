@@ -205,8 +205,14 @@ Markers follow Home Assistant live, in the panel and in the card:
 - **Tap** (or Enter/Space on a focused marker) toggles lights, switches, fans and input booleans,
   opens or closes a cover (stops it while it moves) and locks or unlocks a lock after you confirm.
   Sensors and unavailable devices open their details instead.
-- **Hold** (half a second), right-click, the context-menu key or Shift+F10 opens Home Assistant's
-  more-info dialog.
+- **Hold** (half a second), right-click, the context-menu key or Shift+F10 opens a radial menu
+  around the marker with what the device can do: Toggle, Brightness (10–100 %) and Colour (whites
+  and a few colours) for a light, Speed and Oscillate for a fan, Open / Stop / Close and Position
+  for a cover, Lock or Unlock (after you confirm) for a lock, an item per other entity of the
+  device, and **Details** (Home Assistant's more-info dialog). Only what the device supports is
+  offered; an unavailable device has Details only. An item with more options (Brightness) opens a
+  second ring further out without acting. Arrow keys move around a ring, Enter chooses, Esc or
+  Backspace goes back a ring or closes it; a click outside, a pan or a zoom closes it too.
 - A device's marker shows its entity you can control (a light, a switch…), else its binary sensor,
   else its temperature or humidity sensor; a tap acts on that entity.
 - Markers keep the same size on screen at any zoom. Each one is a button with its entity's name
@@ -272,7 +278,7 @@ mesh: true # optional: draw mesh links
 history: true # optional: a History button that opens the time slider
 ```
 
-The card shows the plan with live device markers (tap to toggle, hold for details) and, with
+The card shows the plan with live device markers (tap to toggle, hold for the device's menu) and, with
 `layer`, a heatmap. It does not pan or zoom, so the dashboard still scrolls over it; open the panel
 to explore a plan. When a plan is edited, open cards update straight away. With `history: true`
 the card gets the same History slider as the panel (loaded on first use); while you scrub, marker
@@ -352,8 +358,8 @@ for the phone layout) and `history`, which runs after the desktop tests because 
 readings far from the others' on the shared instance.
 
 The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
-(with what it shares) 20 KB gzip and everything together 61 KB gzip. The heatmap renderer, editor,
-mesh layer and history bar are separate chunks loaded when first used. The build squeezes the CSS,
+(with what it shares) 20.5 KB gzip and everything together 64 KB gzip. The heatmap renderer, editor,
+mesh layer, history bar and device menu are separate chunks loaded when first used. The build squeezes the CSS,
 GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
 byte for byte.
 

@@ -468,6 +468,7 @@ export class ChartroomPanel extends HTMLElement {
     }
     if (!this.#plan || !this.#planId) return;
     this.#viewer.closeTime();
+    this.#controls.reset();
     const { PlanEditor } = await import('./plan-editor');
     this.#missed = false;
     this.#editor = new PlanEditor({

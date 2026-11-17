@@ -1,6 +1,7 @@
-// Tapping and holding device markers outside the editor: tap toggles (locks ask first), hold,
-// right-click or the context-menu key open Home Assistant's more-info dialog. Hovering a marker or
-// source with the mouse, or focusing a marker from the keyboard, shows what it is (a popover).
+// Tapping and holding device markers outside the editor: tap toggles (locks ask first); a hold,
+// right-click or the context-menu key opens the radial menu of what the device can do (Details
+// among it: Home Assistant's more-info dialog). Hovering a marker or source with the mouse, or
+// focusing a marker from the keyboard, shows what it is (a popover).
 import { itemEntities } from './device-entities';
 import {
   DevicePopover,
@@ -8,7 +9,9 @@ import {
   popoverContent,
   type PopoverContent,
 } from './device-popover';
-import { tapAction } from './devices';
+import type { MenuAction } from './device-actions';
+import type { DeviceMenu } from './device-menu';
+import { deviceName, tapAction } from './devices';
 import type { Hass } from './ha-types';
 import type { Point } from './plan/types';
 import type { PlanView, PointerDelegate } from './plan-view';
@@ -26,6 +29,7 @@ const HIDE_MS = 200;
 const TICK_MS = 30_000;
 
 interface Press {
+  el: SVGElement;
   entity: string;
   id: string;
   x: number;
@@ -44,7 +48,10 @@ export class DeviceControls implements PointerDelegate {
   #tick: ReturnType<typeof setInterval> | undefined;
   #press: Press | null = null;
   /** The marker under the last right-button press, if any. */
-  #rightPress: { entity: string; x: number; y: number } | null = null;
+  #rightPress: { el: SVGElement; x: number; y: number } | null = null;
+  /** The radial menu, once it has opened (its code loads then). */
+  #menu: DeviceMenu | null = null;
+  #menuLoad: Promise<typeof import('./device-menu')> | null = null;
   #lastInfo = 0;
   readonly #confirmText: HTMLElement;
   readonly #confirmButton: HTMLButtonElement;
@@ -90,18 +97,27 @@ export class DeviceControls implements PointerDelegate {
       clearTimeout(this.#showTimer);
       // A press on the marker shown keeps it (a tap's new state shows); a pan hides it.
       if (this.#target(e.target) !== this.popover.anchor) this.#hide();
+      // Any press outside the menu closes it.
+      if (this.#menu && !this.#menu.el.contains(e.target as Node)) this.#menu.close(false);
       const el = e.button === 2 ? this.#marker(e.target) : null;
-      this.#rightPress = el ? { entity: el.dataset['entity']!, x: e.clientX, y: e.clientY } : null;
+      this.#rightPress = el ? { el, x: e.clientX, y: e.clientY } : null;
     });
     view.el.addEventListener('contextmenu', (e) => {
       const r = this.#rightPress;
       this.#rightPress = null;
       // A right-drag that moved is a pan, not a click.
-      const entity =
-        this.#marker(e.target)?.dataset['entity'] ??
-        (r && Math.hypot(e.clientX - r.x, e.clientY - r.y) <= SLOP_PX ? r.entity : undefined);
-      // A long touch fires contextmenu too; the hold already opened the dialog.
-      if (entity && this.active && !this.#press?.held) this.#moreInfo(entity);
+      const el =
+        this.#marker(e.target) ??
+        (r && Math.hypot(e.clientX - r.x, e.clientY - r.y) <= SLOP_PX ? r.el : null);
+      if (!el || !this.active) return;
+      const press = this.#press;
+      // A long touch fires contextmenu too: it is the hold (the lift does not tap).
+      if (press) {
+        clearTimeout(press.timer);
+        if (press.held) return;
+        press.held = true;
+      }
+      void this.openMenu(el);
     });
   }
 
@@ -168,7 +184,8 @@ export class DeviceControls implements PointerDelegate {
   }
 
   #show(el: Element): void {
-    const content = this.active && el.isConnected ? this.#content(el as SVGElement) : null;
+    const content =
+      this.active && el.isConnected && !this.#menu?.anchor ? this.#content(el as SVGElement) : null;
     if (!content) return this.#hide();
     this.popover.show(el, content);
     if (this.#tick) return;
@@ -181,9 +198,10 @@ export class DeviceControls implements PointerDelegate {
     if (e.key === 'Escape') this.#hide();
   };
 
-  /** The plan was replaced or the view released: what the popover says is stale. */
+  /** The plan was replaced, the view released or the editor opens: popover and menu are stale. */
   reset(): void {
     this.#hide();
+    this.#menu?.close(false);
   }
 
   #hide(): void {
@@ -199,20 +217,29 @@ export class DeviceControls implements PointerDelegate {
 
   /** New states (or the History slider moved): an open popover follows them. */
   statesChanged(): void {
+    if (!this.active) this.#menu?.close(false);
     const anchor = this.popover.anchor;
     if (anchor) this.#show(anchor);
   }
 
-  /** The view moved (fitted, resized): the popover follows its marker. */
+  /** The view moved (panned, zoomed, fitted, resized): the popover follows, the menu closes. */
   viewChanged(): void {
     this.popover.place();
+    this.#menu?.close(false);
   }
 
   down(_p: Point, e: PointerEvent): boolean {
     const el = e.button === 0 ? this.#marker(e.target) : null;
+    // A press that closes the menu does nothing else on a marker (elsewhere it may pan).
+    if (this.#menu?.anchor) {
+      this.#menu.close(false);
+      this.#press = null;
+      return !!el;
+    }
     if (!el) return false;
     const entity = el.dataset['entity']!;
     const press: Press = {
+      el,
       entity,
       id: el.dataset['id']!,
       x: e.clientX,
@@ -221,7 +248,7 @@ export class DeviceControls implements PointerDelegate {
       moved: false,
       timer: setTimeout(() => {
         press.held = true;
-        this.#moreInfo(entity);
+        void this.openMenu(el);
       }, HOLD_MS),
     };
     this.#press = press;
@@ -262,8 +289,33 @@ export class DeviceControls implements PointerDelegate {
       void this.tap(el.dataset['id']!, el.dataset['entity']!);
     } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
       e.preventDefault();
-      this.#moreInfo(el.dataset['entity']!);
+      void this.openMenu(el);
     }
+  }
+
+  /** Open the radial menu on marker `el` (its code loads the first time). */
+  async openMenu(el: SVGElement): Promise<void> {
+    this.#hide();
+    const load = (this.#menuLoad ??= import('./device-menu'));
+    const { DeviceMenu, deviceActions } = await load;
+    const plan = this.view.plan;
+    const d = plan?.devices?.find((x) => x.id === el.dataset['id']);
+    if (!d || !el.isConnected || !this.active) return;
+    const hass = this.hass();
+    const entities = itemEntities(plan, hass).get(d.id) ?? [d.entity_id];
+    const menu = (this.#menu ??= new DeviceMenu(this.view.el, (a, m) => this.#choose(a, m)));
+    if (menu.anchor === el) return;
+    const name = deviceName(el.dataset['entity']!, d.device_id, hass);
+    menu.open(el, name, deviceActions(entities, hass));
+  }
+
+  #choose(action: MenuAction, marker: Element): void {
+    if (action.type === 'more-info') return this.#moreInfo(action.entity);
+    const { domain, service, data, confirm } = action;
+    void this.#call((marker as SVGElement).dataset['id']!, action.entity, domain, service, {
+      data,
+      confirm,
+    });
   }
 
   /** Home Assistant's own details dialog for an entity. */
@@ -283,10 +335,24 @@ export class DeviceControls implements PointerDelegate {
       this.#moreInfo(entityId);
       return;
     }
-    if (action.confirm && !(await this.confirm(action.confirm, action.service))) return;
+    await this.#call(id, entityId, action.domain, action.service, action);
+  }
+
+  /** Call a service on an entity of marker `id` (as a tap does), asking first with `confirm`. */
+  async #call(
+    id: string,
+    entityId: string,
+    domain: string,
+    service: string,
+    { data, confirm }: { data?: Record<string, unknown>; confirm?: string },
+  ): Promise<void> {
+    const hass = this.hass();
+    // The History slider's states cannot act: show details instead, as a tap does.
+    if (!hass?.callService) return this.#moreInfo(entityId);
+    if (confirm && !(await this.confirm(confirm, service))) return;
     this.view.markers.markPending(id);
     try {
-      await hass.callService(action.domain, action.service, { entity_id: entityId });
+      await hass.callService(domain, service, { ...data, entity_id: entityId });
     } catch (err) {
       this.host.dispatchEvent(
         new CustomEvent('hass-notification', {

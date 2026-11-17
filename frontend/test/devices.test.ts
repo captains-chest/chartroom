@@ -3,6 +3,7 @@ import { pointInPolygon } from '../src/geometry';
 import type { EntityState, Hass } from '../src/ha-types';
 import { foldDevices, itemEntities, itemPrimary } from '../src/device-entities';
 import { popoverContent } from '../src/device-popover';
+import { deviceActions, type Ring } from '../src/device-actions';
 import { autoPlace, deviceChoices, deviceLook, spotsInRoom, tapAction } from '../src/devices';
 import { LIMITS } from '../src/plan/constants';
 import { emptyPlan, limitWarnings, validatePlan } from '../src/plan/functions';
@@ -103,6 +104,140 @@ describe('tapAction', () => {
     });
     expect(tapAction('light.a', st('light.a', 'unavailable'))).toEqual({ type: 'more-info' });
     expect(tapAction('light.a', undefined)).toEqual({ type: 'more-info' });
+  });
+});
+
+describe('deviceActions', () => {
+  // Each ring as "Label" or "Label: ring-2 labels".
+  const shape = (ring: Ring): string[] =>
+    ring.map((i) => (i.ring ? `${i.label}: ${i.ring.map((j) => j.label).join(', ')}` : i.label));
+  const of = (states: [string, string, EntityState['attributes']?][]): Hass => ({
+    states: Object.fromEntries(
+      states.map(([id, state, attributes = {}]) => [
+        id,
+        { entity_id: id, state, attributes: { friendly_name: `Lamp ${id}`, ...attributes } },
+      ]),
+    ),
+    entities: Object.fromEntries(states.map(([id]) => [id, { entity_id: id, device_id: 'd' }])),
+    devices: { d: { id: 'd', name: 'Lamp' } },
+  });
+  const STEPS = '10 %, 25 %, 50 %, 75 %, 100 %';
+  it.each<[string, [string, string, EntityState['attributes']?][], string[]]>([
+    [
+      'an on/off light',
+      [['light.a', 'off', { supported_color_modes: ['onoff'] }]],
+      ['Toggle', 'Details'],
+    ],
+    [
+      'a dimmable colour light, its whites inside its range',
+      [
+        [
+          'light.a',
+          'on',
+          { supported_color_modes: ['color_temp', 'hs'], min_color_temp_kelvin: 3000 },
+        ],
+      ],
+      [
+        'Toggle',
+        `Brightness: ${STEPS}`,
+        'Colour: Neutral white, Cool white, Red, Orange, Yellow, Green, Blue, Purple',
+        'Details',
+      ],
+    ],
+    [
+      'an unavailable light',
+      [['light.a', 'unavailable', { supported_color_modes: ['hs'] }]],
+      ['Details'],
+    ],
+    ['a switch', [['switch.a', 'on']], ['Toggle', 'Details']],
+    [
+      'a fan with presets that oscillates',
+      [
+        [
+          'fan.a',
+          'on',
+          { supported_features: 1 | 2 | 8, preset_modes: ['eco', 'boost'], oscillating: true },
+        ],
+      ],
+      ['Toggle', 'Speed: Eco, Boost', 'Stop oscillating', 'Details'],
+    ],
+    [
+      'a fan with speeds only',
+      [['fan.a', 'on', { supported_features: 1 }]],
+      ['Toggle', 'Speed: 25 %, 50 %, 75 %, 100 %', 'Details'],
+    ],
+    [
+      'a cover with position',
+      [['cover.a', 'open', { supported_features: 15 }]],
+      ['Open', 'Stop', 'Close', 'Position: 0 %, 25 %, 50 %, 75 %, 100 %', 'Details'],
+    ],
+    [
+      'a cover that opens and closes',
+      [['cover.a', 'open', { supported_features: 3 }]],
+      ['Open', 'Close', 'Details'],
+    ],
+    ['a locked lock', [['lock.a', 'locked']], ['Unlock', 'Details']],
+    ['a jammed lock', [['lock.a', 'jammed']], ['Details']],
+    [
+      'a multisensor: one item per other entity',
+      [
+        ['sensor.t', '21', { device_class: 'temperature', friendly_name: 'Lamp Temperature' }],
+        ['binary_sensor.m', 'off', { device_class: 'motion', friendly_name: 'Lamp Motion' }],
+        ['switch.s', 'off', { friendly_name: 'Lamp Relay' }],
+      ],
+      ['Toggle', 'Temperature', 'Motion', 'Details'],
+    ],
+    [
+      'a light with a relay: ring 2 has what acts, no further rings',
+      [
+        ['light.a', 'on', { supported_color_modes: ['brightness'] }],
+        ['switch.s', 'off', { friendly_name: 'Lamp Relay' }],
+        ['light.b', 'off', { supported_color_modes: ['brightness'], friendly_name: 'Lamp Night' }],
+      ],
+      [
+        'Toggle',
+        `Brightness: ${STEPS}`,
+        'Relay: Toggle, Details',
+        'Night: Toggle, Details',
+        'Details',
+      ],
+    ],
+  ])('%s', (_, states, want) => {
+    expect(
+      shape(
+        deviceActions(
+          states.map(([id]) => id),
+          of(states),
+        ),
+      ),
+    ).toEqual(want);
+  });
+
+  it('acts with the data each item stands for', () => {
+    const h = of([
+      ['light.a', 'on', { supported_color_modes: ['color_temp', 'hs'] }],
+      ['lock.l', 'locked', { friendly_name: 'Front door' }],
+      ['sensor.t', '21', { device_class: 'temperature' }],
+    ]);
+    const [, brightness, colour, lock, temp, details] = deviceActions(
+      ['light.a', 'lock.l', 'sensor.t'],
+      h,
+    );
+    expect(brightness!.ring![2]!.action).toEqual({
+      type: 'service',
+      entity: 'light.a',
+      domain: 'light',
+      service: 'turn_on',
+      data: { brightness_pct: 50 },
+    });
+    expect(colour!.ring![0]!.action).toMatchObject({ data: { color_temp_kelvin: 2700 } });
+    expect(colour!.ring![3]!.action).toMatchObject({ data: { hs_color: [0, 100] } });
+    expect(lock!.ring![0]!.action).toMatchObject({
+      service: 'unlock',
+      confirm: 'Unlock Front door?',
+    });
+    expect(temp!.action).toEqual({ type: 'more-info', entity: 'sensor.t' });
+    expect(details!.action).toEqual({ type: 'more-info', entity: 'light.a' });
   });
 });
 

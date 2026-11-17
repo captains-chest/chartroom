@@ -174,7 +174,7 @@ test.describe('devices', () => {
     expect(new Set(stored.devices.map((d) => d.entity_id)).size).toBe(stored.devices.length);
   });
 
-  test('markers show live state, toggle on tap and open details on hold', async ({ page }) => {
+  test('markers show live state, toggle on tap and open their menu on hold', async ({ page }) => {
     const present = await savePlaced();
     const coffee = 'switch.coffee_maker';
     const was = await state(coffee);
@@ -210,12 +210,16 @@ test.describe('devices', () => {
       await restore(coffee, was);
       await expect(m).toHaveAttribute('data-status', was!);
 
-      // Hold opens Home Assistant's more-info dialog; so does a sensor tap.
+      // Hold opens the device's menu, whose Details is Home Assistant's more-info dialog.
       const box = (await m.boundingBox())!;
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.down();
       await page.waitForTimeout(800);
       await page.mouse.up();
+      const menu = panel.locator('.device-menu');
+      await expect(menu.getByRole('menuitem')).toHaveText(['Toggle', 'Details']);
+      await menu.getByRole('menuitem', { name: 'Details' }).click();
+      await expect(menu).toBeHidden();
       const info = page.locator('ha-more-info-dialog');
       await expect(info).toBeAttached();
       await expect(info.getByText('Coffee maker').first()).toBeVisible();
@@ -226,18 +230,71 @@ test.describe('devices', () => {
     }
   });
 
-  test('right-click on a marker opens details without toggling', async ({ page }) => {
+  test('right-click or the keyboard opens the device menu', async ({ page }) => {
+    const light = 'light.kitchen_ceiling_light';
+    const level = 'input_number.kitchen_light_level';
     const present = await savePlaced();
-    const coffee = 'switch.coffee_maker';
-    test.skip(!present.includes(coffee), 'no switch.coffee_maker on this instance');
-    const was = await state(coffee);
-    const panel = await openPlan(page);
-    const box = (await marker(panel, coffee).boundingBox())!;
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
-    const info = page.locator('ha-more-info-dialog');
-    await expect(info).toBeAttached();
-    await expect(info.getByText('Coffee maker').first()).toBeVisible();
-    expect(await state(coffee)).toBe(was);
+    const wasLevel = await state(level);
+    test.skip(
+      !present.includes(light) || wasLevel === null,
+      'no dimmable kitchen light (CI has one)',
+    );
+    const was = await state(light);
+    try {
+      const panel = await openPlan(page);
+      const m = marker(panel, light);
+      const menu = panel.locator('.device-menu');
+      const item = (name: string): Locator => menu.getByRole('menuitem', { name, exact: true });
+
+      // Right-click: ring 1, its first item focused. Brightness opens ring 2 without acting.
+      const box = (await m.boundingBox())!;
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' });
+      await expect(menu.getByRole('menuitem')).toHaveText(['Toggle', 'Brightness', 'Details']);
+      await expect(item('Toggle')).toBeFocused();
+      await item('Brightness').click();
+      await expect(menu.getByRole('menu', { name: 'Brightness' }).getByRole('menuitem')).toHaveText(
+        ['10 %', '25 %', '50 %', '75 %', '100 %'],
+      );
+      await shot(page, 'device-menu.png');
+      expect([await state(light), await state(level)]).toEqual([was, wasLevel]);
+      // A ring-2 step calls the service and closes the menu.
+      await item('50 %').click();
+      await expect(menu).toBeHidden();
+      await expect.poll(async () => Number(await state(level))).toBe(128);
+
+      // The keyboard: Shift+F10 opens it, arrows move, Enter opens ring 2, Esc goes back a ring
+      // and then closes it, focus back on the marker; nothing acts.
+      await m.focus();
+      await page.keyboard.press('Shift+F10');
+      await expect(item('Toggle')).toBeFocused();
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('Enter');
+      await expect(item('10 %')).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(item('Brightness')).toBeFocused();
+      await expect(item('10 %')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(menu).toBeHidden();
+      await expect(m).toBeFocused();
+      expect(await state(light)).toBe(was);
+
+      // Details opens Home Assistant's more-info dialog.
+      await page.keyboard.press('Shift+F10');
+      await page.keyboard.press('ArrowLeft');
+      await expect(item('Details')).toBeFocused();
+      await page.keyboard.press('Enter');
+      const info = page.locator('ha-more-info-dialog');
+      await expect(info).toBeAttached();
+      await expect(info.getByText('Kitchen ceiling light').first()).toBeVisible();
+      await page.keyboard.press('Escape');
+      expect(await state(light)).toBe(was);
+    } finally {
+      await restore(light, was);
+      await api(token(), '/api/services/input_number/set_value', {
+        entity_id: level,
+        value: Number(wasLevel),
+      });
+    }
   });
 
   test('hovering or focusing a marker says which device it is', async ({ page }) => {

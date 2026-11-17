@@ -192,8 +192,8 @@ function poorReading(l: MeshLink): string | null {
 
 /**
  * The weak spots of a topology, by node id, with what makes each weak:
- * - a node that does not route (an end device, a Thread REED) whose only parent link (to its
- *   `via`, or marked `parent`) is poor: "Weak: only parent link is poor (LQI 62)";
+ * - a node that does not route (an end device, a Thread REED) whose parent link (to its `via`;
+ *   without one, its only link marked `parent`) is poor: "Weak: only parent link is poor (LQI 62)";
  * - a router that MANY_DEPENDANTS or more nodes route through (their `via` chains pass it): "Weak:
  *   4 devices route through this". The coordinator is left out: every route ends there.
  */
@@ -208,9 +208,11 @@ export function weakSpots(topology: Topology): Map<string, string> {
       if (hop.role === 'router') dependants.set(hop.id, (dependants.get(hop.id) ?? 0) + 1);
     }
     if (n.role !== 'end_device' && n.thread_role !== 'REED') continue;
+    // The link to `via` when the network names the parent (none if that link is missing), else
+    // the parent-marked links.
     const parents = topology.links.filter((l) => {
       const other = l.a === n.id ? l.b : l.b === n.id ? l.a : null;
-      return other !== null && (other === n.via || l.relationship === 'parent');
+      return other !== null && (n.via ? other === n.via : l.relationship === 'parent');
     });
     const poor = parents.length === 1 && poorReading(parents[0]!);
     if (poor) out.set(n.id, `Weak: only parent link is poor (${poor})`);

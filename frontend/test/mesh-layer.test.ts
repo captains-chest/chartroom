@@ -192,6 +192,12 @@ describe('weak spots', () => {
         node('fine', 'end_device', 'c'),
         node('reed', 'router', 'c', { thread_role: 'REED' }),
         node('r', 'router', 'c'),
+        // `via` decides: a good neighbour marked parent does not hide a poor via link...
+        node('viaPoor', 'end_device', 'c'),
+        // ...and a poor parent-marked link to another node is not its parent.
+        node('noLink', 'end_device', 'c'),
+        // Without `via`, its one parent-marked link is.
+        node('noVia', 'end_device'),
       ],
       links: [
         { a: 'c', b: 'lqi', source: 'zha', lqi: 62, relationship: 'parent' },
@@ -201,6 +207,10 @@ describe('weak spots', () => {
         { a: 'c', b: 'reed', source: 'zha', rssi: -86, relationship: 'parent' },
         // A router has other ways out.
         { a: 'c', b: 'r', source: 'zha', lqi: 10, relationship: 'route' },
+        { a: 'c', b: 'viaPoor', source: 'zha', lqi: 30, relationship: 'parent' },
+        { a: 'r', b: 'viaPoor', source: 'zha', lqi: 250, relationship: 'parent' },
+        { a: 'r', b: 'noLink', source: 'zha', lqi: 20, relationship: 'parent' },
+        { a: 'r', b: 'noVia', source: 'zha', lqi: 70, relationship: 'parent' },
       ],
       sources: { zha: 'ok' },
     };
@@ -208,6 +218,8 @@ describe('weak spots', () => {
       lqi: 'Weak: only parent link is poor (LQI 62)',
       rssi: 'Weak: only parent link is poor (RSSI -91 dBm)',
       reed: 'Weak: only parent link is poor (RSSI -86 dBm)',
+      viaPoor: 'Weak: only parent link is poor (LQI 30)',
+      noVia: 'Weak: only parent link is poor (LQI 70)',
     });
   });
 

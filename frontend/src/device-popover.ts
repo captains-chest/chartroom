@@ -26,7 +26,10 @@ export interface PopoverContent {
   lines: PopoverLine[];
   /** Entities left out past MAX_LINES. */
   more: number;
-  /** The device's mesh role and route, while the Mesh layer is on. */
+  /**
+   * The device's mesh role and route while the Mesh layer is on, and its measured links while the
+   * signal map comes from its mesh.
+   */
   mesh?: string[] | undefined;
 }
 

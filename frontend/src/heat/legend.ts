@@ -69,7 +69,10 @@ export function legendContent(
   };
 }
 
-export function renderLegend(el: HTMLElement, c: LegendContent): void {
+/** Put legend `c` into `el`, with `extra` (the signal layer's network picker) under it. */
+export function renderLegend(el: HTMLElement, c: LegendContent, extra?: HTMLElement | null): void {
+  // Put back, the picker keeps focus (moving it out of the page drops it).
+  const focused = extra?.querySelector<HTMLElement>(':focus') ?? null;
   const bar = h('div', { class: 'heat-bar' });
   bar.style.background = c.ramp;
   for (const t of c.ticks) {
@@ -83,6 +86,8 @@ export function renderLegend(el: HTMLElement, c: LegendContent): void {
     h('div', { class: 'heat-scale' }, ...c.scale.map((v) => h('span', {}, v))),
     h('div', { class: 'heat-note' }, c.note.join(' · ')),
   );
+  if (extra) el.append(extra);
+  focused?.focus();
   el.setAttribute('aria-label', c.label);
   el.hidden = false;
 }

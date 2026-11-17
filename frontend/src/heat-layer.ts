@@ -2,7 +2,8 @@
 // plan their per-cell weights (only when the layout changes), eases values and the range,
 // cross-fades layout changes, and hands the field to a renderer (heat/models.ts FieldRenderer):
 // WebGL2 or, failing that, Canvas2D from the worker's field grid. The signal layer is traced instead (signal.ts): in
-// one WebGL2 pass, or by the worker for Canvas2D. Loaded on demand, the first time a layer is
+// one WebGL2 pass, or by the worker for Canvas2D, from the routers of a mesh (signal-mesh.ts) or
+// the access points and radios placed by hand. Loaded on demand, the first time a layer is
 // switched on.
 import { FADE_DISTANCE, fieldGrid } from './field';
 import { planBounds } from './geometry';
@@ -17,8 +18,23 @@ import { easeOut, layerData, layerDomain, layoutKey, rampLut, staleAt } from './
 import type { LayerData } from './heat/models';
 import type { HeatLayerId } from './heat/types';
 import type { Hass } from './ha-types';
+import type { Topology } from './mesh-layer';
+import { watchTopology } from './mesh-layer';
 import type { Plan } from './plan/models';
-import { barrierSegments, SIGNAL_CELLS, signalInput, signalKey } from './signal';
+import {
+  barrierSegments,
+  SIGNAL_CELLS,
+  signalInput,
+  signalKey,
+  type CappedSignalInput,
+} from './signal';
+import {
+  measuredLines,
+  meshNetworks,
+  meshSignal,
+  type MeshNetwork,
+  type MeshSignal,
+} from './signal-mesh';
 import { h } from './ui';
 import type { View } from './viewport';
 
@@ -28,6 +44,18 @@ export { declutterLabels, renderValueLabels } from './heat/value-labels';
 /** Field opacity at full confidence inside the house. */
 export const HEAT_OPACITY = 0.72;
 export const RENDERER_KEY = 'chartroom:renderer';
+/** The signal map's network picked last ('' for the access points and radios). */
+export const NETWORK_KEY = 'chartroom:signal-network';
+const PLACED = '';
+
+// Here rather than with the view's styles, so they load with the layer.
+const PICKER_STYLES = `
+  .heat-net { margin-top: 4px; }
+  .heat-net select { pointer-events: auto; max-width: 100%; font: inherit; color: inherit; background: none;
+    border: 1px solid var(--divider-color, #ccc); border-radius: 4px; padding: 1px 2px; }
+`;
+
+type MeshApi = Parameters<typeof watchTopology>[0];
 
 const RENDERERS: Record<RendererKind, (c: HTMLCanvasElement, r: FieldRequest) => FieldRenderer> = {
   webgl2: (c) => new GlRenderer(c),
@@ -77,6 +105,24 @@ export class HeatLayer {
   #preview = false;
   #lut: Uint8Array = rampLut(LAYERS.temperature.ramp);
   #signalNote: string[] = [];
+  /** The signal map from a mesh: its topology (while the Signal layer is on), the network shown. */
+  #topology: Topology | null = null;
+  #watching: MeshApi | null = null;
+  #stopWatch: (() => void) | null = null;
+  #pick: string | null = null;
+  #mesh: { topology: Topology; net: MeshNetwork; signal: MeshSignal; walls: Float32Array } | null =
+    null;
+  readonly #select = h('select', { 'aria-label': 'Signal from' });
+  #options = '';
+  /** Picks the network the signal map is built from, when there is more than one to pick. */
+  readonly picker: HTMLElement = h(
+    'div',
+    { class: 'heat-net' },
+    h('style', {}, PICKER_STYLES),
+    this.#select,
+  );
+  /** The integration's commands (the mesh topology), once connected. */
+  meshApi: () => MeshApi | null = () => null;
   readonly #idle: (() => void)[] = [];
   #disposed = false;
   /** How long readings ease to new values (none under reduced motion). */
@@ -93,6 +139,20 @@ export class HeatLayer {
     this.#renderer = this.#pickRenderer(
       renderer ?? (localStorage.getItem(RENDERER_KEY) === 'canvas' ? 'canvas' : 'webgl2'),
     );
+    this.#select.addEventListener('change', () => {
+      this.#pick = this.#select.value;
+      try {
+        localStorage.setItem(NETWORK_KEY, this.#pick);
+      } catch {
+        // Not remembered.
+      }
+      this.#refresh();
+    });
+    try {
+      this.#pick = localStorage.getItem(NETWORK_KEY);
+    } catch {
+      // Nothing remembered.
+    }
   }
 
   get renderer(): RendererKind {
@@ -193,6 +253,7 @@ export class HeatLayer {
     const plan = this.#plan;
     clearTimeout(this.#staleTimer);
     if (!layer || !plan) {
+      this.#unwatch();
       this.#data = null;
       this.#wantKey = this.#key = '';
       this.#layout = null;
@@ -202,15 +263,16 @@ export class HeatLayer {
       this.onReadings?.(null, null);
       return;
     }
-    const data = layerData(plan, this.#hass, layer);
+    let data = layerData(plan, this.#hass, layer);
+    let input: CappedSignalInput | null = null;
+    if (layer === 'signal') [data, input] = this.#signal(plan, data);
+    else this.#unwatch();
     this.#data = data;
     const stale = staleAt(data, this.#hass);
     if (stale < Infinity && !this.#disposed)
       this.#staleTimer = setTimeout(() => this.#refresh(), stale - Date.now() + 1);
     const bounds = planBounds(plan);
     const outline = plan.outline;
-    const input = layer === 'signal' ? signalInput(plan, this.#hass, data.readings) : null;
-    this.#signalNote = input ? signalNote(input) : [];
     // Temperature and humidity stop at walls and closed doors: their layout depends on those.
     const walls = input ? [] : barrierSegments(plan, this.#hass);
     const key = `${layer}|${data.unit}|${input ? signalKey(input) : walls.join(',')}|${layoutKey(data.readings, outline)}|${bounds ? [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].join(',') : ''}`;
@@ -233,11 +295,15 @@ export class HeatLayer {
       else if (a.to !== r.value)
         Object.assign(a, { from: current(a, now, this.#ms), to: r.value, t0: now });
     }
-    const sig = key + JSON.stringify([values, target, data.excluded, this.#signalNote]);
+    // The picker's options and whether it shows are in the legend too.
+    const picker = input && !this.picker.hidden ? this.picker : null;
+    const sig =
+      key +
+      JSON.stringify([values, target, data.excluded, this.#signalNote, !!picker && this.#options]);
     const changed = sig !== this.#sig;
     if (changed) {
       this.#sig = sig;
-      renderLegend(this.legend, legendContent(data, target, this.#signalNote));
+      renderLegend(this.legend, legendContent(data, target, this.#signalNote), picker);
       this.onReadings?.(data, target);
     }
     if (data.readings.length === 0) return this.#blank(key);
@@ -282,6 +348,85 @@ export class HeatLayer {
         });
       // Same layout and the same readings: the field on screen is already right.
     } else if (changed) this.#start();
+  }
+
+  /**
+   * The signal layer's sources: the routers of the network picked (or with the most placed
+   * routers) when the mesh has some, else the access points and radios in `placed`.
+   */
+  #signal(plan: Plan, placed: LayerData): [LayerData, CappedSignalInput] {
+    this.#watch();
+    const t = this.#topology;
+    const nets = t ? meshNetworks(t, plan, this.#hass) : [];
+    const hasPlaced = placed.readings.length + placed.excluded.length > 0;
+    const net =
+      this.#pick === PLACED && hasPlaced
+        ? null
+        : (nets.find((n) => n.name === this.#pick) ?? nets[0] ?? null);
+    const options: [string, string][] = nets.map((n) => [n.name, `${n.name} routers`]);
+    if (hasPlaced) options.push([PLACED, 'Access points and radios']);
+    this.picker.hidden = options.length < 2;
+    const key = options.join('\n');
+    if (key !== this.#options) {
+      this.#options = key;
+      this.#select.replaceChildren(
+        ...options.map(([v, label]) => h('option', { value: v }, label)),
+      );
+    }
+    this.#select.value = net?.name ?? PLACED;
+    if (!t || !net) {
+      this.#mesh = null;
+      const input = signalInput(plan, this.#hass, placed.readings);
+      this.#signalNote = signalNote(input);
+      return [placed, input];
+    }
+    const walls = signalInput(plan, this.#hass, []).walls;
+    const signal = meshSignal(net, walls);
+    const input = signalInput(plan, this.#hass, signal.sources);
+    this.#mesh = { topology: t, net, signal, walls };
+    this.#signalNote = [signal.note, ...signalNote(input).slice(1)];
+    const data: LayerData = {
+      layer: 'signal',
+      unit: 'dBm',
+      readings: signal.sources.map((s) => ({ ...s, entity_id: '' })),
+      excluded: signal.down.map((s) => ({ ...s, entity_id: '', reason: 'unavailable' })),
+    };
+    return [data, input];
+  }
+
+  /** Follow the connection's topology poll (shared with the Mesh layer) while on the Signal layer. */
+  #watch(): void {
+    const api = this.meshApi();
+    if (api === this.#watching || this.#disposed) return;
+    this.#unwatch();
+    if (!api) return;
+    this.#watching = api;
+    // The first result may come at once, inside this refresh: it reads #topology after this.
+    let now = true;
+    this.#stopWatch = watchTopology(api, (state) => {
+      this.#topology = state.topology;
+      if (!now) this.#refresh();
+    }).stop;
+    now = false;
+  }
+
+  #unwatch(): void {
+    this.#stopWatch?.();
+    this.#stopWatch = null;
+    this.#watching = null;
+    this.#topology = null;
+    this.#mesh = null;
+  }
+
+  /**
+   * For the popover, while the signal map comes from a mesh: the map's level at a device's spot
+   * and its measured links next to the model's (see `measuredLines`); nothing otherwise.
+   */
+  probe(entities: readonly string[], deviceId?: string | null): string[] {
+    const m = this.#layer === 'signal' ? this.#mesh : null;
+    return m
+      ? measuredLines(m.topology, m.net, m.signal, m.walls, entities, deviceId, this.#hass)
+      : [];
   }
 
   /** Nothing to draw for layout `key`: hide the field and settle. */
@@ -378,6 +523,7 @@ export class HeatLayer {
   }
 
   dispose(): void {
+    this.#unwatch();
     this.#disposed = true;
     clearTimeout(this.#staleTimer);
     cancelAnimationFrame(this.#raf);

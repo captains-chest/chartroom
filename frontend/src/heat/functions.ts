@@ -177,7 +177,8 @@ export function layerCounts(
   return {
     temperature: layerEntities(plan, hass, 'temperature').length,
     humidity: layerEntities(plan, hass, 'humidity').length,
-    signal: (plan?.sources ?? []).filter(isSignalSource).length,
+    // Any device may be a mesh router (signal-mesh.ts): the map says when none is.
+    signal: (plan?.sources ?? []).filter(isSignalSource).length + (plan?.devices?.length ?? 0),
   };
 }
 

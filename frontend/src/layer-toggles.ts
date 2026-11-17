@@ -39,13 +39,14 @@ export class LayerToggles {
     for (const [id, b] of this.#buttons) {
       b.setAttribute('aria-pressed', String(id === active));
       b.disabled = counts[id] === 0 && id !== active;
-      const what = id === 'signal' ? 'access point or radio' : 'sensor';
       b.title =
-        counts[id] === 0
-          ? id === 'signal'
-            ? 'No access points or radios placed on this plan'
-            : `No ${LAYERS[id].label.toLowerCase()} sensors placed on this plan`
-          : `${LAYERS[id].label} heatmap (${count(counts[id], what)})`;
+        id === 'signal'
+          ? counts[id] === 0
+            ? 'No access points, radios or devices placed on this plan'
+            : 'Signal heatmap (from access points and radios, or mesh routers)'
+          : counts[id] === 0
+            ? `No ${LAYERS[id].label.toLowerCase()} sensors placed on this plan`
+            : `${LAYERS[id].label} heatmap (${count(counts[id], 'sensor')})`;
     }
   }
 }

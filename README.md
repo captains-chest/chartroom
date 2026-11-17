@@ -116,20 +116,33 @@ button again to hide it. Your choice is remembered on this device.
 
 ### Signal
 
-**Signal** estimates the Wi-Fi or radio strength (dBm) you would get everywhere on the plan from
-the access points and radios placed with **Source**:
+**Signal** estimates the radio strength (dBm) you would get everywhere on the plan, from the
+routers of your Zigbee, Z-Wave or Thread mesh, or from the access points and radios placed with
+**Source**:
+
+- **From the mesh.** Every coordinator and router of the mesh (Thread REEDs and border routers
+  too) that is placed on the plan, as a device marker or a source, is a source; end devices only
+  receive. When more than one network (or the placed access points and radios) could make the
+  map, a select under the legend picks one; the default is the network with the most placed
+  routers. One level at 1 m is fitted per network to the RSSI the placed devices measure between
+  them, and the legend shows it with the fit's error: "Thread · 5 routers · fitted -53 dBm @1 m ·
+  ±4.8 dB". With fewer than 3 measured links, or LQI only (Zigbee2MQTT), the level is the one
+  set on the network's placed radio, else -45 dBm. Hovering a placed mesh device shows the map's
+  level at its spot and its measured links next to the map's.
 
 - **Straight rays through your walls.** From each source, signal falls off with distance from its
   level at 1 m (path-loss exponent 2.2), and every wall the straight line crosses takes off its
   material's loss per centimetre times its thickness (**Materials** in the editor). Doors and
   windows have their own material and lose nothing while their entity says they are open. Each
   point shows the strongest source.
-- **Level at 1 m** is set per source in the inspector (default -40 dBm for an access point,
-  -45 dBm for a radio). A source whose entity is unavailable is left out.
+- **Level at 1 m** of a placed access point or radio is set in the inspector (default -40 dBm for
+  an access point, -45 dBm for a radio). A source or router whose entity is unavailable is left
+  out.
 - The scale is fixed from -90 dBm (violet, unusable) through red and amber to green (-30 dBm).
   The legend shows how many sources and wall segments are used, and how many were left out above
   the limits of 32 sources and 2048 wall segments.
-- It is an estimate, not a measurement: there is no calibration to real RSSI yet.
+- It is an estimate, not a measurement: only the level at 1 m is fitted to the mesh's measured
+  links, not the path-loss exponent or the wall losses.
 - Drawn by a WebGL2 shader, or by the Web Worker on a 2D canvas, with the same results.
 
 ![Signal heatmap](https://raw.githubusercontent.com/captains-chest/chartroom/main/docs/images/heatmap-signal.png)
@@ -372,7 +385,7 @@ for the phone layout) and `history`, which runs after the desktop tests because 
 readings far from the others' on the shared instance.
 
 The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
-(with what it shares) 20.5 KB gzip and everything together 66 KB gzip. The heatmap renderer, editor,
+(with what it shares) 20.6 KB gzip and everything together 68 KB gzip. The heatmap renderer, editor,
 mesh layer, history bar and device menu are separate chunks loaded when first used. The build squeezes the CSS,
 GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
 byte for byte.

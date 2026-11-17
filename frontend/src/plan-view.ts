@@ -205,7 +205,7 @@ export class PlanView {
     this.#delegate?.reset?.();
     const plan = given && (this.#editing ? given : foldDevices(given, this.#hass));
     this.#plan = plan;
-    this.#body.innerHTML = plan ? planBody(plan) : '';
+    this.#body.innerHTML = plan ? planBody(plan, { tooltips: false }) : '';
     if (selected) {
       const sel = `[data-kind="${selected.kind}"][data-id="${CSS.escape(selected.id)}"]`;
       for (const el of this.#body.querySelectorAll(sel)) el.classList.add('selected');

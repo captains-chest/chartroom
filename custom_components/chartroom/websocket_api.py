@@ -144,7 +144,7 @@ def ws_subscribe_plans(
 async def ws_get_mesh(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Return the Zigbee and Z-Wave mesh: nodes, links and which sources answered."""
+    """Return the Zigbee, Z-Wave and Thread mesh: nodes, links and which sources answered."""
     if _store(hass, connection, msg["id"]) is None:
         return
     connection.send_result(msg["id"], await async_get_topology(hass))

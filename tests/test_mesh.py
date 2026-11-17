@@ -1,11 +1,14 @@
-"""Mesh topology: the ZHA, Z-Wave JS and Zigbee2MQTT parsers, and chartroom/mesh/*."""
+"""Mesh topology: the ZHA, Z-Wave JS, Zigbee2MQTT and Thread parsers, and chartroom/mesh/*."""
 
 import asyncio
+import copy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
@@ -41,6 +44,7 @@ def test_parse_zha() -> None:
         "source": "zha",
         "name": "Hall plug",
         "role": "router",
+        "thread_role": None,
         "device_id": "dev-plug",
         "entities": ["switch.hall_plug"],
     }
@@ -96,6 +100,81 @@ def test_parse_z2m() -> None:
     assert identifiers["z2m:0x00158d0000000002"] == (("mqtt", "zigbee2mqtt_0x00158d0000000002"),)
 
 
+THREAD_FABRIC = "1122334455667788"
+
+
+def _thread_id(node: int) -> str:
+    return f"matter:{THREAD_FABRIC}-{node:016X}"
+
+
+def _thread(server: dict[str, Any], br: bool = True) -> tuple[dict[str, str], dict[Any, Any]]:
+    """Parse ``server``, with its border router known; return roles and links by node name."""
+    routers = [{"ext_address": server["border_router_ext_address"], "name": "Border router"}]
+    nodes, links = mesh.parse_thread(server, routers if br else [])
+    names = {n.id: n.name for n in nodes}
+    return (
+        {n.name: f"{n.role}/{n.thread_role}" for n in nodes},
+        {frozenset((names[x["a"]], names[x["b"]])): x for x in links},
+    )
+
+
+def test_parse_thread() -> None:
+    """A house's Thread network: roles, links with RSSI from both tables, the border router."""
+    server = _load("matter_thread.json")
+    roles, links = _thread(server)
+    assert roles == {
+        "Kitchen plug": "router/leader",
+        "Living room plug": "router/router",
+        "Dining lamp": "router/REED",
+        "Button": "end_device/sleepy end device",
+        "Table lamp": "router/REED",
+        "TV lamp": "router/REED",
+        "Border router": "coordinator/border router",
+    }
+
+    def link(a: str, b: str) -> tuple[Any, ...]:
+        x = links[frozenset((a, b))]
+        return x["rssi"], x["lqi"], x["offline"]
+
+    assert len(links) == 10
+    # Both directions merge to the weaker average RSSI and LQI (0-3 scaled to 0-255).
+    assert link("Kitchen plug", "Living room plug") == (-63, 255, False)
+    assert link("Kitchen plug", "Table lamp") == (-81, 170, False)
+    assert link("Table lamp", "Border router") == (-91, 85, False)
+    # A link only the route table knows has LQI and no RSSI.
+    assert link("Dining lamp", "Table lamp") == (None, 255, False)
+    # The button's parent entry is days old, but it is its attachment: kept.
+    assert link("Button", "Border router")[0] == -16
+    assert {n.id: n.identifiers for n in mesh.parse_thread(server, [])[0]}[_thread_id(1)] == (
+        ("matter", f"deviceid_{THREAD_FABRIC}-{1:016X}-MatterNodeDevice"),
+    )
+    # Without the border router's address, its links have no other end.
+    assert len(_thread(server, br=False)[1]) == 6
+
+
+def test_parse_thread_stale_and_unavailable() -> None:
+    """Old router entries are dropped; an unavailable node's cached links are marked offline."""
+    server = copy.deepcopy(_load("matter_thread.json"))
+    living, table = (n for n in server["nodes"] if n["node_id"] in (2, 5))
+    # The living room plug last heard the dining lamp an hour ago, in both its tables.
+    dining = 0x1A00000000000003
+    for entry in living["attributes"]["0/53/7"]:
+        entry["1"] = 3600 if entry["0"] == dining else entry["1"]
+    for entry in living["attributes"]["0/53/8"]:
+        entry["7"] = 3600 if entry["0"] == dining else entry["7"]
+    table["available"] = False
+    roles, links = _thread(server)
+    assert frozenset(("Living room plug", "Dining lamp")) not in links
+    assert "Table lamp" in roles
+    offline = {tuple(sorted(k)) for k, x in links.items() if x["offline"]}
+    assert offline == {
+        ("Kitchen plug", "Table lamp"),
+        ("Living room plug", "Table lamp"),
+        ("Border router", "Table lamp"),
+        ("Dining lamp", "Table lamp"),
+    }
+
+
 def test_parsers_tolerate_junk() -> None:
     nodes, links = mesh.parse_zha([{}, {"ieee": "x", "neighbors": [{}]}, "nope"])
     assert ([n.as_wire() for n in nodes], links) == (
@@ -105,6 +184,7 @@ def test_parsers_tolerate_junk() -> None:
                 "source": "zha",
                 "name": "zha:x",
                 "role": None,
+                "thread_role": None,
                 "device_id": None,
                 "entities": [],
             }
@@ -114,6 +194,20 @@ def test_parsers_tolerate_junk() -> None:
     assert mesh.parse_zwave([{}, {"node_id": 5, "lwr": {"repeaters": [None]}}])[1] == []
     assert mesh.parse_z2m({}) == ([], [])
     assert mesh.parse_z2m({"data": {"value": {"nodes": [{}], "links": [{}]}}}) == ([], [])
+    wifi = {"node_id": 7, "attributes": {"0/51/0": [{"7": 1}]}}
+    bridge = {"node_id": 8, "is_bridge": True, "attributes": {"0/53/1": 5}}
+    junk = {
+        "node_id": 9,
+        "attributes": {
+            "0/51/0": [{"4": "!", "7": 4}],
+            "0/53/1": 5,
+            "0/53/7": [{}, None, {"0": 0}],
+            "0/53/8": [{"0": 1, "9": True}],
+        },
+    }
+    nodes, links = mesh.parse_thread({"nodes": [wifi, bridge, junk, "nope"]}, [{}])
+    # Only the Thread node is kept, and none of its entries points at a known node.
+    assert ([n.id for n in nodes], links) == ([f"matter:{0:016X}-{9:016X}"], [])
 
 
 async def _setup(hass: HomeAssistant) -> None:
@@ -133,7 +227,12 @@ async def test_mesh_get_without_sources(hass: HomeAssistant, hass_ws_client) -> 
     assert msg["result"] == {
         "nodes": [],
         "links": [],
-        "sources": {"zha": "absent", "zwave_js": "absent", "zigbee2mqtt": "absent"},
+        "sources": {
+            "zha": "absent",
+            "zwave_js": "absent",
+            "zigbee2mqtt": "absent",
+            "matter": "absent",
+        },
     }
 
 
@@ -154,6 +253,7 @@ async def test_mesh_source_error_is_reported(hass: HomeAssistant, hass_ws_client
         "zha": "ok",
         "zwave_js": "error",
         "zigbee2mqtt": "absent",
+        "matter": "absent",
     }
     assert len(msg["result"]["nodes"]) == 3
     assert len(msg["result"]["links"]) == 2
@@ -252,6 +352,7 @@ async def test_mesh_test_source(
         "source": "test",
         "name": "",
         "role": "coordinator",
+        "thread_role": None,
         "device_id": None,
         "entities": ["light.a"],
     }
@@ -327,6 +428,7 @@ async def test_mesh_test_source_is_resolved(hass: HomeAssistant, hass_ws_client)
             "source": "test",
             "name": "",
             "role": None,
+            "thread_role": None,
             "device_id": device.id,
             "entities": ["switch.plug"],
         }
@@ -379,3 +481,74 @@ async def test_resolve_prefers_device_of_identifier_domain(hass: HomeAssistant) 
     device = dev_reg.async_get_or_create(config_entry_id=mqtt.entry_id, identifiers=ident)
     [node] = mesh._resolve(hass, [_z2m_node("0x01")])
     assert node["device_id"] == device.id
+
+
+async def test_mesh_reads_matter(hass: HomeAssistant, hass_ws_client) -> None:
+    """Matter is read from its loaded entry, the border router's address from OTBR's.
+
+    Nodes find their Matter devices, and the border router the one radio on Thread firmware.
+    """
+    await _setup(hass)
+    server = _load("matter_thread.json")
+    fabric = server["info"]["compressed_fabric_id"]
+    nodes = [
+        SimpleNamespace(
+            node_id=n["node_id"],
+            available=n["available"],
+            is_bridge_device=n["is_bridge"],
+            node_data=SimpleNamespace(attributes=n["attributes"]),
+        )
+        for n in server["nodes"]
+    ]
+    client = SimpleNamespace(
+        server_info=SimpleNamespace(compressed_fabric_id=fabric), get_nodes=lambda: nodes
+    )
+    matter = MockConfigEntry(domain="matter", state=ConfigEntryState.LOADED)
+    matter.add_to_hass(hass)
+    matter.runtime_data = SimpleNamespace(adapter=SimpleNamespace(matter_client=client))
+
+    async def ext() -> bytes:
+        return server["border_router_ext_address"].to_bytes(8)
+
+    otbr = MockConfigEntry(domain="otbr", title="OTBR", state=ConfigEntryState.LOADED)
+    otbr.add_to_hass(hass)
+    otbr.runtime_data = SimpleNamespace(get_extended_address=ext)
+    radio_entry = MockConfigEntry(
+        domain="homeassistant_connect_zbt2",
+        data={"firmware": "spinel"},
+        state=ConfigEntryState.LOADED,
+    )
+    radio_entry.add_to_hass(hass)
+    dev_reg = dr.async_get(hass)
+    radio = dev_reg.async_get_or_create(
+        config_entry_id=radio_entry.entry_id,
+        identifiers={("homeassistant_connect_zbt2", "1")},
+        name="ZBT-2",
+    )
+    plug = dev_reg.async_get_or_create(
+        config_entry_id=matter.entry_id,
+        identifiers={mesh.matter_node_identifier(fabric, 1)},
+        name="Kitchen plug",
+    )
+
+    ws = await hass_ws_client(hass)
+    await ws.send_json_auto_id({"type": "chartroom/mesh/get"})
+    result = (await ws.receive_json())["result"]
+    assert result["sources"]["matter"] == "ok"
+    by_id = {n["id"]: n for n in result["nodes"]}
+    assert by_id[_thread_id(1)]["device_id"] == plug.id
+    assert by_id[_thread_id(1)]["name"] == "Kitchen plug"
+    assert by_id[_thread_id(2)]["name"] == "Matter node 2"
+    assert by_id["thread:1a000000000000b1"] | {"entities": []} == {
+        "id": "thread:1a000000000000b1",
+        "source": "matter",
+        "name": "ZBT-2",
+        "role": "coordinator",
+        "thread_role": "border router",
+        "device_id": radio.id,
+        "entities": [],
+    }
+    assert len(result["links"]) == 10
+    # Not really loaded: keep teardown from unloading them (the Matter client is not installed).
+    for entry in (matter, otbr, radio_entry):
+        entry.mock_state(hass, ConfigEntryState.NOT_LOADED)

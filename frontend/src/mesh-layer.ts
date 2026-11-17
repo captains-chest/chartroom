@@ -1,5 +1,6 @@
-// Mesh links between placed devices: the Zigbee and Z-Wave topology the integration reads from ZHA,
-// Z-Wave JS and Zigbee2MQTT (chartroom/mesh/get), drawn as lines coloured by link quality.
+// Mesh links between placed devices: the Zigbee, Z-Wave and Thread topology the integration reads
+// from ZHA, Z-Wave JS, Zigbee2MQTT and Matter (chartroom/mesh/get), drawn as lines coloured by link
+// quality.
 // Loaded on demand, the first time the Mesh layer is switched on.
 import type { ChartroomApi } from './api';
 import type { Hass } from './ha-types';
@@ -13,6 +14,8 @@ export interface MeshNode {
   source: string;
   name: string;
   role: string | null;
+  /** The Thread role (leader, router, REED, ...), for Matter nodes. */
+  thread_role?: string | null;
   device_id?: string | null;
   entities?: string[];
 }
@@ -22,6 +25,8 @@ export interface MeshLink {
   source: string;
   lqi?: number | null;
   rssi?: number | null;
+  /** An end is offline: the link is from its last report. */
+  offline?: boolean;
 }
 export interface Topology {
   nodes: MeshNode[];
@@ -33,6 +38,7 @@ export interface PlacedLink {
   b: Point;
   /** 0 (bad) to 1 (good), or null when the network does not say. */
   quality: number | null;
+  offline: boolean;
   label: string;
 }
 
@@ -42,15 +48,16 @@ const SOURCE_NAMES: Record<string, string> = {
   zha: 'ZHA',
   zwave_js: 'Z-Wave JS',
   zigbee2mqtt: 'Zigbee2MQTT',
+  matter: 'Matter',
   test: 'Test',
 };
 
-/** Link quality from 0 to 1: LQI over 0..255, else RSSI over -90..-40 dBm. */
+/** Link quality from 0 to 1: RSSI over -90..-40 dBm (the finer of the two), else LQI over 0..255. */
 export function linkQuality(link: MeshLink): number | null {
   const clamp = (v: number): number => Math.min(1, Math.max(0, v));
-  if (typeof link.lqi === 'number' && Number.isFinite(link.lqi)) return clamp(link.lqi / 255);
   if (typeof link.rssi === 'number' && Number.isFinite(link.rssi))
     return clamp((link.rssi + 90) / 50);
+  if (typeof link.lqi === 'number' && Number.isFinite(link.lqi)) return clamp(link.lqi / 255);
   return null;
 }
 
@@ -74,7 +81,7 @@ export function placeLinks(topology: Topology, plan: Plan, hass: Hass | undefine
   const at = new Map<string, Point>();
   const names = new Map<string, string>();
   for (const n of topology.nodes) {
-    names.set(n.id, n.name || n.id);
+    names.set(n.id, (n.name || n.id) + (n.thread_role ? ` (${n.thread_role})` : ''));
     const pos =
       (n.entities ?? []).map((e) => byEntity.get(e)).find((p) => p) ??
       (n.device_id ? byDevice.get(n.device_id) : undefined);
@@ -90,11 +97,13 @@ export function placeLinks(topology: Topology, plan: Plan, hass: Hass | undefine
       typeof l.lqi === 'number' ? `LQI ${Math.round(l.lqi)}` : '',
       typeof l.rssi === 'number' ? `RSSI ${Math.round(l.rssi)} dBm` : '',
     ].filter(Boolean);
+    const offline = l.offline === true;
     out.push({
       a,
       b,
       quality,
-      label: `${names.get(l.a)} – ${names.get(l.b)}: ${parts.join(', ') || 'quality unknown'}`,
+      offline,
+      label: `${names.get(l.a)} – ${names.get(l.b)}: ${parts.join(', ') || 'quality unknown'}${offline ? ' (offline, last report)' : ''}`,
     });
   }
   return out;
@@ -105,7 +114,7 @@ export function sourceNote(topology: Topology | null, placed: number, error?: st
   if (error) return `Mesh: ${error}`;
   if (!topology) return 'Mesh: loading…';
   const found = Object.entries(topology.sources).filter(([, v]) => v !== 'absent');
-  if (!found.length) return 'Mesh: no ZHA, Z-Wave JS or Zigbee2MQTT network found';
+  if (!found.length) return 'Mesh: no ZHA, Z-Wave JS, Zigbee2MQTT or Matter network found';
   const parts = found.map(([k, v]) => `${SOURCE_NAMES[k] ?? k}${v === 'ok' ? '' : ` ${v}`}`);
   return `Mesh: ${count(placed, 'link')} on this plan · ${parts.join(', ')}`;
 }
@@ -243,7 +252,7 @@ export class MeshLayer {
         s(
           'line',
           {
-            class: l.quality === null ? 'mesh-link unknown' : 'mesh-link',
+            class: `mesh-link${l.quality === null ? ' unknown' : ''}${l.offline ? ' offline' : ''}`,
             x1: l.a[0],
             y1: l.a[1],
             x2: l.b[0],

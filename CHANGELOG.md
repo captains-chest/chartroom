@@ -6,6 +6,15 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ### Added
 
+- The mesh layer shows Matter-over-Thread devices and their links, read from the Thread network
+  diagnostics the Matter server keeps for each node: each node's neighbour table (RSSI and LQI, both
+  directions merged to the weaker) and its routes to other routers. Lines are coloured by RSSI when
+  a link has one, else by LQI. Leader, router, REED and (sleepy) end device are named in the hover
+  text; the OpenThread Border Router is the coordinator, placed at the one radio running OpenThread
+  firmware (Connect ZBT-2, SkyConnect or Yellow) when there is just one. Entries a router last heard
+  over 5 minutes ago are left out, and a node Matter reports unavailable keeps its last-reported
+  links, drawn dotted and marked offline. Matter over Wi-Fi and bridges are not mesh nodes (#88).
+
 - Hovering a device marker, access point or radio with the mouse, or focusing a marker from the
   keyboard, shows a popover with the device's name and area and a line per entity: its state with
   unit and how long ago it changed, unavailable ones marked. It follows state changes while open,

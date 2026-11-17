@@ -35,6 +35,8 @@ export interface PointerDelegate {
   cancel?(): void;
   /** After every pan or zoom (the editor rescales its handles). */
   viewChanged?(): void;
+  /** After every new hass, whether or not the plan reads what changed. */
+  statesChanged?(): void;
 }
 
 export class PlanView {
@@ -317,6 +319,12 @@ export class PlanView {
    * changed (plan-inputs.ts); returns whether it did.
    */
   setHass(hass: Hass | undefined): boolean {
+    const changed = this.#setHass(hass);
+    this.#delegate?.statesChanged?.();
+    return changed;
+  }
+
+  #setHass(hass: Hass | undefined): boolean {
     const changed = hassChanged(this.#hass, hass, planInputs(this.#plan, this.#hass));
     const registry = hass?.entities !== this.#hass?.entities;
     this.#hass = hass;

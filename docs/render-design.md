@@ -366,6 +366,14 @@ not a source, and a device item stands for a Home Assistant device rather than o
   active layer per device, drawn above its marker (`VALUE_OFFSET_PX` in `labels.ts`).
 - The marker shows the item's primary entity (`primaryEntity`): one it can control, else a binary
   sensor, else a temperature, then humidity, then other sensor.
+- Hovering a marker (mouse or pen, after 400 ms) or focusing it from the keyboard
+  (`:focus-visible`) shows a popover (`device-popover.ts`, `.device-popover`, in the plan box) with
+  the device's name, area and a line per item entity (`popoverContent`), the primary first. It is
+  the marker's `aria-describedby` while shown (markers have no `<title>`, whose native tooltip
+  would cover it), refreshes on every new `hass` (`PointerDelegate.statesChanged`) and every 30 s,
+  follows the marker when the view moves, and hides on a press elsewhere, a wheel, blur or Esc.
+  Touch never shows it: a touch hold has its own job (more-info; the radial menu of #86). Sources (access points, radios) get it on
+  hover too.
 - `planInputs` (which states a plan reads) and the History slider's entity list resolve items the
   same way, so they take the registry along with the plan.
 - **Migration**: `normalizePlan` turns a version 1 plan's `sensor` sources into device items with

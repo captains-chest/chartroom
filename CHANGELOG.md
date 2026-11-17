@@ -4,6 +4,14 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ## Unreleased
 
+### Added
+
+- Hovering a device marker, access point or radio with the mouse, or focusing a marker from the
+  keyboard, shows a popover with the device's name and area and a line per entity: its state with
+  unit and how long ago it changed, unavailable ones marked. It follows state changes while open,
+  stays while the mouse is over it, and hides on leave, blur, Esc, a pan or a zoom; not on touch,
+  and not in the editor. Markers no longer carry a native tooltip, which would cover it (#85).
+
 ### Changed
 
 - A Home Assistant device is one marker on the plan, not one per entity: a temperature and

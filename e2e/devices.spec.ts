@@ -95,18 +95,21 @@ const PLACED: [string, Pt][] = [
   ['lock.front_door_lock', near('hall', 0.4, 0.1)],
 ];
 
-async function savePlaced(): Promise<string[]> {
+async function savePlaced(extra: [string, Pt][] = []): Promise<string[]> {
+  const placed = [...PLACED, ...extra];
   const present: string[] = [];
-  for (const [id] of PLACED) if ((await state(id)) !== null) present.push(id);
+  for (const [id] of placed) if ((await state(id)) !== null) present.push(id);
   await savePlan(token(), DEVICES_PLAN, {
     ...FIXTURE,
     name: 'E2E devices',
     floor_id: null,
-    devices: PLACED.filter(([id]) => present.includes(id)).map(([entity_id, position], i) => ({
-      id: `device_${i + 1}`,
-      entity_id,
-      position,
-    })),
+    devices: placed
+      .filter(([id]) => present.includes(id))
+      .map(([entity_id, position], i) => ({
+        id: `device_${i + 1}`,
+        entity_id,
+        position,
+      })),
   });
   return present;
 }
@@ -235,6 +238,51 @@ test.describe('devices', () => {
     await expect(info).toBeAttached();
     await expect(info.getByText('Coffee maker').first()).toBeVisible();
     expect(await state(coffee)).toBe(was);
+  });
+
+  test('hovering or focusing a marker says which device it is', async ({ page }) => {
+    const temp = 'sensor.kitchen_temperature';
+    const present = await savePlaced([[temp, near('kitchen_living', 0, 2)]]);
+    const coffee = 'switch.coffee_maker';
+    test.skip(!present.includes(coffee), 'no switch.coffee_maker on this instance');
+    const panel = await openPlan(page);
+    const pop = panel.locator('.device-popover');
+    const hover = async (id: string): Promise<void> => {
+      const b = (await marker(panel, id).boundingBox())!;
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    };
+
+    // The mouse: after a short rest, the name and each entity's state; gone once it leaves.
+    await hover(coffee);
+    await expect(pop).toBeVisible();
+    await expect(pop.locator('.dp-title')).toHaveText('Coffee maker');
+    await expect(pop.locator('.dp-value')).toHaveText((await state(coffee))!);
+    await expect(marker(panel, coffee)).toHaveAttribute(
+      'aria-describedby',
+      'chartroom-device-popover',
+    );
+    if (present.includes(temp)) {
+      await hover(temp);
+      await expect(pop.locator('.dp-title')).toHaveText('Kitchen temperature');
+      await expect(pop.locator('.dp-area')).toHaveText('Kitchen');
+      await expect(pop.locator('.dp-value')).toHaveText(/^-?\d+(\.\d+)? °C$/);
+    }
+    if (present.includes('light.kitchen_pendant_unreachable')) {
+      await hover('light.kitchen_pendant_unreachable');
+      await expect(pop.locator('li.unavailable .dp-value')).toHaveText('unavailable');
+    }
+    await shot(page, 'device-popover.png');
+    await page.mouse.move(5, 5);
+    await expect(pop).toBeHidden();
+
+    // The keyboard: focus shows it (not a click's: a key press first, as when tabbing), Esc hides it.
+    const door = marker(panel, 'binary_sensor.front_door');
+    await page.keyboard.press('Shift');
+    await door.focus();
+    await expect(pop.locator('.dp-title')).toHaveText('Front door');
+    await expect(pop.locator('.dp-value')).toHaveText(/^(open|closed)$/);
+    await page.keyboard.press('Escape');
+    await expect(pop).toBeHidden();
   });
 
   test('a lock asks before it unlocks', async ({ page }) => {

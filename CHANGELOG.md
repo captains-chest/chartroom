@@ -6,6 +6,12 @@ All notable changes to Chartroom. Versions follow [Semantic Versioning](https://
 
 ### Added
 
+- The mesh layer flags weak spots: an end device (or Thread REED) whose only parent link is poor
+  (RSSI under -85 dBm, else LQI under 80) and a router that 3 or more devices route through, so
+  one unplugged plug would cut them off. Their ring on the plan is drawn in the warning colour and
+  the device's popover says why: "Weak: only parent link is poor (RSSI -91 dBm)", "Weak: 4
+  devices route through this" (#124).
+
 - With the Mesh layer on, a device's radial menu has a Route item when the mesh knows the device:
   it shows the popover with the device's role and route ("Route: → Kitchen plug (RSSI -63 dBm) →
   Border router (LQI 255) · 2 hops") and highlights the route on the plan until the next press,

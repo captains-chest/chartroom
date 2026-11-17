@@ -305,6 +305,7 @@ export class DeviceControls implements PointerDelegate {
   cancel(): void {
     const p = this.#press;
     if (p) clearTimeout(p.timer);
+    this.#menu?.endSlide();
     this.#press = null;
   }
 
@@ -360,12 +361,15 @@ export class DeviceControls implements PointerDelegate {
       void this.tap(el);
     } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
       e.preventDefault();
-      void this.openMenu(el);
+      void this.openMenu(el, true);
     }
   }
 
-  /** Open the radial menu on marker `el` (its code loads the first time). */
-  async openMenu(el: SVGElement): Promise<void> {
+  /**
+   * Open the wheel on marker `el` (its code loads the first time); `keyboard`: a key opened it, so
+   * its focused segment shows a ring.
+   */
+  async openMenu(el: SVGElement, keyboard = false): Promise<void> {
     this.#hide();
     const ticket = ++this.#menuTicket;
     const load = (this.#menuLoad ??= import('./device-menu'));
@@ -392,6 +396,7 @@ export class DeviceControls implements PointerDelegate {
       name,
       deviceActions(entities, hass, route),
       glyphOf(entity, hass?.states?.[entity]),
+      keyboard,
     );
   }
 
@@ -439,7 +444,7 @@ export class DeviceControls implements PointerDelegate {
     const action = tapAction(entityId, hass?.states?.[entityId]);
     if (action.type === 'menu' || !hass?.callService) {
       if (at) this.#swallowLift(...at);
-      return this.openMenu(el);
+      return this.openMenu(el, !at);
     }
     await this.#call(el.dataset['id']!, entityId, action.domain, action.service, action);
   }

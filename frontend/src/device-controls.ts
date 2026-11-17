@@ -307,7 +307,14 @@ export class DeviceControls implements PointerDelegate {
     this.#hide();
     const ticket = ++this.#menuTicket;
     const load = (this.#menuLoad ??= import('./device-menu'));
-    const { DeviceMenu, deviceActions } = await load;
+    // A press outside the plan while the menu still loads drops this opening too.
+    const outside = (e: Event): void => {
+      if (!e.composedPath().includes(this.view.el)) this.#closeMenu();
+    };
+    document.addEventListener?.('pointerdown', outside, true);
+    const { DeviceMenu, deviceActions } = await load.finally(() =>
+      document.removeEventListener?.('pointerdown', outside, true),
+    );
     const plan = this.view.plan;
     const d = plan?.devices?.find((x) => x.id === el.dataset['id']);
     if (ticket !== this.#menuTicket || !d || !el.isConnected || !this.active) return;

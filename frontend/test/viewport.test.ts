@@ -11,14 +11,25 @@ import { fitView, MIN_WIDTH, panBy, toPlan, viewBoxOf, withAspect, zoomAt } from
 
 describe('viewport', () => {
   it('fits bounds at the element aspect with a margin', () => {
-    const v = fitView({ minX: 0, minY: 0, maxX: 10, maxY: 4 }, 2, 1);
+    const v = fitView({ minX: 0, minY: 0, maxX: 10, maxY: 4 }, 2, 1, 1);
     expect(v).toEqual({ x: -1, y: -1, w: 12, h: 6 });
-    expect(fitView({ minX: 0, minY: 0, maxX: 2, maxY: 10 }, 1, 0)).toEqual({
+    expect(fitView({ minX: 0, minY: 0, maxX: 2, maxY: 10 }, 1, 1, 0)).toEqual({
       x: -4,
       y: 0,
       w: 10,
       h: 10,
     });
+  });
+
+  it('fits clear of a legend in a corner', () => {
+    // A 10×4 m plan in 400×200 px with a 100×80 px legend at the top right: beside it the plan
+    // fits 300×200 px, below it 400×120 px; beside it is larger.
+    const legend = { left: 290, top: 10, right: 390, bottom: 90 };
+    const v = fitView({ minX: 0, minY: 0, maxX: 10, maxY: 4 }, 400, 200, 0, legend);
+    const px = (x: number, y: number) => [((x - v.x) / v.w) * 400, ((y - v.y) / v.h) * 200];
+    const [right] = px(10, 0);
+    expect(right).toBeCloseTo(290);
+    expect(px(0, 4)[0]).toBeCloseTo(0);
   });
 
   it('zooms about the cursor, within limits', () => {

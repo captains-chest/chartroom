@@ -14,16 +14,50 @@ export interface View {
 export const MIN_WIDTH = 0.5;
 export const MAX_WIDTH = 500;
 
-/** A view that shows `b` with `margin` metres around it, at the given width/height aspect. */
-export function fitView(b: Bounds | null, aspect: number, margin = 0.5): View {
+/** A box in pixels within the element. */
+export interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * A view that shows `b` with `margin` metres around it in a `width`×`height` element. `cover`: a box
+ * in one corner (the legend) the plan stays clear of, beside it or above/below it, whichever shows
+ * the plan larger.
+ */
+export function fitView(
+  b: Bounds | null,
+  width: number,
+  height: number,
+  margin = 0.5,
+  cover?: Box | null,
+): View {
   const box = b ?? { minX: 0, minY: 0, maxX: 10, maxY: 8 };
-  let w = box.maxX - box.minX + 2 * margin;
-  let h = box.maxY - box.minY + 2 * margin;
-  if (w / h > aspect) h = w / aspect;
-  else w = h * aspect;
   const cx = (box.minX + box.maxX) / 2;
   const cy = (box.minY + box.maxY) / 2;
-  return { x: cx - w / 2, y: cy - h / 2, w, h };
+  // The plan centred in the element less `l`, `t`, `r`, `btm` pixels at its edges.
+  const at = (l: number, t: number, r: number, btm: number): View & { k: number } => {
+    const aw = Math.max(1, width - l - r);
+    const ah = Math.max(1, height - t - btm);
+    const k = Math.max(
+      (box.maxX - box.minX + 2 * margin) / aw,
+      (box.maxY - box.minY + 2 * margin) / ah,
+    );
+    return { x: cx - (l + aw / 2) * k, y: cy - (t + ah / 2) * k, w: width * k, h: height * k, k };
+  };
+  let v = at(0, 0, 0, 0);
+  if (cover) {
+    const side =
+      cover.left + cover.right > width ? at(0, 0, width - cover.left, 0) : at(cover.right, 0, 0, 0);
+    const end =
+      cover.top + cover.bottom > height
+        ? at(0, 0, 0, height - cover.top)
+        : at(0, cover.bottom, 0, 0);
+    v = side.k < end.k ? side : end;
+  }
+  return { x: v.x, y: v.y, w: v.w, h: v.h };
 }
 
 /** Same centre and width, new aspect (the element was resized). */

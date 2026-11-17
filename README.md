@@ -385,7 +385,7 @@ for the phone layout) and `history`, which runs after the desktop tests because 
 readings far from the others' on the shared instance.
 
 The frontend has no runtime dependencies and a size budget, checked by `pnpm size` in CI: the card
-(with what it shares) 20.6 KB gzip and everything together 68 KB gzip. The heatmap renderer, editor,
+(with what it shares) 20.8 KB gzip and everything together 68 KB gzip. The heatmap renderer, editor,
 mesh layer, history bar and device menu are separate chunks loaded when first used. The build squeezes the CSS,
 GLSL and HTML in template literals (`scripts/minify-literals.ts`), which the JS minifier keeps
 byte for byte.

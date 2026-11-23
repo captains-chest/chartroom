@@ -11,7 +11,7 @@ test = [
   # panel_custom depends on frontend, which needs the frontend package (pinned by HA core).
   "home-assistant-frontend==20261028.6",
 ]
-lint = ["ruff==0.17.5"]
+lint = ["ruff==0.17.6"]
 
 [tool.uv]
 # Pillow 12.3.0, which Home Assistant pins, has security advisories fixed in 13.0.0 (#73). It is
